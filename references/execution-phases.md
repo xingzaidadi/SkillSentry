@@ -4,6 +4,20 @@
 
 ---
 
+## 阶段一（速度优化）：触发率测评的跳过规则
+
+触发率 AI 模拟需要生成并评估 10 条 prompt，耗时约 2-3 分钟。按以下规则决定是否执行：
+
+| 测评模式 | 默认行为 | 用户可覆盖 |
+|---------|---------|---------|
+| **quick** | **跳过触发率测评**，直接进入阶段三 | 用户明确说「需要触发率」时执行 |
+| **standard** | 执行触发率测评 | 用户明确说「跳过触发率」时跳过 |
+| **full** | 强制执行，不可跳过 | — |
+
+quick 模式跳过时，报告第十一章标注：「触发率预评估已跳过（quick 模式默认优化）。升级 standard 模式可启用。」
+
+---
+
 ## 阶段三：测试用例设计
 
 **核心逻辑：双源合流**
@@ -71,7 +85,25 @@ text_generation → 纯文本模式：subagent 生成文本输出，记录完整
 
 ### Layer 1：Executor — 真实执行，记录 transcript
 
-每个用例同时派出两个 subagent（with_skill + without_skill）并行启动。
+**⚡ 强制并行规则（速度关键约束）**：
+
+每个用例的 with_skill 和 without_skill **必须在同一批次同时启动**，不得串行。
+
+```
+❌ 错误做法（串行，时间 × 2）：
+   eval-1 with_skill → 等完成 → eval-1 without_skill → 等完成 → eval-2 ...
+
+✅ 正确做法（并行，时间不变）：
+   同时启动：eval-1 with_skill + eval-1 without_skill（并行）
+   同时启动：eval-2 with_skill + eval-2 without_skill（并行）
+   ...
+   所有用例可分批并行，每批 2-3 个用例同时执行，取决于资源限制
+```
+
+**分批并行策略**：
+- 每批同时执行 2-3 个用例（共 4-6 个 subagent 并行）
+- 一批完成后立即启动 Grader 批量评审该批次，同时启动下一批 Executor
+- Executor 和 Grader 的执行形成流水线（pipeline），而非等所有 Executor 完成再启 Grader
 
 **启动 without_skill subagent 时必须在 prompt 中注明**：
 ```
@@ -125,9 +157,54 @@ Status: success | error | timeout
 - **Layer 2a**：字段精确校验（Ground Truth）
 - **Layer 2b**：独立 Grader 评审（根据 transcript 判卷）
 
+**⚡ Grader 批量评审规则（速度关键约束）**：
+
+Grader 不得逐用例单独调用。每批 Executor 完成后，**一次性**将该批次所有用例的 transcript 传给 Grader 统一评审：
+
+```
+❌ 错误做法（逐用例，N次冷启动）：
+   启动 Grader-1（评 eval-1）→ 启动 Grader-2（评 eval-2）→ ...
+
+✅ 正确做法（批量，1次冷启动）：
+   启动 Grader（同时评 eval-1 + eval-2 + eval-3 的 transcript）
+   → 输出 grading-1.json + grading-2.json + grading-3.json
+```
+
+**批量评审的 prompt 结构**：
+```
+你需要评审以下 [N] 个用例的 transcript，逐一输出 grading.json：
+
+用例 1：eval-1
+transcript 路径：[路径]
+expectations：[断言列表]
+
+用例 2：eval-2
+...
+
+请按用例顺序依次输出 grading-1.json、grading-2.json...
+```
+
+> **为什么批量评审能节省时间**：每次启动 Grader subagent 有约 10-30 秒的冷启动开销（API 初始化 + SKILL.md 加载）。10 个用例逐个评审 = 10 次冷启动；批量评审 = 1-2 次冷启动。
+
 **纯文本模式下的 Grader 特别说明**：当 `skill_type = "text_generation"` 时，Grader 使用 `agents/grader.md` 中的「纯文本评审规范」章节，而非 MCP transcript 验证标准。
 
 ### Layer 3：盲测对比与根因分析
+
+**⚡ Comparator/Analyzer 范围限定（速度关键约束）**：
+
+Layer 3 **仅对以下类型的用例运行**，其他类型跳过：
+- `happy_path`（正常路径用例）
+- `e2e`（端到端用例）
+
+```
+❌ 对所有用例跑 Comparator（浪费时间）
+✅ 仅对 happy_path + e2e 用例跑 Comparator
+
+quick 模式（8-10 个用例）中，happy_path + e2e 通常 2-3 个
+→ Comparator 只运行 2-3 次，而非 8-10 次
+```
+
+> **为什么不对所有用例跑 Comparator**：Comparator 的核心价值在于发现「主流程」上 with_skill vs without_skill 的质量差异。边界/负向/鲁棒性用例的对比意义有限（这些场景下 without_skill 本来就表现差），做了也是噪音。
 
 - **Comparator**：盲测对比两个输出的质量胜负。
 - **Analyzer**：定位胜负原因，生成改进建议。
@@ -140,13 +217,13 @@ Status: success | error | timeout
 
 每种模式的运行次数下限是为了保证基本的可重现性判断：
 
-| 模式 | 覆盖率目标 | 每用例最少运行次数 | 稳定性判断 |
-|------|----------|----------------|----------|
-| **quick** | ≥ 40% | **2 次** | 两次通过率差距 > 15% → 报告标红「结果不稳定」，建议升级 standard |
-| **standard** | ≥ 70% | 3 次 | 计算 Stddev，对照准入阈值 |
-| **full** | ≥ 90% | 3 次 | 计算 Stddev，对照准入阈值（S/A 级要求 < 0.05） |
+| 模式 | 覆盖率目标 | **用例数上限** | 每用例最少运行次数 | 稳定性判断 |
+|------|----------|------------|----------------|----------|
+| **quick** | ≥ 40% | **8-10 个** | **2 次** | 两次通过率差距 > 15% → 报告标红「结果不稳定」，建议升级 standard |
+| **standard** | ≥ 70% | 20-25 个 | 3 次 | 计算 Stddev，对照准入阈值 |
+| **full** | ≥ 90% | 30-35 个 | 3 次 | 计算 Stddev，对照准入阈值（S/A 级要求 < 0.05） |
 
-> **为什么 quick 模式固定跑 2 次**：单次执行存在随机性，2 次能检测结果是否稳定，且不显著增加测评时间。如果两次差距 > 15%，说明 Skill 本身存在不稳定性，这比通过率更值得关注。
+> **quick 模式用例数控制在 8-10 个的理由**：quick 模式的核心价值是「快速反馈」。超过 10 个用例后，每新增一个用例带来的覆盖率收益递减（因为主要路径已被前 8 个覆盖），但时间线性增加。8-10 个用例约覆盖 40-50% 路径，足够完成冒烟测试。
 
 **quick 模式 2 次运行的处理规则**：
 - 两次通过率均值作为最终通过率（不是取最优）
