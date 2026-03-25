@@ -42,6 +42,63 @@ description: >
 1. **主动推送进度**：每完成一个里程碑，立即向用户发飞书消息（不等用户问）
 2. **解析简化语法**：支持在触发消息里直接附带参数（见下方「简化触发语法」章节）
 
+### Step 0.5：检测模型路由配置并输出（不可跳过）
+
+**在任何阶段执行之前**，立即检测当前测评环境的模型配置，并向用户输出：
+
+```
+检测逻辑：
+1. 检查 opencode.json 中是否定义了 skillsentry-executor agent
+   → 存在 → executor_model = 该 agent 的 model 字段值
+   → 不存在 → executor_model = "当前默认模型"（subagent_type=general）
+
+2. 检查 opencode.json 中是否定义了 skillsentry-grader agent
+   → 存在 → grader_model = 该 agent 的 model 字段值
+   → 不存在 → grader_model = "当前默认模型"（subagent_type=general）
+
+3. 判断模式：
+   → executor_model ≠ grader_model → routing_mode = "dual_model"（双模型交叉评审）
+   → executor_model = grader_model  → routing_mode = "single_model"（单模型模式）
+```
+
+**立即输出以下模型配置信息（无论 OpenCode 还是 OpenClaw 模式都必须输出）**：
+
+双模型模式输出：
+```
+🔧 测评环境 · 模型配置
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+执行层 (Executor)  ：[executor_model]
+评审层 (Grader)    ：[grader_model]  ← 异构模型 ✅
+对比层 (Comparator)：[当前默认模型]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+模式：双模型交叉评审（执行与评审使用不同厂商模型，评审独立性更高）
+```
+
+单模型模式输出：
+```
+🔧 测评环境 · 模型配置
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+执行层 (Executor)  ：[当前默认模型]
+评审层 (Grader)    ：[当前默认模型]（与执行层相同）
+对比层 (Comparator)：[当前默认模型]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+模式：单模型模式
+💡 提示：可在 opencode.json 中配置 skillsentry-executor 和 skillsentry-grader
+   使用不同厂商模型以获得更高的评审独立性（见 README 模型路由章节）
+```
+
+**模型信息同时写入 eval_environment.json**：
+```json
+{
+  "model_routing": {
+    "routing_mode": "dual_model | single_model",
+    "executor_model": "[模型ID]",
+    "grader_model": "[模型ID]",
+    "comparator_model": "[模型ID]"
+  }
+}
+```
+
 ### Step 1：解析简化触发语法（OpenClaw 模式必须执行）
 
 用户在飞书里发消息时，支持以下简化格式，省去多轮确认：

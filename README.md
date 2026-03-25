@@ -100,7 +100,62 @@ SkillSentry/
 
 ---
 
-## 已知局限
+## 模型路由（可选增强）
+
+默认情况下，SkillSentry 的 Executor（执行层）和 Grader（评审层）使用同一个模型。如果希望提升评审独立性，可以配置异构模型路由，让两个角色使用不同厂商的模型。
+
+**效果**：执行用 Claude，评审用 GPT-4o → 消除同模型自我评审偏差，评审结论更客观。
+
+### 配置步骤
+
+**Step 1：添加 OpenAI 的 API Key**
+```
+/connect   # 在 OpenCode TUI 里执行，选择 OpenAI，输入 API Key
+```
+
+**Step 2：在 `opencode.json` 里定义两个专用 Agent**
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "skillsentry-executor": {
+      "description": "SkillSentry 执行层：真实运行被测 Skill，记录 transcript",
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "hidden": true,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "skillsentry-grader": {
+      "description": "SkillSentry 评审层：独立审计 transcript，输出 grading.json",
+      "mode": "subagent",
+      "model": "openai/gpt-4o",
+      "hidden": true,
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    }
+  }
+}
+```
+
+配置完成后，SkillSentry 启动时会自动检测并输出：
+```
+🔧 测评环境 · 模型配置
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+执行层 (Executor)  ：anthropic/claude-sonnet-4-20250514
+评审层 (Grader)    ：openai/gpt-4o  ← 异构模型 ✅
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+模式：双模型交叉评审
+```
+
+> **注意**：API Key 通过 `/connect` 存储在 `~/.local/share/opencode/auth.json`，**不会出现在 `opencode.json` 里**，不存在泄漏风险。
+
+---
 
 | 局限 | 说明 |
 |------|------|
