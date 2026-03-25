@@ -100,65 +100,40 @@ SkillSentry/
 
 ---
 
-## 模型路由（可选增强）
+## 模型路由（可选，锦上添花）
 
-默认情况下，SkillSentry 的 Executor（执行层）和 Grader（评审层）使用同一个模型。如果希望提升评审独立性，可以配置异构模型路由，让两个角色使用不同厂商的模型。
+SkillSentry 默认使用单一模型完成所有角色（执行、评审、对比）。这在绝大多数场景下已经足够可信，原因如下：
 
-**效果**：执行用 Claude，评审用 GPT-4o → 消除同模型自我评审偏差，评审结论更客观。
+**为什么单模型已经足够？**
 
-### 配置步骤
+1. **上下文天然隔离**：OpenCode 的每个 subagent 都运行在全新的、独立的上下文中，不继承任何父级对话历史（来源：[OpenCode Agents 文档](https://opencode.ai/docs/agents/)）。Grader 启动时完全不知道 transcript 是谁生成的，「自我评审」这件事在上下文层面就已经不存在。
+2. **核心断言是事实判断，不是风格判断**：SkillSentry 的准入判断依赖 `exact_match` 精确断言（如「docStatus 字段值是否等于 10」）。这类判断没有风格偏好空间，无论哪个模型来评审，结论是一样的。
+3. **Self-Preference Bias 的适用场景不符**：学术研究（Zheng et al. 2023, MT-Bench, arXiv:2306.05685）揭示的模型自我偏好，主要出现在「开放式内容质量评分」场景，而不是结构化事实校验场景。
+
+**异构模型有没有任何价值？**
+
+有，但很有限，仅在一个场景有微弱收益：**Comparator（盲测对比）对纯文本生成型 Skill 的主观质量评分**。这类断言是 semantic 级别，确实存在风格偏好空间。但 Comparator 的结论在报告里属于参考性指标，不是发布决策的硬性依据。
+
+**结论：不配置也没问题，配了也没坏处。**
+
+如果你有多厂商 API Key 且希望追求极致的评审独立性，可以按以下方式配置。配置后 Grader subagent 会使用你指定的模型，其余逻辑完全不变。
+
+### 配置方式（仅供参考）
 
 **Step 1：添加第二个 Provider 的 API Key**
 
-OpenCode 的 API Key 通过 `/connect` 命令添加，**统一存储在 `~/.local/share/opencode/auth.json`**，不会出现在任何配置文件里，提交 git 也不会泄漏。
+在 OpenCode TUI 里执行 `/connect`，选择对应 Provider，输入 API Key。Key 安全存储在 `~/.local/share/opencode/auth.json`，不会出现在任何配置文件里：
 
-在 OpenCode TUI 里执行：
 ```
 /connect
 ```
 
-选择对应 Provider（如 OpenAI），输入 API Key，回车确认：
-```
-┌ Select provider
-│
-│  ● OpenAI
-│  ● Anthropic
-│  ● ...
-└
-
-┌ API key
-│
-└ sk-...（粘贴你的 OpenAI API Key）
-```
-
-Key 保存成功后，`auth.json` 内容类似：
-```json
-{
-  "anthropic": { "api_key": "sk-ant-..." },
-  "openai":    { "api_key": "sk-..."     }
-}
-```
-
-此文件在你的本地机器上，**不要手动编辑，不要提交到 git**。
-
-**Step 2：在 `opencode.json` 里定义两个专用 Agent**
-
-`opencode.json` 只写模型和权限配置，**不写任何 Key**：
+**Step 2：在 `opencode.json` 里定义专用 Agent**
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "agent": {
-    "skillsentry-executor": {
-      "description": "SkillSentry 执行层：真实运行被测 Skill，记录 transcript",
-      "mode": "subagent",
-      "model": "anthropic/claude-sonnet-4-20250514",
-      "hidden": true,
-      "permission": {
-        "edit": "allow",
-        "bash": "allow"
-      }
-    },
     "skillsentry-grader": {
       "description": "SkillSentry 评审层：独立审计 transcript，输出 grading.json",
       "mode": "subagent",
@@ -174,39 +149,7 @@ Key 保存成功后，`auth.json` 内容类似：
 }
 ```
 
-> **`opencode.json` 放在哪里？**
-> - 全局生效：`~/.config/opencode/opencode.json`（推荐，对所有项目生效）
-> - 仅项目生效：项目根目录下的 `opencode.json`
-
-**Step 3：验证配置生效**
-
-下次触发 SkillSentry 时，启动阶段会自动输出：
-```
-🔧 测评环境 · 模型配置
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-执行层 (Executor)  ：anthropic/claude-sonnet-4-20250514
-评审层 (Grader)    ：openai/gpt-4o  ← 异构模型 ✅
-对比层 (Comparator)：anthropic/claude-sonnet-4-20250514
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-模式：双模型交叉评审（执行与评审使用不同厂商模型，评审独立性更高）
-```
-
-如果看到「单模型模式」提示，说明 Step 2 的配置未生效，检查 `opencode.json` 路径和 agent 名称是否完全一致（`skillsentry-executor` / `skillsentry-grader`）。
-
-### 常见问题
-
-**Q：不配置的话能不能正常使用？**
-可以。未配置时自动降级为单模型模式，全程使用当前默认模型，功能完整，只是 Grader 和 Executor 同模型。
-
-**Q：用哪个模型做 Grader 效果最好？**
-推荐和 Executor 使用不同厂商的模型。Executor 用 Claude → Grader 用 GPT-4o 或 DeepSeek；Executor 用 GPT-4o → Grader 用 Claude。核心原则是不同厂商，消除系统性偏差。
-
-**Q：auth.json 在哪里，怎么确认 Key 加进去了？**
-路径：`~/.local/share/opencode/auth.json`。可以用下面的命令确认：
-```bash
-cat ~/.local/share/opencode/auth.json
-```
-看到对应 provider 有 `api_key` 字段即表示添加成功。
+> `opencode.json` 只写模型和权限配置，不写任何 Key，可以安全提交到 git。
 
 ---
 
