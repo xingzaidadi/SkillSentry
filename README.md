@@ -108,12 +108,43 @@ SkillSentry/
 
 ### 配置步骤
 
-**Step 1：添加 OpenAI 的 API Key**
+**Step 1：添加第二个 Provider 的 API Key**
+
+OpenCode 的 API Key 通过 `/connect` 命令添加，**统一存储在 `~/.local/share/opencode/auth.json`**，不会出现在任何配置文件里，提交 git 也不会泄漏。
+
+在 OpenCode TUI 里执行：
 ```
-/connect   # 在 OpenCode TUI 里执行，选择 OpenAI，输入 API Key
+/connect
 ```
 
+选择对应 Provider（如 OpenAI），输入 API Key，回车确认：
+```
+┌ Select provider
+│
+│  ● OpenAI
+│  ● Anthropic
+│  ● ...
+└
+
+┌ API key
+│
+└ sk-...（粘贴你的 OpenAI API Key）
+```
+
+Key 保存成功后，`auth.json` 内容类似：
+```json
+{
+  "anthropic": { "api_key": "sk-ant-..." },
+  "openai":    { "api_key": "sk-..."     }
+}
+```
+
+此文件在你的本地机器上，**不要手动编辑，不要提交到 git**。
+
 **Step 2：在 `opencode.json` 里定义两个专用 Agent**
+
+`opencode.json` 只写模型和权限配置，**不写任何 Key**：
+
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
@@ -143,17 +174,39 @@ SkillSentry/
 }
 ```
 
-配置完成后，SkillSentry 启动时会自动检测并输出：
+> **`opencode.json` 放在哪里？**
+> - 全局生效：`~/.config/opencode/opencode.json`（推荐，对所有项目生效）
+> - 仅项目生效：项目根目录下的 `opencode.json`
+
+**Step 3：验证配置生效**
+
+下次触发 SkillSentry 时，启动阶段会自动输出：
 ```
 🔧 测评环境 · 模型配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 执行层 (Executor)  ：anthropic/claude-sonnet-4-20250514
 评审层 (Grader)    ：openai/gpt-4o  ← 异构模型 ✅
+对比层 (Comparator)：anthropic/claude-sonnet-4-20250514
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-模式：双模型交叉评审
+模式：双模型交叉评审（执行与评审使用不同厂商模型，评审独立性更高）
 ```
 
-> **注意**：API Key 通过 `/connect` 存储在 `~/.local/share/opencode/auth.json`，**不会出现在 `opencode.json` 里**，不存在泄漏风险。
+如果看到「单模型模式」提示，说明 Step 2 的配置未生效，检查 `opencode.json` 路径和 agent 名称是否完全一致（`skillsentry-executor` / `skillsentry-grader`）。
+
+### 常见问题
+
+**Q：不配置的话能不能正常使用？**
+可以。未配置时自动降级为单模型模式，全程使用当前默认模型，功能完整，只是 Grader 和 Executor 同模型。
+
+**Q：用哪个模型做 Grader 效果最好？**
+推荐和 Executor 使用不同厂商的模型。Executor 用 Claude → Grader 用 GPT-4o 或 DeepSeek；Executor 用 GPT-4o → Grader 用 Claude。核心原则是不同厂商，消除系统性偏差。
+
+**Q：auth.json 在哪里，怎么确认 Key 加进去了？**
+路径：`~/.local/share/opencode/auth.json`。可以用下面的命令确认：
+```bash
+cat ~/.local/share/opencode/auth.json
+```
+看到对应 provider 有 `api_key` 字段即表示添加成功。
 
 ---
 
