@@ -230,9 +230,19 @@ Skill：[Skill名称]
 if [ ! -d inputs_dir ]; then
   mkdir -p inputs_dir
   cp <SkillSentry路径>/references/custom-cases-template.md inputs_dir/custom.cases.md
-  # 告知用户已自动创建素材文件夹，并预置了用例模板
 fi
 ```
+
+**初始化完成后，必须向用户输出以下提示（无论目录是否已存在）**：
+
+```
+📂 被测素材目录：<inputs_dir 的完整路径>
+
+如需提供测试发票/图片/数据文件，请将文件放入上述目录后告诉我，我会在测评中使用这些真实素材。
+如暂无素材，也可直接继续——我会用口述方式模拟发票信息进行测评。
+```
+
+> **为什么要主动告知**：用户不需要知道 SkillSentry 的内部目录结构，也不应该自己去猜路径。每次测评启动时主动告知，用户只需要把文件丢进去就好。
 ...
 ### 第一步（补充2）：外部用例自动导入 (Markdown Support)
 
