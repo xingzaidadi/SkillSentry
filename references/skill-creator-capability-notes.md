@@ -1,6 +1,6 @@
-# skill-eval-master 与 skill-creator 的能力关系
+# SkillSentry 与 skill-creator 的能力关系
 
-> 本文档说明 skill-eval-master 在设计上借鉴了 skill-creator 的哪些核心机制，
+> 本文档说明 SkillSentry 在设计上借鉴了 skill-creator 的哪些核心机制，
 > 以及两者的定位区别。面向希望深入了解工具原理的工程师。
 
 ---
@@ -10,15 +10,15 @@
 | 工具 | 解决什么问题 | 核心能力 |
 |------|------------|---------|
 | **skill-creator** | Skill 的创建、迭代优化、触发率测评 | 写 Skill → 测触发率 → 优化 description |
-| **skill-eval-master** | Skill 触发后的行为质量测评 | 读 Skill → 穷举路径 → 设计用例 → 四层验证 → 出报告 |
+| **SkillSentry** | Skill 触发后的行为质量测评 | 读 Skill → 穷举路径 → 设计用例 → 四层验证 → 出报告 |
 
 两者互补，不是替代关系：
 - 先用 skill-creator 确认 Skill 能被正确触发（触发率 ≥90%）
-- 再用 skill-eval-master 验证触发后的行为质量（通过率 ≥95%）
+- 再用 SkillSentry 验证触发后的行为质量（通过率 ≥95%）
 
 ---
 
-## skill-eval-master 借鉴自 skill-creator 的设计
+## SkillSentry 借鉴自 skill-creator 的设计
 
 ### 1. 独立 Grader Agent（`agents/grader.md`）
 
@@ -81,7 +81,7 @@
 
 ---
 
-## skill-creator 有哪些能力 skill-eval-master 的集成状态
+## skill-creator 有哪些能力 SkillSentry 的集成状态
 
 | skill-creator 能力 | 集成状态 | 说明 |
 |-------------------|---------|------|
