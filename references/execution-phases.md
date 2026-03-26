@@ -16,9 +16,39 @@
 
 quick 模式跳过时，报告第十一章标注：「触发率预评估已跳过（quick 模式默认优化）。升级 standard 模式可启用。」
 
+**⚡ 触发率预评估使用 `explore` subagent**：
+
+触发率预评估是纯文本分析任务（读 description + 生成判断），使用 `explore` subagent 即可，无需 `general`。
+
 ---
 
 ## 阶段三：测试用例设计
+
+**⚡ 阶段零规则提炼和阶段三用例设计：优先使用轻量模型**
+
+规则提炼（阶段零）和用例设计（阶段三）是纯分析/生成任务，不需要执行任何工具，不需要强推理能力。
+
+如果用户在 `opencode.json` 中配置了轻量模型（如 `claude-haiku-4`），SkillSentry 应在这两个阶段切换到该模型，对执行层（Layer 1）和评审层（Grader）仍使用默认能力模型：
+
+```json
+// 可选配置示例（opencode.json）
+{
+  "agent": {
+    "skillsentry-analyst": {
+      "description": "SkillSentry 分析层：规则提炼和用例设计，使用轻量模型",
+      "mode": "subagent",
+      "model": "anthropic/claude-haiku-4-20250514",
+      "hidden": true,
+      "steps": 20,
+      "permission": { "edit": "allow", "bash": "deny" }
+    }
+  }
+}
+```
+
+> **来源**：Anthropic《Building effective agents》Routing 章节：*"Routing easy/common questions to smaller, cost-efficient models like Claude Haiku 4.5"*。规则提炼和用例设计属于"结构化分析"类任务，轻量模型完全胜任，且速度通常快 2-3 倍。
+
+**未配置轻量模型时**：阶段零和阶段三使用当前默认模型，不受影响，功能完整。
 
 **核心逻辑：双源合流**
 1. **注入外部用例**：优先加载阶段零发现的「外部用例」，标记为「[外部导入]」。
@@ -105,6 +135,18 @@ text_generation → 纯文本模式：subagent 生成文本输出，记录完整
 - 一批完成后立即启动 Grader 批量评审该批次，同时启动下一批 Executor
 - Executor 和 Grader 的执行形成流水线（pipeline），而非等所有 Executor 完成再启 Grader
 
+**⚡ Executor subagent 的 steps 上限（防止过度迭代）**：
+
+Executor subagent 启动时，必须根据 Skill 类型设置 `steps` 上限：
+
+| Skill 类型 | steps 上限 | 理由 |
+|-----------|-----------|------|
+| `mcp_based` | **15 steps** | 一个报销流程通常 6-10 次 MCP 调用，15 步留有余量 |
+| `code_execution` | **10 steps** | 代码执行+验证不超过 10 步 |
+| `text_generation` | **5 steps** | 纯文本只需一次生成，5 步够容错 |
+
+> **来源**：OpenCode 官方文档 `steps` 字段说明：*"Control the maximum number of agentic iterations an agent can perform before being forced to respond with text only."* 不设上限时，LLM 可能无限重试，既浪费时间又消耗 Token。
+
 **启动 without_skill subagent 时必须在 prompt 中注明**：
 ```
 你的工作目录是 eval-N/without_skill/workspace/，禁止读取 eval-N/with_skill/ 下的任何文件。
@@ -159,23 +201,63 @@ Status: success | error | timeout
 
 **⚡ Grader 批量评审规则（速度关键约束）**：
 
-Grader 不得逐用例单独调用。每批 Executor 完成后，**一次性**将该批次所有用例的 transcript 传给 Grader 统一评审：
+Grader 不得逐用例单独调用。每批 Executor 完成后，**一次性**将该批次所有用例的 transcript 传给 Grader 统一评审。
+
+**⚡ Grader 使用 `explore` subagent 类型**：
+
+Grader 是纯读取任务（只读 transcript，不写文件），使用 `explore` subagent 而非 `general`：
 
 ```
-❌ 错误做法（逐用例，N次冷启动）：
-   启动 Grader-1（评 eval-1）→ 启动 Grader-2（评 eval-2）→ ...
-
-✅ 正确做法（批量，1次冷启动）：
-   启动 Grader（同时评 eval-1 + eval-2 + eval-3 的 transcript）
-   → 输出 grading-1.json + grading-2.json + grading-3.json
+❌ subagent_type = "general"（有写文件能力，过重）
+✅ subagent_type = "explore"（只读，更快，资源消耗少）
 ```
+
+> **来源**：OpenCode 官方文档 explore subagent 说明：*"A fast, read-only agent for exploring codebases. Cannot modify files."* Grader 只需要读 transcript 和输出文件，无需任何写操作，explore 完全满足且速度更快。
+
+**⚡ Grader 输入精简化（减少 Token 消耗）**：
+
+Grader 批量评审时，**不传完整 transcript**，只传精简版本：
+
+```
+精简传输规则：
+1. 只传 [tool_calls] 区块（跳过 [agent_notes]）
+2. 跳过超过 500 字的完整 JSON 返回值，改传摘要：
+   Return: {"code":"200","body":"a1b2c3d4",...} → 截断为前 200 字
+3. 必须完整保留的部分：
+   - 所有工具调用的名称（Tool: xxx）
+   - 所有工具调用的入参（Args: ...）
+   - 返回值的状态码和关键字段（如 fdId、code、status）
+   - 最终 response.md 全文（这是断言验证的主要来源）
+```
+
+示例精简：
+```markdown
+[原始 transcript 约 8000 tokens]
+         ↓ 精简后
+[tool_calls] Step 1: queryExpenseApplier
+Tool: mcp_queryExpenseApplier
+Args: {"docApplierUsername":"zhangsan"}
+Return: {"fdCompanyId":"abc","fdBankName":"招商银行"} [已截断]
+Status: success
+
+[tool_calls] Step 5: saveExpenseDoc
+Tool: mcp_saveExpenseDoc
+Args: {"docStatus":"10","expenseType":"1","fdApplyMoney":"168.00",...}
+Return: {"code":"200","body":"a1b2c3d4"} [已截断]
+Status: success
+
+[精简后约 1500-2000 tokens]
+```
+
+> **为什么安全**：Grader 评审断言时，精确断言（exact_match）验证的是工具调用名称、入参字段值、返回状态码，这些全部保留。只截断的是冗余的完整 JSON 返回体（几百行）和 agent_notes 解释文字，这两类信息对断言判定没有实质贡献。
 
 **批量评审的 prompt 结构**：
 ```
 你需要评审以下 [N] 个用例的 transcript，逐一输出 grading.json：
 
 用例 1：eval-1
-transcript 路径：[路径]
+transcript（精简版）：[见上方精简规则]
+response.md：[完整内容]
 expectations：[断言列表]
 
 用例 2：eval-2
