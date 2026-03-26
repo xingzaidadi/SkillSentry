@@ -359,4 +359,101 @@ S/A 级 Skill 的业务逻辑断言需要业务方审核。
 
 ---
 
+## 十、防编造可信度体系
+
+> SkillSentry 的测评结论可信度，根本上取决于 Skill 类型和执行环境。本章是不同场景下防编造能力的诚实评估。
+
+### 10.1 各 Skill 类型防编造评分
+
+| Skill 类型 | 评分 | 核心机制 | 核心缺口 |
+|-----------|------|---------|---------|
+| **mcp_based（MCP 可用）** | **5/10** | transcript 双分离 + 强制 FAIL + claims 交叉验证 | transcript 由 AI 手写，无系统级拦截机制，AI 技术上可以伪造 Return 值 |
+| **mcp_based（MCP 不可用）** | **1/10** | 仅有规则推断，无任何客观锚点 | 完全依赖 AI 按 SKILL.md 规则编写剧本，所有字段值均为推断 |
+| **code_execution** | **6.5/10** | 上述全部 + 文件系统输出独立验证 | 文件内容是物理锚点，Grader 可独立读取；但脚本本身可能输出假数据 |
+| **text_generation** | **2.5/10** | 量化断言（字数/格式）+ without_skill 对照 + 幻觉声明检测 | 全链路 AI 闭环，无外部真相锚点，评分天花板约 5 分 |
+
+**重要说明**：
+- 评分反映的是「当前设计下，测评结论不被 AI 编造的概率」
+- mcp_based 在 MCP 真实可调用时，评分 5/10 的含义是：能防住「软性编造」和「粗心遗漏」，无法防住「精心构造的完整伪造」
+- text_generation 的 2.5 分不是失败，而是这类 Skill 的客观上限较低——判断「文章写得好不好」本身就没有客观标准
+
+---
+
+### 10.2 提升方案
+
+#### mcp_based：5 → 8 分路径
+
+**核心方案：MCP 调用 Side-car 日志**
+
+主 SkillSentry agent 在 subagent 执行期间，独立监听并记录每次 MCP 工具调用的入参和返回值，写入 `mcp_sidecar.log`。Grader 对比 `mcp_sidecar.log` 和 `transcript [tool_calls]` 中的每一个 Return 值，不一致则强制 FAIL，标注「transcript 疑似伪造」。
+
+**前提条件**：需要确认 OpenCode 平台是否支持主 agent 读取 subagent 的工具调用详情（task notification 机制）。
+
+**临时方案（当前可用）**：
+- Grader 对每条 exact_match 断言，统计工具名在 transcript 中出现次数，与断言声明数字交叉核查
+- 发现「声明调用 1 次但工具名出现 3 次」类矛盾 → FAIL
+
+#### code_execution：6.5 → 8.5 分路径
+
+**方案：输出文件 SHA256 哈希校验**
+
+```bash
+# Grader 在读取输出文件时同步计算哈希
+sha256sum <output_file> >> grading.json
+```
+
+- 写入 `grading.json` 的 `output_hash` 字段
+- 跨迭代对比：若相同用例两次运行输出哈希完全一致（但环境发生变化），标注「文件疑似复用而非重新生成」
+
+#### text_generation：2.5 → 5 分路径（上限约 5 分）
+
+**方案 1：量化断言比例强制要求**
+
+text_generation Skill 的断言中，`exact_match`（可量化）类型必须占 ≥ 50%。用例设计阶段 AI 必须输出：
+- 字数统计断言（`回复长度 ≤ 200 字`）
+- 关键词存在性断言（`输出包含「费用类型」字段`）
+- 结构格式断言（`包含 H1/H2 标题层级`）
+
+**方案 2：量化断言用脚本验证，不经 Grader AI**
+
+对以下类型断言，用 Python 脚本直接判定，结果是 0/1 确定性，完全规避 AI 主观判断：
+
+```python
+# 字数
+assert len(response_text.replace(' ', '')) <= 200, f"字数超标: {len(response_text)}"
+
+# 标题结构
+import re
+has_h2 = bool(re.search(r'^## ', response_text, re.MULTILINE))
+assert has_h2, "缺少二级标题"
+
+# 关键词存在性
+assert '报销金额' in response_text, "输出未包含「报销金额」字段"
+```
+
+这类断言的结果写入 `grading.json` 时标注 `method: script`，与 `method: grader` 的语义断言区分，报告中单独展示。
+
+**方案 3：强制人工确认节点**
+
+text_generation Skill 的报告必须包含以下提示，且不可省略：
+
+```
+⚠️ 纯文本生成型 Skill：核心质量断言由 AI 评审，存在主观判断空间。
+   建议发布前，业务方对以下 3-5 个典型用例的输出进行人工确认：
+   [列出 happy_path 和 E2E 类型用例的 response.md 路径]
+```
+
+---
+
+### 10.3 各场景下的报告使用建议
+
+| 场景 | 报告结论可用性 | 行动建议 |
+|------|------------|---------|
+| mcp_based + MCP 真实执行 | 可参考，有一定可信度 | 重点关注 exact_match 断言，人工复核 1-2 个关键断言的原文 evidence |
+| mcp_based + MCP 不可用 | **不可用于发布决策** | 修复 MCP 环境后重测 |
+| code_execution | 可参考，可信度较高 | 检查输出文件内容是否符合预期 |
+| text_generation | 仅供参考 | 必须经过业务方人工确认核心用例 |
+
+---
+
 *Last Updated: 2026-03-26*
