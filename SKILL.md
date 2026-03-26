@@ -411,7 +411,7 @@ boundary_uncertain_rate = 边界题uncertain比例
 - 阶段四：四层验证体系（Layer 0-3）、transcript 双分离格式规范、timing.json 采集规则
 - 阶段五：测评模式运行次数规范、发布准入标准（S/A/B/C 级）、报告新增章节格式
 
-**阶段三额外执行（v6.0 新增）**：
+**阶段三额外执行**：
 
 断言设计自检新增第4项：
 ```
@@ -433,9 +433,9 @@ boundary_uncertain_rate = 边界题uncertain比例
 
 > **为什么不可逆操作必须有用户确认**：Anthropic《Building effective agents》明确建议，Agent 在执行任何不可逆操作前应暂停等待人工确认。缺少此机制的 Skill 一旦误触发，无法回滚，直接造成业务损失。
 
-**阶段五额外执行（v6.0 新增）—— 效率维度诊断（P2 级别）**：
+**阶段五额外执行 —— 效率维度诊断（P2 级别）**：
 
-> **学术依据**：Kapoor et al.（*AI Agents That Matter*, arXiv:2407.01502, 2024）指出：当前 Agent 普遍过度复杂，准确率相近的情况下成本差异可达数十倍。SkillSentry 从 v6.0 起将效率纳入测评，防止「功能正确但过度昂贵」的 Skill 上线。
+> **学术依据**：Kapoor et al.（*AI Agents That Matter*, arXiv:2407.01502, 2024）指出：当前 Agent 普遍过度复杂，准确率相近的情况下成本差异可达数十倍。SkillSentry 将效率纳入测评，防止「功能正确但过度昂贵」的 Skill 上线。
 
 在阶段五汇总指标时，额外执行以下三项效率诊断：
 
@@ -500,4 +500,4 @@ boundary_uncertain_rate = 边界题uncertain比例
 → 触发消息中如果包含飞书消息格式的元数据（如 sender_id、chat_id），或用户明确说「我在飞书里」，则判定为 openclaw 模式。无法判断时默认 opencode 模式，不影响核心测评逻辑。
 
 ---
-*Last Updated: 2026-03-25 · 新增 OpenClaw/飞书适配：简化触发语法、进度主动推送、摘要卡片交付*
+*Last Updated: 2026-03-26*
