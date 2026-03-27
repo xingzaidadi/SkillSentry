@@ -137,13 +137,15 @@ text_generation → 纯文本模式：subagent 生成文本输出，记录完整
 
 **⚡ Executor subagent 的 steps 上限（防止过度迭代）**：
 
-Executor subagent 启动时，必须根据 Skill 类型设置 `steps` 上限：
+Executor subagent 启动时，必须根据 Skill 类型和执行侧分别设置 `steps` 上限：
 
-| Skill 类型 | steps 上限 | 理由 |
-|-----------|-----------|------|
-| `mcp_based` | **15 steps** | 一个报销流程通常 6-10 次 MCP 调用，15 步留有余量 |
-| `code_execution` | **10 steps** | 代码执行+验证不超过 10 步 |
-| `text_generation` | **5 steps** | 纯文本只需一次生成，5 步够容错 |
+| Skill 类型 | with_skill steps 上限 | without_skill steps 上限 | 理由 |
+|-----------|----------------------|------------------------|------|
+| `mcp_based` | **15 steps** | **8 steps** | with_skill 需完整跑完流程；without_skill 遇到首个关键失败即可停止，无需尝试恢复 |
+| `code_execution` | **10 steps** | **6 steps** | 同上 |
+| `text_generation` | **5 steps** | **5 steps** | 纯文本只需一次生成，两侧相同 |
+
+> **为什么 without_skill 要单独设置更低的上限**：实测数据显示，without_skill 在复杂业务流程（如差旅报销）中会无目的地漫游尝试，消耗远超 with_skill 的 Token 和时间（实测 without_skill 耗时 1318s、42k tokens，而 with_skill 仅 770s、18.5k tokens）。without_skill 的测评目的是"证明没有 Skill 会更差"，并不需要它跑完整流程，遇到第一个关键失败点即可得出结论。
 
 > **来源**：OpenCode 官方文档 `steps` 字段说明：*"Control the maximum number of agentic iterations an agent can perform before being forced to respond with text only."* 不设上限时，LLM 可能无限重试，既浪费时间又消耗 Token。
 
@@ -151,6 +153,12 @@ Executor subagent 启动时，必须根据 Skill 类型设置 `steps` 上限：
 ```
 你的工作目录是 eval-N/without_skill/workspace/，禁止读取 eval-N/with_skill/ 下的任何文件。
 所有操作（文件上传、中间产物）必须独立完成，不能复用 with_skill 的任何结果。
+你的目标是展示没有 Skill 指导时的自然行为。遇到以下任一关键失败点时，立即停止并输出当前结果，不要尝试恢复或绕过：
+- 路由选择错误（如把差旅报销当日常报销处理）
+- 必填字段缺失或格式错误导致 API 拒绝
+- 权限校验失败
+- 流程中断且无法继续（如找不到申请单）
+记录失败原因后直接退出，这已足够评估 Δ。
 ```
 
 **transcript 格式规范（P2 双分离结构）**：
@@ -291,6 +299,22 @@ quick 模式（8-10 个用例）中，happy_path + e2e 通常 2-3 个
 - **Comparator**：盲测对比两个输出的质量胜负。
 - **Analyzer**：定位胜负原因，生成改进建议。
 
+**⚡ Comparator/Analyzer 必须非阻塞启动（速度关键约束）**：
+
+Comparator 和 Analyzer 是独立 subagent，启动后主流程**不得等待其完成**，应立即继续处理下一批用例：
+
+```
+✅ 正确做法（非阻塞）：
+   Grader(batch-1) 完成 → 启动 Comparator(batch-1) [非阻塞，后台运行]
+                         → 同时继续 Grader(batch-2) / Executor(batch-3)
+   等所有批次和 Grader 全部完成后，进入阶段五前，再收集所有 Comparator/Analyzer 的结果
+
+❌ 错误做法（阻塞）：
+   Grader(batch-1) 完成 → 等 Comparator(batch-1) → 等 Analyzer(batch-1) → 才启动下一批
+```
+
+> **为什么安全**：阶段五（报告生成）只需要 Comparator/Analyzer 的输出（comparison.json / analysis.json），不影响其他批次的执行和 Grader 评审。只需在进入阶段五之前确认所有 Comparator/Analyzer 已完成即可。
+
 ---
 
 ## 阶段五：生成报告与发布决策
@@ -301,9 +325,12 @@ quick 模式（8-10 个用例）中，happy_path + e2e 通常 2-3 个
 
 | 模式 | 覆盖率目标 | **用例数上限** | 每用例最少运行次数 | 稳定性判断 |
 |------|----------|------------|----------------|----------|
+| **smoke** | ≥ 20% | **4-5 个** | **1 次** | 仅判断核心路径是否崩溃，不出具发布决策 |
 | **quick** | ≥ 40% | **8-10 个** | **2 次** | 两次通过率差距 > 15% → 报告标红「结果不稳定」，建议升级 standard |
 | **standard** | ≥ 70% | 20-25 个 | 3 次 | 计算 Stddev，对照准入阈值 |
 | **full** | ≥ 90% | 30-35 个 | 3 次 | 计算 Stddev，对照准入阈值（S/A 级要求 < 0.05） |
+
+> **smoke 模式的适用场景**：Skill 开发迭代中修改了某条规则，只需验证"主流程没有崩"，不需要统计置信度。smoke 模式只跑 4-5 个 happy_path + 核心原子用例、每个只跑 1 次，**不出具 PASS/FAIL 发布决策**，仅输出「冒烟通过 / 冒烟失败」结论，适合高频开发循环使用。
 
 > **quick 模式用例数控制在 8-10 个的理由**：quick 模式的核心价值是「快速反馈」。超过 10 个用例后，每新增一个用例带来的覆盖率收益递减（因为主要路径已被前 8 个覆盖），但时间线性增加。8-10 个用例约覆盖 40-50% 路径，足够完成冒烟测试。
 

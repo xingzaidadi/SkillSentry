@@ -49,6 +49,7 @@ description: >
 | 用户输入 | 解析结果 |
 |---------|---------|
 | `测评 em-reimbursement-v3` | 正常交互流程，逐步确认 |
+| `测评 em-reimbursement-v3 smoke` | 跳过模式选择，直接用 smoke 模式（4-5 用例，单次运行，仅冒烟）|
 | `测评 em-reimbursement-v3 quick` | 跳过模式选择，直接用 quick 模式 |
 | `测评 em-reimbursement-v3 standard` | 跳过模式选择，直接用 standard 模式 |
 | `测评 em-reimbursement-v3 full` | 跳过模式选择，直接用 full 模式 |
@@ -58,8 +59,8 @@ description: >
 ```
 ✅ 已收到测评请求
    被测 Skill：em-reimbursement-v3
-   模式：quick（已从消息中识别）
-   预计耗时：15 分钟
+   模式：[smoke/quick/standard/full]（已从消息中识别）
+   预计耗时：[smoke ~5分钟 / quick ~15分钟 / standard ~40分钟 / full ~60分钟]
    开始执行，我会在关键节点主动通知你 👇
 ```
 
