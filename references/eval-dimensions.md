@@ -383,15 +383,17 @@ S/A 级 Skill 的业务逻辑断言需要业务方审核。
 
 #### mcp_based：5 → 8 分路径
 
-**核心方案：MCP 调用 Side-car 日志**
+**【待实现，预计可信度 +3分】MCP 调用 Side-car 日志**
 
 主 SkillSentry agent 在 subagent 执行期间，独立监听并记录每次 MCP 工具调用的入参和返回值，写入 `mcp_sidecar.log`。Grader 对比 `mcp_sidecar.log` 和 `transcript [tool_calls]` 中的每一个 Return 值，不一致则强制 FAIL，标注「transcript 疑似伪造」。
 
 **前提条件**：需要确认 OpenCode 平台是否支持主 agent 读取 subagent 的工具调用详情（task notification 机制）。
 
-**临时方案（当前可用）**：
+**【当前已实现 ✅】工具调用次数交叉核查（agents/grader.md 已包含）**：
 - Grader 对每条 exact_match 断言，统计工具名在 transcript 中出现次数，与断言声明数字交叉核查
 - 发现「声明调用 1 次但工具名出现 3 次」类矛盾 → FAIL
+- Return 值以自然语言描述而非原始 JSON → `fabrication_risk: "high"`，报告橙色警告
+- 此机制可防住「软性编造」和「粗心遗漏」，是当前可信度 5 分的主要来源
 
 #### code_execution：6.5 → 8.5 分路径
 
@@ -456,4 +458,27 @@ text_generation Skill 的报告必须包含以下提示，且不可省略：
 
 ---
 
-*Last Updated: 2026-03-26*
+## 十一、ISO/IEC 25010:2023 对照表
+
+> SkillSentry 的 9 层测评维度与国际软件质量标准 ISO/IEC 25010:2023（SQuaRE 产品质量模型）及 AI 扩展标准 ISO/IEC 25059 的对应关系。此对照表供外部专业人员验证测评框架完备性。
+
+| SkillSentry 维度 | ISO 25010:2023 主特性 | ISO 子特性 | AI 扩展（25059）备注 |
+|----------------|---------------------|------------|-------------------|
+| **触发层**（触发准确性、边界触发） | 功能适用性 (Functional Suitability) | 功能正确性 (Functional Correctness)、功能适当性 (Functional Appropriateness) | AI 触发精度属于 AI 特有的功能适当性 |
+| **输出层**（格式合规、内容准确、一致性） | 功能适用性 + 可靠性 (Reliability) | 功能正确性、成熟度 (Maturity) | ISO 25059 新增"输出一致性"子特性 |
+| **业务层**（规则遵守、IFR、合规性） | 功能适用性 + 安全性 (Safety) | 功能完整性 (Functional Completeness)、合规性 | ISO 25059 将"指令遵循"列为 AI 核心质量属性 |
+| **交互层**（多轮一致性、追问质量、可解释性） | 易用性 (Usability) | 可操作性 (Operability)、用户错误防护 | ISO 25059 新增"透明性 (Transparency)"子特性 |
+| **健壮层**（鲁棒性、幻觉检测、安全性） | 可靠性 + 安全保障 (Security) | 容错性 (Fault Tolerance)、可用性 (Availability) | ISO 25059 新增"鲁棒性 (Robustness)"，幻觉检测属于 AI 特有缺陷 |
+| **效率层**（响应时间、Token 消耗、稳定性） | 性能效率 (Performance Efficiency) | 时间行为 (Time Behaviour)、资源利用率 (Resource Utilization) | Kapoor et al. (2024) 提出成本-准确率联合优化，与此维度直接对应 |
+| **设计层**（Skill 复杂度、负向增益） | 可维护性 (Maintainability) | 可分析性 (Analysability)、模块性 (Modularity) | ISO 25059 新增"AI 模型可维护性"子特性 |
+| **工程层**（覆盖率、环境一致性、数据分布） | 可靠性 + 灵活性 (Flexibility) | 可测试性 (Testability)、适应性 (Adaptability) | ISO 25059 将"数据分布对齐"列为 AI 测评要求 |
+| **组织层**（知识时效性、业务确认） | 可维护性 | 可修改性 (Modifiability) | — |
+
+**参考标准**：
+- [ISO/IEC 25010:2023](https://www.iso.org/standard/78176.html) — Systems and software Quality Requirements and Evaluation (SQuaRE)
+- [ISO/IEC 25059](https://www.iso.org/standard/80655.html) — SQuaRE for AI Systems（AI 系统质量扩展）
+- Kapoor et al., *AI Agents That Matter*, arXiv:2407.01502, 2024
+
+---
+
+*Last Updated: 2026-03-30*

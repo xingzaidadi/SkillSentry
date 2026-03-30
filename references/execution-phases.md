@@ -131,9 +131,27 @@ text_generation → 纯文本模式：subagent 生成文本输出，记录完整
 ```
 
 **分批并行策略**：
-- 每批同时执行 2-3 个用例（共 4-6 个 subagent 并行）
+- 批次大小按模式区分：**quick 模式每批 4-5 个用例**（共 16-20 个 subagent 并行）；**standard/full 模式每批 2-3 个用例**（共 4-6 个 subagent，控制资源压力）
 - 一批完成后立即启动 Grader 批量评审该批次，同时启动下一批 Executor
 - Executor 和 Grader 的执行形成流水线（pipeline），而非等所有 Executor 完成再启 Grader
+
+**⚡ quick 模式：两次运行合并为 mega-batch（速度关键约束）**：
+
+quick 模式要求每用例运行 2 次，这两次必须**合并进同一 mega-batch** 同时启动，不得分两轮顺序执行：
+
+```
+❌ 错误做法（两轮串行，时间 × 2）：
+   Round-1：[eval-1 run1 ×2侧] → [eval-2 run1 ×2侧] → ... → 全部完成
+   Round-2：[eval-1 run2 ×2侧] → [eval-2 run2 ×2侧] → ... → 全部完成
+
+✅ 正确做法（mega-batch，两轮时间塌缩为一轮）：
+   批次A：[eval-1 run1 with] [eval-1 run1 without] [eval-1 run2 with] [eval-1 run2 without]
+          [eval-2 run1 with] [eval-2 run1 without] [eval-2 run2 with] [eval-2 run2 without]
+          ... 共 4-5 用例同时启动（16-20 subagent）
+   批次B：剩余用例，同上
+```
+
+> **节省估算**：quick 模式 10 用例 × 2 次，原本需要 2 轮（每轮约 6-8 分钟）= 12-16 分钟；合并后只需 1 轮 ≈ 6-8 分钟。批次从 2 轮变 1 轮，Grader 冷启动次数也从 6-8 次降到 2-3 次。
 
 **⚡ Executor subagent 的 steps 上限（防止过度迭代）**：
 
@@ -159,7 +177,15 @@ Executor subagent 启动时，必须根据 Skill 类型和执行侧分别设置 
 - 权限校验失败
 - 流程中断且无法继续（如找不到申请单）
 记录失败原因后直接退出，这已足够评估 Δ。
+
+【自检 — 执行完成后必须回答以下问题并写入 response.md 末尾】：
+沙箱隔离自检：
+1. 我是否读取了 eval-N/with_skill/ 目录下的任何文件？（是/否）
+2. 我使用的所有 FDS URL 或上传结果，是否全部由本次独立执行产生？（是/否）
+如果任何一项答案为"是"，立即在 response.md 末尾标注：「⚠️ 沙箱隔离违规：本次结果无效，请通知 SkillSentry 主 agent 标记 INVALID」
 ```
+
+> **为什么加自检**：文件系统隔离规则依赖 AI 自觉遵守，缺乏系统级拦截。自检通过强制 AI 在执行结束时声明自己是否违规，让 Grader 在评审时能发现并标记被污染的测评结果，使违规行为可被追溯而非静默通过。
 
 **transcript 格式规范（P2 双分离结构）**：
 
@@ -282,7 +308,9 @@ expectations：[断言列表]
 
 **⚡ Comparator/Analyzer 范围限定（速度关键约束）**：
 
-Layer 3 **仅对以下类型的用例运行**，其他类型跳过：
+**smoke 模式完全跳过 Layer 3**：smoke 模式只做冒烟验证，不出具发布决策，Comparator 和 Analyzer 的增益分析没有意义，直接跳过。
+
+其他模式，Layer 3 **仅对以下类型的用例运行**，其他类型跳过：
 - `happy_path`（正常路径用例）
 - `e2e`（端到端用例）
 
@@ -292,6 +320,8 @@ Layer 3 **仅对以下类型的用例运行**，其他类型跳过：
 
 quick 模式（8-10 个用例）中，happy_path + e2e 通常 2-3 个
 → Comparator 只运行 2-3 次，而非 8-10 次
+
+smoke 模式：Layer 3 完全跳过，节省 1-3 分钟
 ```
 
 > **为什么不对所有用例跑 Comparator**：Comparator 的核心价值在于发现「主流程」上 with_skill vs without_skill 的质量差异。边界/负向/鲁棒性用例的对比意义有限（这些场景下 without_skill 本来就表现差），做了也是噪音。
@@ -381,3 +411,24 @@ Comparator 和 Analyzer 是独立 subagent，启动后主流程**不得等待其
   - 平均 Token 消耗：[XX] tokens/用例
   - Token 效率比：[Δ通过率 / 额外Token消耗]
 ```
+
+---
+
+## ⚡ 报告模板预加载（阶段四执行期间后台执行）
+
+`references/report-template.md` 的读取**不得等到阶段五才触发**，应在以下时机提前加载：
+
+```
+触发时机：第一批 Executor 全部完成（即阶段四开始后约 1-2 分钟）时，
+         在等待 Grader 评审的同时，后台读取 report-template.md 缓存到上下文。
+
+等效于：
+  阶段四执行中（后台）：read report-template.md  ←── 新增，并行不阻塞
+  阶段四执行中（前台）：Grader 批量评审 batch-1
+  ...
+  阶段五开始时：report-template.md 已就绪，直接生成报告，无需等待文件读取
+```
+
+**节省估算**：report-template.md 读取约需 10-30 秒（文件较大），预加载后阶段五的启动延迟从 30-60 秒降到 < 5 秒。
+
+> **安全性**：报告模板不依赖测评结果，任何时候读取内容都相同，提前加载不影响正确性。

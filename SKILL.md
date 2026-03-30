@@ -60,7 +60,7 @@ description: >
 ✅ 已收到测评请求
    被测 Skill：em-reimbursement-v3
    模式：[smoke/quick/standard/full]（已从消息中识别）
-   预计耗时：[smoke ~5分钟 / quick ~15分钟 / standard ~40分钟 / full ~60分钟]
+   预计耗时：[smoke ~3-5分钟 / quick ~15-25分钟 / standard ~35分钟 / full ~60分钟]（含 without_skill 基线，实际耗时因 Skill 复杂度而异）
    开始执行，我会在关键节点主动通知你 👇
 ```
 
@@ -78,7 +78,7 @@ description: >
 
 这 5 个 todo 代表用户感知到的测评进度，每完成一个阶段立即标记完成：
 - 【1/5】完成条件：被测 Skill 定位、inputs 扫描、MCP 检测、规则提炼、必填信息收集、风险定级、模式选择全部完成
-- 【2/5】完成条件：eval_environment.json 创建、用例设计完成、用户确认用例清单
+- 【2/5】完成条件：eval_environment.json 创建、用例设计完成、**断言质量预检**（existence 占比计算 + 超 50% 时给出警告）、用户确认用例清单
 - 【3/5】完成条件：所有批次执行完毕（含三个 Agent 全部跑完）
 - 【4/5】完成条件：通过率/IFR/覆盖率计算完成、质量检查清单执行完毕
 - 【5/5】完成条件：HTML 报告生成、解读指引已输出给用户
@@ -103,6 +103,8 @@ Skill 类型：[mcp_based / text_generation / code_execution]
 ```
 ⚙️ 用例设计完成，共 [N] 个用例
 覆盖规则：[N]/[N] 条（[XX]%）
+断言质量：exact_match [X]% / semantic [X]% / existence [X]%
+[仅当 existence 占比 > 50% 时显示] ⚠️ existence 断言占 [X]%，建议升级为 exact_match，否则测评区分度低
 是否开始执行？
   → 回复「确认」直接开始
   → 回复「修改」进入调整模式
@@ -159,7 +161,7 @@ Skill：[Skill名称]
 | `references/eval-dimensions.md` | 阶段三设计用例时，且需要确认某类用例的覆盖维度 | 仅读取与当前被测 Skill 类型相关的维度章节，不需要全量读取 |
 | `references/admission-criteria.md` | 阶段一完成风险定级后，查阅对应等级的准入阈值；阶段五计算指标时再次读取 | 仅读取对应风险等级（S/A/B/C）的阈值行，不需要读取整个文件 |
 | `references/case-matrix-templates.md` | 阶段三设计用例时，需要参考某类用例的断言写法 | 按用例类型（正常路径/原子/E2E 等）按需读取对应章节 |
-| `references/report-template.md` | 阶段六生成报告前，且报告前置检查通过后 | 完整读取，用于生成 HTML 报告 |
+| `references/report-template.md` | **阶段四第一批 Executor 完成后立即后台预加载**（不阻塞前台执行），阶段五开始时直接使用缓存 | 完整读取，用于生成 HTML 报告 |
 | `agents/grader.md` | 阶段四每批用例 Layer1 执行完成后，启动 Grader subagent 前 | 完整读取，传给 Grader subagent 作为指令 |
 | `agents/comparator.md` | 阶段四正常路径/E2E 批次 Layer1 完成后，启动 Comparator subagent 前 | 完整读取，传给 Comparator subagent 作为指令 |
 | `agents/analyzer.md` | Comparator 完成并输出 comparison.json 后，启动 Analyzer subagent 前 | 完整读取，传给 Analyzer subagent 作为指令 |
@@ -209,7 +211,9 @@ Skill：[Skill名称]
 查找优先级：
 1. 用户说了具体路径（如「测评 /path/to/my-skill」）→ 直接使用该路径
 2. 用户只说了名字（如「测评 em-reimbursement-v3」）
-   → 去 ~/.config/opencode/skills/<名字>/ 查找 SKILL.md
+   → 按以下顺序查找 SKILL.md：
+     a. ~/.claude/skills/<名字>/          （Claude Code 环境）
+     b. ~/.config/opencode/skills/<名字>/ （OpenCode 环境）
    → 找到则使用，找不到则告知用户并询问完整路径
 3. 用户说「测评这个 skill」或未指定名字
    → 查找当前工作目录下的 SKILL.md
@@ -409,7 +413,7 @@ boundary_uncertain_rate = 边界题uncertain比例
 
 **在进入阶段三前，立即读取 `references/execution-phases.md`（完整），其中包含：**
 - 阶段三：断言强度分级（exact_match / semantic / existence）、双源合流用例设计、纯文本 Skill 断言规范
-- 阶段四：四层验证体系（Layer 0-3）、transcript 双分离格式规范、timing.json 采集规则
+- 阶段四：四层验证体系（Layer 0-3）、transcript 双分离格式规范、timing.json 采集规则、**quick 模式 mega-batch（两次运行合并为一轮）**、报告模板后台预加载时机
 - 阶段五：测评模式运行次数规范、发布准入标准（S/A/B/C 级）、报告新增章节格式
 
 **阶段三额外执行**：
@@ -501,4 +505,4 @@ boundary_uncertain_rate = 边界题uncertain比例
 → 触发消息中如果包含飞书消息格式的元数据（如 sender_id、chat_id），或用户明确说「我在飞书里」，则判定为 openclaw 模式。无法判断时默认 opencode 模式，不影响核心测评逻辑。
 
 ---
-*Last Updated: 2026-03-26*
+*Last Updated: 2026-03-30*
