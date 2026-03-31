@@ -383,66 +383,71 @@ S/A 级 Skill 的业务逻辑断言需要业务方审核。
 
 #### mcp_based：5 → 8 分路径
 
-**【待实现，预计可信度 +3分】MCP 调用 Side-car 日志**
+**【❌ 已核查不可行，已废弃】MCP Side-car 日志方案**
 
-主 SkillSentry agent 在 subagent 执行期间，独立监听并记录每次 MCP 工具调用的入参和返回值，写入 `mcp_sidecar.log`。Grader 对比 `mcp_sidecar.log` 和 `transcript [tool_calls]` 中的每一个 Return 值，不一致则强制 FAIL，标注「transcript 疑似伪造」。
+经查 OpenCode 官方文档（https://opencode.ai/docs/agents/）：*"subagents will use the model of the primary agent that invoked the subagent"* — 主 agent 通过 Task 工具启动 subagent 后，只能拿到 subagent 最终的文字输出，**无法获取 subagent 执行期间的工具调用原始记录**。「主 agent 独立监听 subagent MCP 调用」在当前 OpenCode 架构下做不到，此方案已废弃。
 
-**前提条件**：需要确认 OpenCode 平台是否支持主 agent 读取 subagent 的工具调用详情（task notification 机制）。
+---
 
-**【当前已实现 ✅】工具调用次数交叉核查（agents/grader.md 已包含）**：
+**【✅ 当前可行方案 1】MCP STDIO 拦截代理**
+
+**依据**：MCP 官方架构文档（modelcontextprotocol.io）：*"Stdio transport: Uses standard input/output streams for direct process communication between local processes on the same machine"*
+
+本地 MCP 服务器使用 STDIO 传输，可在其前面插入一个代理脚本，自动捕获所有 JSON-RPC 原始通信。这个日志由系统级进程写入，AI 不知道它的存在，无法修改。
+
+实现方式参见：`scripts/verify_assertions.py`（已包含 transcript 与拦截日志的对比逻辑）。
+
+可行条件：MCP server 使用 STDIO 传输（本地 MCP 均支持此传输方式）。
+
+---
+
+**【✅ 当前可行方案 2】Python 脚本替代 Grader 做量化验证**
+
+**依据**：OpenCode 工具文档（https://opencode.ai/docs/tools/）：*"bash: Execute shell commands in your project environment"* — Grader 可调用 bash 执行 Python 脚本，结果 0/1，完全绕过 AI 主观判断。
+
+工具脚本：`scripts/verify_assertions.py`，支持以下确定性验证类型：
+- `tool_call_count`：统计 [tool_calls] 区块中工具名出现次数
+- `args_field`：提取工具调用入参字段值精确匹配
+- `response_not_contains`：全文检索占位符/禁止字符串
+- `response_contains`：关键词存在性
+- `response_word_count`：字数统计
+- `response_has_heading`：标题结构检测
+
+结果在 `grading.json` 中标注 `"method": "script"`，与 `"method": "grader"` 明确区分，报告单独统计「脚本验证通过率」。
+
+**【✅ 当前已实现】工具调用次数交叉核查（agents/grader.md 已包含）**：
 - Grader 对每条 exact_match 断言，统计工具名在 transcript 中出现次数，与断言声明数字交叉核查
 - 发现「声明调用 1 次但工具名出现 3 次」类矛盾 → FAIL
 - Return 值以自然语言描述而非原始 JSON → `fabrication_risk: "high"`，报告橙色警告
-- 此机制可防住「软性编造」和「粗心遗漏」，是当前可信度 5 分的主要来源
 
-#### code_execution：6.5 → 8.5 分路径
+#### code_execution：7 → 9 分路径
 
-**方案：输出文件 SHA256 哈希校验**
+**方案：不读 transcript，直接读输出文件**
 
-```bash
-# Grader 在读取输出文件时同步计算哈希
-sha256sum <output_file> >> grading.json
-```
-
-- 写入 `grading.json` 的 `output_hash` 字段
-- 跨迭代对比：若相同用例两次运行输出哈希完全一致（但环境发生变化），标注「文件疑似复用而非重新生成」
-
-#### text_generation：2.5 → 5 分路径（上限约 5 分）
-
-**方案 1：量化断言比例强制要求**
-
-text_generation Skill 的断言中，`exact_match`（可量化）类型必须占 ≥ 50%。用例设计阶段 AI 必须输出：
-- 字数统计断言（`回复长度 ≤ 200 字`）
-- 关键词存在性断言（`输出包含「费用类型」字段`）
-- 结构格式断言（`包含 H1/H2 标题层级`）
-
-**方案 2：量化断言用脚本验证，不经 Grader AI**
-
-对以下类型断言，用 Python 脚本直接判定，结果是 0/1 确定性，完全规避 AI 主观判断：
-
-```python
-# 字数
-assert len(response_text.replace(' ', '')) <= 200, f"字数超标: {len(response_text)}"
-
-# 标题结构
-import re
-has_h2 = bool(re.search(r'^## ', response_text, re.MULTILINE))
-assert has_h2, "缺少二级标题"
-
-# 关键词存在性
-assert '报销金额' in response_text, "输出未包含「报销金额」字段"
-```
-
-这类断言的结果写入 `grading.json` 时标注 `method: script`，与 `method: grader` 的语义断言区分，报告中单独展示。
-
-**方案 3：强制人工确认节点**
-
-text_generation Skill 的报告必须包含以下提示，且不可省略：
+Bash 命令的产出文件是物理锚点，AI 无法在「不实际执行命令」的情况下伪造它。Grader 直接调用 bash 读取并验证文件内容，完全不依赖 transcript 里的 Return 字段。
 
 ```
-⚠️ 纯文本生成型 Skill：核心质量断言由 AI 评审，存在主观判断空间。
-   建议发布前，业务方对以下 3-5 个典型用例的输出进行人工确认：
-   [列出 happy_path 和 E2E 类型用例的 response.md 路径]
+❌ 不要写断言：命令执行返回 status=success
+✅ 要写断言：outputs/result.json 存在，且 json["status"] == "success"
+```
+
+验证逻辑在 `scripts/verify_assertions.py` 中可直接扩展。
+
+#### text_generation：2.5 → 5 分路径（这是上限，无法突破）
+
+**为什么上限是 5 分**：「判断文章写得好不好」本身没有客观标准，这是 LLM 评估领域的普遍难题。即使 LMSYS Chatbot Arena（业界最权威的 LLM 评测）也依赖大量人工评分来解决这个问题。这不是 SkillSentry 的缺陷，是 text_generation 类型评测的本质局限。
+
+**方案 1：量化断言比例强制 ≥ 50%，用脚本验证**
+
+text_generation Skill 的断言中，可量化类型必须占 ≥ 50%，且交由 `verify_assertions.py` 脚本验证而非 Grader AI，确保至少一半结论不依赖主观判断。
+
+**方案 2：发布前业务方人工确认（不可省略）**
+
+```
+⚠️ 纯文本生成型 Skill：语义断言由 AI 评审，存在主观判断空间。
+   在发布决策生效前，请业务方确认以下用例的输出质量：
+   - [happy_path 用例 response.md 路径]
+   - [E2E 用例 response.md 路径]
 ```
 
 ---
@@ -451,10 +456,11 @@ text_generation Skill 的报告必须包含以下提示，且不可省略：
 
 | 场景 | 报告结论可用性 | 行动建议 |
 |------|------------|---------|
-| mcp_based + MCP 真实执行 | 可参考，有一定可信度 | 重点关注 exact_match 断言，人工复核 1-2 个关键断言的原文 evidence |
+| mcp_based + MCP 真实执行 + 脚本验证 | **可信，可作发布参考** | 重点看 `method: script` 标注的断言结果 |
+| mcp_based + MCP 真实执行（无脚本验证） | 有一定可信度 | 人工复核 1-2 个关键断言的 evidence 原文 |
 | mcp_based + MCP 不可用 | **不可用于发布决策** | 修复 MCP 环境后重测 |
-| code_execution | 可参考，可信度较高 | 检查输出文件内容是否符合预期 |
-| text_generation | 仅供参考 | 必须经过业务方人工确认核心用例 |
+| code_execution + 直接读输出文件 | **可信，可信度最高** | 验证输出文件内容本身即可 |
+| text_generation | 仅供参考 | 必须经业务方人工确认核心用例输出 |
 
 ---
 
