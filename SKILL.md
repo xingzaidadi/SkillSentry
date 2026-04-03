@@ -123,6 +123,29 @@ inputs_dir    = <SkillSentry路径>/inputs/<被测Skill名称>/
    暂无素材也可继续——我会用口述方式模拟发票信息测评。
 ```
 
+### ⚡ 规则缓存检查（阶段零最优先执行）
+
+**在读取被测 SKILL.md 前**，先检查缓存：
+
+```bash
+# 计算被测 SKILL.md 的文件哈希
+python3 -c "import hashlib,sys; print(hashlib.md5(open(sys.argv[1],'rb').read()).hexdigest())" <skill_path>/SKILL.md
+```
+
+然后检查 `<inputs_dir>/rules.cache.json` 是否存在，并比较 `skill_hash` 字段：
+
+```
+缓存命中（hash 匹配）→ 直接加载 rules.cache.json 中的规则列表
+                         跳过规则提炼步骤，节省 2-5 分钟
+                         告知用户：「⚡ 规则缓存命中（SKILL.md 未变更），跳过规则提炼」
+
+缓存未命中（hash 不匹配 / 文件不存在）→ 正常执行规则提炼
+                         完成后将规则列表写入 rules.cache.json：
+                         { "skill_hash": "<md5>", "extracted_at": "<ISO时间>", "rules": [...] }
+```
+
+> **为什么安全**：hash 匹配意味着 SKILL.md 内容完全相同，规则提炼结果必然相同，可以直接复用。Skill 迭代修改后 hash 变化，自动触发重新提炼。
+
 ### 扫描输入文件与外部用例
 
 扫描 `inputs/<被测Skill名称>/`：
