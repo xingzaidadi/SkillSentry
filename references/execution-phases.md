@@ -131,6 +131,23 @@ text_generation → 纯文本模式：subagent 生成文本输出，记录完整
 
 ### Layer 1：Executor — 真实执行，记录 transcript
 
+**⚡ 每批启动前必须写出声明（不声明禁止发出任何 subagent 调用）**：
+
+在发出任何 Agent 工具调用之前，必须先在消息中写出以下声明：
+
+```
+【批次启动声明 · Batch-N】
+用例：eval-[X], eval-[Y]（共 [N] 个）
+并行方式：在本消息中同时发出 with_skill + without_skill 的 Agent 调用 ✓
+without_skill steps 上限：[8 / 6 / 5]（skill_type=[类型]）✓
+without_skill 早退指令：已注入 ✓
+```
+
+声明写出后，紧接着在**同一消息**中发出所有 Agent 工具调用（with + without 并行）。
+若声明写出后工具调用不在同一消息中，视为串行违规。
+
+> **为什么有效**：这个声明不是给用户看的，是强制 Claude 在执行前完成一次结构化自检。声明一旦写出，后续工具调用必须满足声明中的并行约束，否则前后矛盾——这利用了 LLM 的一致性倾向来对抗其串行本能。实测数据显示（eval-4/5 with/without 完全串行），规则写在文档里不够，需要每次执行前的强制确认动作。
+
 **⚡ 强制并行规则（速度关键约束）**：
 
 每个用例的 with_skill 和 without_skill **必须在同一批次同时启动**，不得串行。
@@ -194,6 +211,14 @@ Executor subagent 启动时，必须根据 Skill 类型和执行侧分别设置 
 - 流程中断且无法继续（如找不到申请单）
 记录失败原因后直接退出，这已足够评估 Δ。
 
+【工具调用自计数规则（mcp_based / code_execution）】：
+每次调用工具前，在心里累加本次已调用次数（从 0 开始）。
+达到以下上限时，立即停止，不再发出新工具调用：
+- mcp_based：最多 6 次工具调用
+- code_execution：最多 5 次工具调用
+停止时输出：「[STOPPED: tool_call_limit_reached, calls=[N]]」及当前已完成步骤摘要。
+平台 steps 参数是备用保障，此自计数是首要约束，优先级更高。
+
 【自检 — 执行完成后必须回答以下问题并写入 response.md 末尾】：
 沙箱隔离自检：
 1. 我是否读取了 eval-N/with_skill/ 目录下的任何文件？（是/否）
@@ -250,6 +275,16 @@ Status: success | error | timeout
 - **Layer 2b**：独立 Grader 评审（根据 transcript 判卷）
 
 **⚡ Grader 批量评审规则（速度关键约束）**：
+
+**禁令**：每次 Grader 调用必须处理 **≥ 2 个**用例的 transcript。单用例单独调用 Grader 是违规行为。
+
+唯一例外：整批只剩最后 1 个未评审用例时，允许单独调用。
+
+启动 Grader 前，必须在消息中写出：
+```
+【Grader 启动声明】本次传入：eval-[X], eval-[Y], ...（共 [N] 个用例）
+```
+N < 2 且非最后 1 个用例场景时，等待更多用例完成后再调用。
 
 Grader 不得逐用例单独调用。每批 Executor 完成后，**一次性**将该批次所有用例的 transcript 传给 Grader 统一评审。
 
