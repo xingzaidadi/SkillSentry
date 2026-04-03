@@ -1,310 +1,56 @@
-# execution-phases.md — 阶段三 & 阶段四 详细执行规范
+# execution-phases.md — 跨工具通用规范与数据接口
 
-> 由 SkillSentry 主文件在阶段三开始时加载。阶段零~二无需读取本文件。
-
----
-
-## 阶段一（速度优化）：触发率测评的跳过规则
-
-触发率 AI 模拟需要生成并评估 10 条 prompt，耗时约 2-3 分钟。按以下规则决定是否执行：
-
-| 测评模式 | 默认行为 | 用户可覆盖 |
-|---------|---------|---------|
-| **quick** | **跳过触发率测评**，直接进入阶段三 | 用户明确说「需要触发率」时执行 |
-| **standard** | 执行触发率测评 | 用户明确说「跳过触发率」时跳过 |
-| **full** | 强制执行，不可跳过 | — |
-
-quick 模式跳过时，报告第十一章标注：「触发率预评估已跳过（quick 模式默认优化）。升级 standard 模式可启用。」
-
-**⚡ 触发率预评估使用 `explore` subagent**：
-
-触发率预评估是纯文本分析任务（读 description + 生成判断），使用 `explore` subagent 即可，无需 `general`。
+> 工具箱架构下，各工具独立执行细节见各 `sentry-*/SKILL.md`。
+> 本文件只保留**跨工具共享的规范**和**工具间数据接口定义**。
 
 ---
 
-## 阶段三：测试用例设计
+## 一、工具间数据接口（JSON 文件约定）
 
-**⚡ 用例缓存检查（阶段三最优先执行）**
+所有工具通过 session 目录中的 JSON 文件传递状态，格式如下：
 
-进入阶段三前，先检查用例缓存是否可复用：
-
-```
-检查 <inputs_dir>/cases.cache.json 是否存在，且 rules_hash 与当前一致：
-
-  缓存命中 → 加载缓存中的 evals 列表
-    smoke/quick 模式：**自动复用**，直接进入阶段四，节省 5-10 分钟
-    standard/full 模式：展示缓存摘要，询问用户「复用上次用例设计 / 重新设计？」
-    用户可强制重新设计（输入「重新设计」）
-    告知用户：「⚡ 用例缓存命中（规则未变更），已加载上次设计的 [N] 个用例」
-
-  缓存未命中 → 正常执行用例设计流程
-    设计完成后，将 evals.json 内容同步写入 cases.cache.json：
-    { "rules_hash": "<与 rules.cache.json 相同的 hash>",
-      "designed_at": "<ISO时间>",
-      "mode": "<smoke/quick/standard/full>",
-      "evals": [...] }
-```
-
-> **预期节省**：Skill 迭代开发中，10 次运行里约 7-8 次 SKILL.md 不变（只是调试行为），缓存命中可跳过 5-10 分钟的用例设计阶段，是准备阶段最大的单项优化。
-
-**⚡ 阶段零规则提炼和阶段三用例设计：优先使用轻量模型**
-
-规则提炼（阶段零）和用例设计（阶段三）是纯分析/生成任务，不需要执行任何工具，不需要强推理能力。
-
-如果用户在 `opencode.json` 中配置了轻量模型（如 `claude-haiku-4`），SkillSentry 应在这两个阶段切换到该模型，对执行层（Layer 1）和评审层（Grader）仍使用默认能力模型：
-
+### rules.cache.json（sentry-cases 读取 / SkillSentry 写入）
 ```json
-// 可选配置示例（opencode.json）
 {
-  "agent": {
-    "skillsentry-analyst": {
-      "description": "SkillSentry 分析层：规则提炼和用例设计，使用轻量模型",
-      "mode": "subagent",
-      "model": "anthropic/claude-haiku-4-20250514",
-      "hidden": true,
-      "steps": 20,
-      "permission": { "edit": "allow", "bash": "deny" }
-    }
-  }
+  "skill_hash": "<SKILL.md 的 MD5>",
+  "extracted_at": "<ISO时间>",
+  "rules": ["规则1", "规则2", "..."]
 }
 ```
 
-> **来源**：Anthropic《Building effective agents》Routing 章节：*"Routing easy/common questions to smaller, cost-efficient models like Claude Haiku 4.5"*。规则提炼和用例设计属于"结构化分析"类任务，轻量模型完全胜任，且速度通常快 2-3 倍。
-
-**未配置轻量模型时**：阶段零和阶段三使用当前默认模型，不受影响，功能完整。
-
-**核心逻辑：双源合流**
-1. **注入外部用例**：优先加载阶段零发现的「外部用例」，标记为「[外部导入]」。
-2. **AI 补齐设计**：根据当前模式的覆盖率目标，针对外部用例未覆盖的路径，AI 自动设计补齐用例。
-3. **一致性检查**：确保所有导入的断言符合 Layer 2/3 的评审规范。
-
-**断言强度分级（P1 必须执行）**：
-
-每条断言在设计时必须标注 `precision` 字段，这决定了它在通过率计算中的权重：
-
-| 强度级别 | `precision` 值 | 定义 | 示例 |
-|---------|--------------|------|------|
-| 精确断言 | `exact_match` | 有具体可验证的字段值/计数/格式，失败风险真实存在 | `saveExpenseDoc 入参 docStatus="10"` |
-| 语义断言 | `semantic` | 需要理解语义才能判断，存在主观空间 | `输出的报销主题描述清晰完整` |
-| 存在性断言 | `existence` | 只验证某内容存在/不存在，无 Skill 也大概率通过 | `输出非空` / `没有编造发票` |
-
-> **为什么要区分断言强度**：如果所有断言都是"输出非空"这种 existence 级别，那么有没有 Skill 结果都差不多，测评失去意义。精确断言才是真正衡量 Skill 价值的指标，应占主体。
-
-**通过率拆分规则**：
-- `精确通过率` = exact_match 断言通过数 / exact_match 断言总数（**这才是核心质量指标**）
-- `语义通过率` = semantic 断言通过数 / semantic 断言总数（参考）
-- `综合通过率` = 全部断言通过数 / 全部断言总数（兼容旧逻辑，显示时标注构成）
-
-**准入阈值应用 `精确通过率`**：对照 admission-criteria.md 的通过率要求，以 `精确通过率` 为准。`existence` 断言不计入准入判断。
-
-**断言设计自检（每条断言写完后必须过一遍）**：
-```
-□ 这条断言如果没有 Skill，会不会照样通过？→ 是 → precision = existence，注明原因
-□ 这条断言的 PASS/FAIL 标准是否唯一确定？→ 否 → 改写为更具体的描述
-□ 这条断言对应 SKILL.md 中的哪条规则？→ 填写 rule_ref 字段
-□ 这条规则涉及不可逆操作（写/提交/删除）？→ 是 → 检查是否有用户确认步骤断言
-```
-
-**⚡ skip_without_skill 标记（用例设计阶段完成后执行）**：
-
-用例设计完成后，对每个用例检查是否满足跳过 without_skill 的条件。满足任一条件则设 `skip_without_skill: true`：
-
-| 条件 | 原因 |
-|------|------|
-| `type = "negative"`（负向测试） | 负向用例验证的是"Skill 不应触发/执行"，without_skill 本来就没有 Skill 指导，自然也不会执行，Δ 无意义 |
-| 所有断言的 `precision` 均为 `existence` | existence 级别断言对"有没有 Skill"不敏感，运行 without_skill 不会提供有效对比信息 |
-| `type = "robustness"` 且核心断言为负向存在性 | 鲁棒性用例验证系统防御行为，without_skill 预期行为已知（混乱），不值得消耗 Executor 时间 |
-
-标记后在 evals.json 中写入：
+### cases.cache.json（sentry-cases 写入 / sentry-executor 读取）
 ```json
-{ "id": 11, "type": "negative", "skip_without_skill": true, "skip_reason": "负向测试，without_skill 无对比价值" }
+{
+  "rules_hash": "<与 rules.cache.json 相同的 skill_hash>",
+  "designed_at": "<ISO时间>",
+  "mode": "smoke | quick | standard | full",
+  "evals": [ /* 同 evals.json 格式 */ ]
+}
 ```
 
-> **预期节省**：quick 模式 8-10 个用例中通常有 2-3 个负向/纯 existence 用例，跳过其 without_skill 可节省 ~20-25% Executor 时间。
-
-**Human-in-the-Loop 检查（P1，涉及不可逆操作时必须执行）**：
-
-被测 Skill 凡包含写操作、提交、删除等不可逆动作，必须在用例设计阶段额外验证：
-
-```
-HiL-1：不可逆操作前是否有明确的用户确认步骤？
-  → SKILL.md 中是否有"等待用户确认"、"询问是否继续"类指令？
-  → 若无：标记 ⚠️，改进建议注明「缺少 Human-in-the-Loop 确认节点」
-
-HiL-2：用户确认失败或超时时，是否有明确的中止逻辑？
-  → 若无：标记 ⚠️，注明「确认节点无超时/拒绝处理逻辑」
-```
-
-> **依据**：Anthropic《Building effective agents》明确建议，Agent 在执行任何不可逆操作前应暂停等待人工确认。缺少此机制的 Skill 一旦误触发无法回滚，直接造成业务损失。
-
-**纯文本 Skill 的用例设计补充规则**（当 `skill_type = "text_generation"` 时）：
-
-纯文本 Skill 没有工具调用，断言必须聚焦在**可验证的输出内容**上，避免不可量化的主观描述：
-
-| 断言类型 | 好的写法 | 坏的写法 |
-|---------|---------|---------|
-| 格式规范 | "输出包含三级标题结构，H1/H2/H3 层次清晰" | "格式看起来不错" |
-| 内容完整性 | "输出覆盖了用户问题的全部 3 个子问题" | "回答比较完整" |
-| 规则遵守 | "回复长度在 200 字以内（SKILL.md 要求简洁）" | "回复很简洁" |
-| 负向断言 | "输出没有包含用户明确说不需要的代码示例" | "没有多余内容" |
-| 边界行为 | "当输入为空时，Skill 提示用户补充信息而非直接执行" | "处理了异常输入" |
-
----
-
-## 阶段四：分组流式执行（四层验证体系）
-
-### Layer 0：执行模式分发
-
-根据阶段零检测的 `skill_type`，自动选择执行模式：
-
-```
-mcp_based      → 标准模式：真实 MCP 工具调用，记录完整 tool_call transcript
-code_execution → 代码模式：真实 Bash/脚本执行，记录命令输出
-text_generation → 纯文本模式：subagent 生成文本输出，记录完整 response
+### evals.json（sentry-cases 输出 / sentry-executor 输入）
+```json
+[
+  {
+    "id": 1,
+    "display_name": "正常报销流程",
+    "type": "happy_path",
+    "source": "ai_generated | external",
+    "prompt": "<用例 prompt>",
+    "skip_without_skill": false,
+    "skip_reason": "",
+    "expectations": [
+      {
+        "text": "<断言描述>",
+        "precision": "exact_match | semantic | existence",
+        "rule_ref": "<对应 SKILL.md 规则>"
+      }
+    ]
+  }
+]
 ```
 
-**纯文本模式的执行规范**：
-- with_skill subagent：加载 SKILL.md 后执行用例 prompt，输出保存到 `response.md`
-- without_skill subagent：不加载任何 Skill，直接执行相同 prompt，输出保存到 `response.md`
-- transcript 内容：完整的推理过程 + 最终输出（无工具调用时，记录模型的思考链和输出）
-- **注意**：纯文本模式下 `execution_metrics.total_mcp_calls` 填 0，不影响 Grader 判断
-
-### Layer 1：Executor — 真实执行，记录 transcript
-
-**⚡ 每批启动前必须写出声明（不声明禁止发出任何 subagent 调用）**：
-
-在发出任何 Agent 工具调用之前，必须先在消息中写出以下声明：
-
-```
-【批次启动声明 · Batch-N】
-用例：eval-[X], eval-[Y]（共 [N] 个）
-并行方式：在本消息中同时发出 with_skill + without_skill 的 Agent 调用 ✓
-without_skill steps 上限：[8 / 6 / 5]（skill_type=[类型]）✓
-without_skill 早退指令：已注入 ✓
-```
-
-声明写出后，紧接着在**同一消息**中发出所有 Agent 工具调用（with + without 并行）。
-若声明写出后工具调用不在同一消息中，视为串行违规。
-
-**⚡ skip_without_skill 检查（每个用例启动前必须执行）**：
-
-```
-读取 evals.json 中该用例的 skip_without_skill 字段：
-  → true：只启动 with_skill Executor，跳过 without_skill
-           在批次启动声明中注明：「eval-[N] without_skill：已跳过（skip_without_skill=true，原因：[skip_reason]）」
-           Grader 评审时跳过 Δ 计算，标注「无 without_skill 对照」
-  → false 或字段不存在：正常启动 with_skill + without_skill 双侧
-```
-
-> **为什么有效**：这个声明不是给用户看的，是强制 Claude 在执行前完成一次结构化自检。声明一旦写出，后续工具调用必须满足声明中的并行约束，否则前后矛盾——这利用了 LLM 的一致性倾向来对抗其串行本能。实测数据显示（eval-4/5 with/without 完全串行），规则写在文档里不够，需要每次执行前的强制确认动作。
-
-**⚡ 强制并行规则（速度关键约束）**：
-
-每个用例的 with_skill 和 without_skill **必须在同一批次同时启动**，不得串行。
-
-```
-❌ 错误做法（串行，时间 × 2）：
-   eval-1 with_skill → 等完成 → eval-1 without_skill → 等完成 → eval-2 ...
-
-✅ 正确做法（并行，时间不变）：
-   同时启动：eval-1 with_skill + eval-1 without_skill（并行）
-   同时启动：eval-2 with_skill + eval-2 without_skill（并行）
-   ...
-   所有用例可分批并行，每批 2-3 个用例同时执行，取决于资源限制
-```
-
-**分批并行策略**：
-- 批次大小按模式区分：**quick 模式每批 4-5 个用例**（共 16-20 个 subagent 并行）；**standard/full 模式每批 2-3 个用例**（共 4-6 个 subagent，控制资源压力）
-- 一批完成后立即启动 Grader 批量评审该批次，同时启动下一批 Executor
-- Executor 和 Grader 的执行形成流水线（pipeline），而非等所有 Executor 完成再启 Grader
-
-**⚡ quick 模式：两次运行合并为 mega-batch（速度关键约束）**：
-
-quick 模式要求每用例运行 2 次，这两次必须**合并进同一 mega-batch** 同时启动，不得分两轮顺序执行：
-
-```
-❌ 错误做法（两轮串行，时间 × 2）：
-   Round-1：[eval-1 run1 ×2侧] → [eval-2 run1 ×2侧] → ... → 全部完成
-   Round-2：[eval-1 run2 ×2侧] → [eval-2 run2 ×2侧] → ... → 全部完成
-
-✅ 正确做法（mega-batch，两轮时间塌缩为一轮）：
-   批次A：[eval-1 run1 with] [eval-1 run1 without] [eval-1 run2 with] [eval-1 run2 without]
-          [eval-2 run1 with] [eval-2 run1 without] [eval-2 run2 with] [eval-2 run2 without]
-          ... 共 4-5 用例同时启动（16-20 subagent）
-   批次B：剩余用例，同上
-```
-
-> **节省估算**：quick 模式 10 用例 × 2 次，原本需要 2 轮（每轮约 6-8 分钟）= 12-16 分钟；合并后只需 1 轮 ≈ 6-8 分钟。批次从 2 轮变 1 轮，Grader 冷启动次数也从 6-8 次降到 2-3 次。
-
-**⚡ Executor subagent 的 steps 上限（防止过度迭代）**：
-
-Executor subagent 启动时，必须根据 Skill 类型和执行侧分别设置 `steps` 上限：
-
-| Skill 类型 | with_skill steps 上限 | without_skill steps 上限 | 理由 |
-|-----------|----------------------|------------------------|------|
-| `mcp_based` | **15 steps** | **8 steps** | with_skill 需完整跑完流程；without_skill 遇到首个关键失败即可停止，无需尝试恢复 |
-| `code_execution` | **10 steps** | **6 steps** | 同上 |
-| `text_generation` | **5 steps** | **5 steps** | 纯文本只需一次生成，两侧相同 |
-
-> **为什么 without_skill 要单独设置更低的上限**：实测数据显示，without_skill 在复杂业务流程（如差旅报销）中会无目的地漫游尝试，消耗远超 with_skill 的 Token 和时间（实测 without_skill 耗时 1318s、42k tokens，而 with_skill 仅 770s、18.5k tokens）。without_skill 的测评目的是"证明没有 Skill 会更差"，并不需要它跑完整流程，遇到第一个关键失败点即可得出结论。
-
-> **来源**：OpenCode 官方文档 `steps` 字段说明：*"Control the maximum number of agentic iterations an agent can perform before being forced to respond with text only."* 不设上限时，LLM 可能无限重试，既浪费时间又消耗 Token。
-
-**启动 without_skill subagent 时必须在 prompt 中注明**：
-```
-你的工作目录是 eval-N/without_skill/workspace/，禁止读取 eval-N/with_skill/ 下的任何文件。
-所有操作（文件上传、中间产物）必须独立完成，不能复用 with_skill 的任何结果。
-你的目标是展示没有 Skill 指导时的自然行为。遇到以下任一关键失败点时，立即停止并输出当前结果，不要尝试恢复或绕过：
-- 路由选择错误（如把差旅报销当日常报销处理）
-- 必填字段缺失或格式错误导致 API 拒绝
-- 权限校验失败
-- 流程中断且无法继续（如找不到申请单）
-记录失败原因后直接退出，这已足够评估 Δ。
-
-【工具调用自计数规则（mcp_based / code_execution）】：
-每次调用工具前，在心里累加本次已调用次数（从 0 开始）。
-达到以下上限时，立即停止，不再发出新工具调用：
-- mcp_based：最多 6 次工具调用
-- code_execution：最多 5 次工具调用
-停止时输出：「[STOPPED: tool_call_limit_reached, calls=[N]]」及当前已完成步骤摘要。
-平台 steps 参数是备用保障，此自计数是首要约束，优先级更高。
-
-【自检 — 执行完成后必须回答以下问题并写入 response.md 末尾】：
-沙箱隔离自检：
-1. 我是否读取了 eval-N/with_skill/ 目录下的任何文件？（是/否）
-2. 我使用的所有 FDS URL 或上传结果，是否全部由本次独立执行产生？（是/否）
-如果任何一项答案为"是"，立即在 response.md 末尾标注：「⚠️ 沙箱隔离违规：本次结果无效，请通知 SkillSentry 主 agent 标记 INVALID」
-```
-
-> **为什么加自检**：文件系统隔离规则依赖 AI 自觉遵守，缺乏系统级拦截。自检通过强制 AI 在执行结束时声明自己是否违规，让 Grader 在评审时能发现并标记被污染的测评结果，使违规行为可被追溯而非静默通过。
-
-**transcript 格式规范（P2 双分离结构）**：
-
-transcript.md 必须严格区分两类内容，**不允许混写**：
-
-```markdown
-## [tool_calls] Step N: <工具名>
-<!-- 原始工具调用日志，禁止添加 AI 注释 -->
-Tool: <exact_tool_name>
-Args: <完整 JSON 入参，原样复制，不得修改>
-Return: <完整返回值，原样复制，不得修改>
-Status: success | error | timeout
-
-## [agent_notes] Step N: <简短标题>
-<!-- AI 主观解释区，清晰标注这是 AI 解读而非原始数据 -->
-解读：<AI 对上一步工具调用结果的解释，或流程决策的说明>
-```
-
-> **为什么要双分离结构**：混写会导致 Grader 评审时无法区分"真实执行结果"和"AI 的自我解读"，从而产生误判。`[tool_calls]` 区块是客观证据，`[agent_notes]` 是主观分析，两者的可信度权重不同。
-
-**强制规则**：
-- `[tool_calls]` 区块内容来自真实 MCP/Bash 返回，**一字不改**原样复制
-- `[agent_notes]` 区块是 AI 的主观解释，Grader 评审时**降权使用**（只作辅助参考，不作 PASS 的主要 evidence）
-- 禁止在 `[tool_calls]` 区块内添加「按任务要求自动选择...」之类的 AI 解释语句
-
-**时间与 Token 采集（所有模式必须执行）**：
-
-每个 subagent 执行完毕后，立即记录以下指标到 `timing.json`：
+### timing_with.json / timing_without.json（sentry-executor 写入 / sentry-report 读取）
 ```json
 {
   "executor_start_ms": 1711234567000,
@@ -315,306 +61,99 @@ Status: success | error | timeout
   "output_tokens": 1140
 }
 ```
-这些数据来自 task notification 的 `total_tokens` 和 `duration_ms` 字段，**必须在 subagent 完成时立即保存**，不可事后补填。
 
-> **为什么必须立即保存**：task notification 是一次性事件，完成后无法回溯。事后补填只能靠估算，会污染效率指标数据，影响 P95 响应时间的准确性。
-
-**⚡ 批次完成后立即执行并行度审计（自动触发，不可跳过）**：
-
-每批所有 subagent 完成后，立即读取本批次所有 timing.json，执行并行度检查：
-
-```python
-# 并行度判定逻辑（伪代码）
-for each eval in batch:
-    if eval.skip_without_skill:
-        continue  # 已标记跳过，不计入审计
-    start_gap = abs(eval.with_skill.start_ms - eval.without_skill.start_ms)
-    parallel = start_gap <= 30_000  # 30秒内视为并行启动
-
-batch_parallel_rate = parallel_count / total_count  # 本批次并行度
+### grading.json（agents/grader 写入 / sentry-report 读取）
+```json
+{
+  "skill_type": "mcp_based | text_generation | code_execution",
+  "expectations": [ /* 逐条断言结果 */ ],
+  "summary": {
+    "passed": 6, "failed": 2, "total": 8,
+    "precision_breakdown": { "exact_match": {}, "semantic": {}, "existence": {} },
+    "authoritative_pass_rate": 0.80
+  },
+  "execution_metrics": {},
+  "timing": {},
+  "eval_feedback": {}
+}
 ```
 
-将结果追加到 `workspace_dir/eval_environment.json` 的 `parallelism_audit` 字段：
+### eval_environment.json（sentry-executor 追加写入）
 ```json
 {
   "parallelism_audit": [
-    { "batch": 1, "parallel_rate": 0.75, "violations": ["eval-4 串行（gap=84s）"] },
-    { "batch": 2, "parallel_rate": 1.00, "violations": [] }
+    { "batch": 1, "parallel_rate": 0.75, "violations": ["eval-4 串行（gap=84s）"] }
   ],
   "overall_parallel_rate": 0.88
 }
 ```
 
-**审计结果触发规则**：
+---
 
-| 本批次并行率 | 触发动作 |
-|------------|---------|
-| ≥ 80% | 正常继续，在批次声明中标注 ✓ |
-| 50-80% | 下一批次声明前，额外输出：「⚠️ 上批次并行率 [X]%，请确认本批次 Agent 调用在同一消息中发出」 |
-| < 50% | **暂停，立即输出诊断**：列出所有串行用例的 start_gap 数据，询问用户是否继续（可能是平台限制而非 Claude 失误） |
+## 二、skip_without_skill 判断规则（sentry-cases 执行，sentry-executor 读取）
 
-> **为什么有效**：审计将"并行执行"从不可见规则变为每批有数据的可追溯指标。连续两批违规会触发用户介入，既创造了 accountability，也能发现平台层面的并行限制（如某些环境下 subagent 确实只能串行）。
+| 条件 | skip_without_skill | skip_reason |
+|------|-------------------|-------------|
+| `type = "negative"` | true | 负向测试，without_skill 无对比价值 |
+| 所有断言 `precision = "existence"` | true | existence 断言对有无 Skill 不敏感 |
+| `type = "robustness"` 且核心断言为负向存在性 | true | 鲁棒性用例，without_skill 行为已知（混乱） |
 
-### Layer 2：独立评审与精确校验
+---
 
-- **Layer 2a**：字段精确校验（Ground Truth）
-- **Layer 2b**：独立 Grader 评审（根据 transcript 判卷）
+## 三、Grader 上下文压缩规范（每批 Grader 完成后执行）
 
-**⚡ Grader 批量评审规则（速度关键约束）**：
+每批 Grader 完成后，主 agent 将详细评审结果**压缩为紧凑摘要**，只在上下文保留摘要：
 
-**禁令**：每次 Grader 调用必须处理 **≥ 2 个**用例的 transcript。单用例单独调用 Grader 是违规行为。
-
-唯一例外：整批只剩最后 1 个未评审用例时，允许单独调用。
-
-启动 Grader 前，必须在消息中写出：
+**压缩格式**（每 eval ≤ 1 行）：
 ```
-【Grader 启动声明】本次传入：eval-[X], eval-[Y], ...（共 [N] 个用例）
-```
-N < 2 且非最后 1 个用例场景时，等待更多用例完成后再调用。
-
-Grader 不得逐用例单独调用。每批 Executor 完成后，**一次性**将该批次所有用例的 transcript 传给 Grader 统一评审。
-
-**⚡ Grader 使用 `explore` subagent 类型**：
-
-Grader 是纯读取任务（只读 transcript，不写文件），使用 `explore` subagent 而非 `general`：
-
-```
-❌ subagent_type = "general"（有写文件能力，过重）
-✅ subagent_type = "explore"（只读，更快，资源消耗少）
-```
-
-> **来源**：OpenCode 官方文档 explore subagent 说明：*"A fast, read-only agent for exploring codebases. Cannot modify files."* Grader 只需要读 transcript 和输出文件，无需任何写操作，explore 完全满足且速度更快。
-
-**⚡ Grader 输入精简化（减少 Token 消耗）**：
-
-Grader 批量评审时，**不传完整 transcript**，只传精简版本：
-
-```
-精简传输规则：
-1. 只传 [tool_calls] 区块（跳过 [agent_notes]）
-2. 跳过超过 500 字的完整 JSON 返回值，改传摘要：
-   Return: {"code":"200","body":"a1b2c3d4",...} → 截断为前 200 字
-3. 必须完整保留的部分：
-   - 所有工具调用的名称（Tool: xxx）
-   - 所有工具调用的入参（Args: ...）
-   - 返回值的状态码和关键字段（如 fdId、code、status）
-   - 最终 response.md 全文（这是断言验证的主要来源）
-```
-
-示例精简：
-```markdown
-[原始 transcript 约 8000 tokens]
-         ↓ 精简后
-[tool_calls] Step 1: queryExpenseApplier
-Tool: mcp_queryExpenseApplier
-Args: {"docApplierUsername":"zhangsan"}
-Return: {"fdCompanyId":"abc","fdBankName":"招商银行"} [已截断]
-Status: success
-
-[tool_calls] Step 5: saveExpenseDoc
-Tool: mcp_saveExpenseDoc
-Args: {"docStatus":"10","expenseType":"1","fdApplyMoney":"168.00",...}
-Return: {"code":"200","body":"a1b2c3d4"} [已截断]
-Status: success
-
-[精简后约 1500-2000 tokens]
-```
-
-> **为什么安全**：Grader 评审断言时，精确断言（exact_match）验证的是工具调用名称、入参字段值、返回状态码，这些全部保留。只截断的是冗余的完整 JSON 返回体（几百行）和 agent_notes 解释文字，这两类信息对断言判定没有实质贡献。
-
-**批量评审的 prompt 结构**：
-```
-你需要评审以下 [N] 个用例的 transcript，逐一输出 grading.json：
-
-用例 1：eval-1
-transcript（精简版）：[见上方精简规则]
-response.md：[完整内容]
-expectations：[断言列表]
-
-用例 2：eval-2
-...
-
-请按用例顺序依次输出 grading-1.json、grading-2.json...
-```
-
-> **为什么批量评审能节省时间**：每次启动 Grader subagent 有约 10-30 秒的冷启动开销（API 初始化 + SKILL.md 加载）。10 个用例逐个评审 = 10 次冷启动；批量评审 = 1-2 次冷启动。
-
-**⚡ 批次结果上下文压缩（Grader 完成后立即执行）**：
-
-每批 Grader 完成后，主 agent 必须将该批次的详细评审结果**压缩为紧凑摘要**，仅在上下文中保留摘要，全量数据保存在文件中。
-
-**压缩格式**（在上下文中保留的内容，每 eval ≤ 1 行）：
-```
-批次1 结果摘要（Grader 完成，全量数据在 grading.json）：
+批次1 结果摘要（全量数据在 grading.json）：
   eval-1 [happy_path]  通过率 8/12 (67%)  script:5/6  grader:3/6  失败: saveExpenseDoc入参错误
   eval-2 [travel]      通过率 6/7  (86%)  script:3/3  grader:3/4  失败: fdMonthOfOccurrence字段
-  eval-3 [atomic]      通过率 4/4  (100%) script:2/2  grader:2/2  ✓
   并行率: 100% ✓
 ```
 
-**禁止在上下文中保留的内容**：
-- 完整 grading.json 内容
-- 完整 transcript 内容
-- Grader 的逐条 evidence 原文
-
-> **为什么关键**：standard/full 模式下有 20-35 个用例，每个用例的 grading.json 约 2-5k tokens，全部保留在上下文中会累计 40-175k tokens，导致后期批次的 API 调用显著变慢（输入 tokens 越多，TTFT 越长）。压缩后每批摘要约 200-300 tokens，整个测评过程上下文增量可控。
-
-**纯文本模式下的 Grader 特别说明**：当 `skill_type = "text_generation"` 时，Grader 使用 `agents/grader.md` 中的「纯文本评审规范」章节，而非 MCP transcript 验证标准。
-
-### Layer 3：盲测对比与根因分析
-
-**⚡ Comparator/Analyzer 范围限定（速度关键约束）**：
-
-**smoke 模式完全跳过 Layer 3**：smoke 模式只做冒烟验证，不出具发布决策，Comparator 和 Analyzer 的增益分析没有意义，直接跳过。
-
-其他模式，Layer 3 **仅对以下类型的用例运行**，其他类型跳过：
-- `happy_path`（正常路径用例）
-- `e2e`（端到端用例）
-
-```
-❌ 对所有用例跑 Comparator（浪费时间）
-✅ 仅对 happy_path + e2e 用例跑 Comparator
-
-quick 模式（8-10 个用例）中，happy_path + e2e 通常 2-3 个
-→ Comparator 只运行 2-3 次，而非 8-10 次
-
-smoke 模式：Layer 3 完全跳过，节省 1-3 分钟
-```
-
-> **为什么不对所有用例跑 Comparator**：Comparator 的核心价值在于发现「主流程」上 with_skill vs without_skill 的质量差异。边界/负向/鲁棒性用例的对比意义有限（这些场景下 without_skill 本来就表现差），做了也是噪音。
-
-- **Comparator**：盲测对比两个输出的质量胜负。
-- **Analyzer**：定位胜负原因，生成改进建议。
-
-**⚡ Comparator/Analyzer 必须非阻塞启动（速度关键约束）**：
-
-Comparator 和 Analyzer 是独立 subagent，启动后主流程**不得等待其完成**，应立即继续处理下一批用例：
-
-```
-✅ 正确做法（非阻塞）：
-   Grader(batch-1) 完成 → 启动 Comparator(batch-1) [非阻塞，后台运行]
-                         → 同时继续 Grader(batch-2) / Executor(batch-3)
-   等所有批次和 Grader 全部完成后，进入阶段五前，再收集所有 Comparator/Analyzer 的结果
-
-❌ 错误做法（阻塞）：
-   Grader(batch-1) 完成 → 等 Comparator(batch-1) → 等 Analyzer(batch-1) → 才启动下一批
-```
-
-> **为什么安全**：阶段五（报告生成）只需要 Comparator/Analyzer 的输出（comparison.json / analysis.json），不影响其他批次的执行和 Grader 评审。只需在进入阶段五之前确认所有 Comparator/Analyzer 已完成即可。
+**禁止在上下文中保留**：完整 grading.json、完整 transcript、Grader 逐条 evidence 原文。
 
 ---
 
-## 阶段五：生成报告与发布决策
+## 四、并行度审计规范（sentry-executor 每批完成后执行）
 
-### 测评模式运行次数规范（P3）
-
-每种模式的运行次数下限是为了保证基本的可重现性判断：
-
-| 模式 | 覆盖率目标 | **用例数上限** | 每用例最少运行次数 | 稳定性判断 |
-|------|----------|------------|----------------|----------|
-| **smoke** | ≥ 20% | **4-5 个** | **1 次** | 仅判断核心路径是否崩溃，不出具发布决策 |
-| **quick** | ≥ 40% | **8-10 个** | **2 次** | 两次通过率差距 > 15% → 报告标红「结果不稳定」，建议升级 standard |
-| **standard** | ≥ 70% | 20-25 个 | 3 次 | 计算 Stddev，对照准入阈值 |
-| **full** | ≥ 90% | 30-35 个 | 3 次 | 计算 Stddev，对照准入阈值（S/A 级要求 < 0.05） |
-
-> **smoke 模式的适用场景**：Skill 开发迭代中修改了某条规则，只需验证"主流程没有崩"，不需要统计置信度。smoke 模式只跑 4-5 个 happy_path + 核心原子用例、每个只跑 1 次，**不出具 PASS/FAIL 发布决策**，仅输出「冒烟通过 / 冒烟失败」结论，适合高频开发循环使用。
-
-> **quick 模式用例数控制在 8-10 个的理由**：quick 模式的核心价值是「快速反馈」。超过 10 个用例后，每新增一个用例带来的覆盖率收益递减（因为主要路径已被前 8 个覆盖），但时间线性增加。8-10 个用例约覆盖 40-50% 路径，足够完成冒烟测试。
-
-**quick 模式 2 次运行的处理规则**：
-- 两次通过率均值作为最终通过率（不是取最优）
-- 两次差距 = |run1_pass_rate - run2_pass_rate|
-- 差距 > 15%：报告关键指标区域标红，标注「⚠️ 结果不稳定（两次差距 [X]%），建议升级 standard 模式」
-- 差距 ≤ 15%：正常展示，标注「quick 2次」
-
-### 发布准入标准 (Admission Criteria)
-
-| 指标 | S级 | A级 | B级 | C级 |
-|------|-----|-----|-----|-----|
-| 通过率 | ≥ 95% | ≥ 90% | ≥ 80% | ≥ 70% |
-| 增益 (Δ) | > 0 | > 0 | ≥ -5% | - |
-| 触发率（AI估算） | TP ≥ 80% | TP ≥ 80% | TP ≥ 70% | 参考 |
-| P95 响应时间 | < 15s | < 15s | < 30s | < 30s |
-
-**触发率说明**：触发率为 AI 模拟估算，按以下规则处理：
-
-| 情况 | S/A 级处理 | B/C 级处理 |
-|------|----------|----------|
-| TP 估算 ≥ 80%，置信度 high/medium | 正常（参考值，标注）| 正常 |
-| TP 估算 ≥ 80%，置信度 low | **强制降为 CONDITIONAL PASS**，注明「触发率估算置信度不足，建议精确测量」 | 警告标注 |
-| TP 估算 70-80% | 警告标注，建议优化 description | 警告标注 |
-| TP 估算 < 70% | **强制降为 CONDITIONAL PASS**，注明「触发率估算不足，须优化 description 后重测」 | 同左 |
-| TN 有误触发预测 | **强制降为 CONDITIONAL PASS**，标红 | 警告标注 |
-
-> 精确测量路径（适用于 S/A 级正式发布前）：使用 skill-creator run_eval.py（需 claude CLI）。
-
-### 报告中新增章节
-
-在现有报告结构后，追加「触发率预评估」章节：
-```
-十一、触发率预评估（AI 模拟）
-  - TP 估算触发率：[XX]%（[N]/[N] 条应触发场景）
-  - TN 估算不触发率：[XX]%（[N]/[N] 条不应触发场景）
-  - 边界情况：[N] 条，其中 [N] 条 uncertain
-  - 整体置信度：[high/medium/low]
-  - ⚠️ 免责声明：此为 AI 模拟估算，精确数据需 skill-creator run_eval.py
+```python
+# 判定逻辑（伪代码）
+start_gap = abs(eval.with_skill.start_ms - eval.without_skill.start_ms)
+parallel = start_gap <= 30_000  # 30秒内视为并行
+batch_parallel_rate = parallel_count / total_count
 ```
 
-**效率层指标汇总**（来自 timing.json 聚合）：
-```
-十二、效率指标
-  - P50 响应时间：[XX]ms
-  - P95 响应时间：[XX]ms（准入阈值：[XX]s）
-  - 平均 Token 消耗：[XX] tokens/用例
-  - Token 效率比：[Δ通过率 / 额外Token消耗]
-```
+触发规则：
 
-### 阶段五额外执行 — 效率维度诊断（P2 级别）
-
-> **学术依据**：Kapoor et al.（*AI Agents That Matter*, arXiv:2407.01502, 2024）指出：Agent 普遍过度复杂，准确率相近时成本差异可达数十倍。SkillSentry 将效率纳入测评，防止「功能正确但过度昂贵」的 Skill 上线。
-
-在阶段五汇总指标时，额外执行以下三项效率诊断：
-
-```
-E-1：Token 消耗合理性
-  额外 Token 消耗 = with_skill均值 - without_skill均值
-  如果额外消耗 > 2000 tokens/用例 且 Δ < 10%：
-    → 报告标注 ⚠️「Token 效率偏低：额外消耗 [X] tokens，增益仅 [X]%，建议精简 SKILL.md」
-
-E-2：工具调用次数合理性（仅 mcp_based）
-  如果平均调用次数 > 预期次数的 1.5 倍：
-    → 报告标注 ⚠️「工具调用疑似冗余：平均 [X] 次，建议检查是否有重复调用」
-
-E-3：复杂度自检
-  复杂度得分 = SKILL.md行数/50 + 模块数×2 + 硬性规则数×0.5
-  得分 > 20：报告标注 ⚠️「Skill 复杂度偏高（得分 [X]），建议评估是否可精简」
-  得分 > 30：报告标注 ❌「Skill 过度复杂（得分 [X]），建议重构」
-```
-
-**冗余规则自检**（在报告改进建议章节输出）：
-```
-对被测 SKILL.md 中的每条 P1/P2 规则，问：
-「如果删掉这条规则，会出现什么问题？」
-如果答案是「可能没问题」→ 该规则是冗余候选，标注供人工复核。
-```
+| 并行率 | 动作 |
+|--------|------|
+| ≥ 80% | 正常继续 ✓ |
+| 50-80% | 下批声明前额外输出警告 |
+| < 50% | 暂停，列出所有串行用例的 start_gap，询问用户是否继续 |
 
 ---
 
-## ⚡ 报告模板预加载（阶段四执行期间后台执行）
+## 五、Grader 使用规范（SkillSentry 内部，适用所有工作流）
 
-`references/report-template.md` 的读取**不得等到阶段五才触发**，应在以下时机提前加载：
+- 每次 Grader 调用必须传入 **≥ 2 个用例** transcript（唯一例外：整批只剩最后 1 个）
+- 使用 `explore` subagent 类型（只读，无需写权限）
+- transcript 精简传输：只传 `[tool_calls]` 区块 + response.md 全文，截断超 500 字的 JSON 返回体
+- 启动前输出：`【Grader 启动声明】本次传入：eval-[X], eval-[Y]（共 [N] 个用例）`
 
-```
-触发时机：第一批 Executor 全部完成（即阶段四开始后约 1-2 分钟）时，
-         在等待 Grader 评审的同时，后台读取 report-template.md 缓存到上下文。
+---
 
-等效于：
-  阶段四执行中（后台）：read report-template.md  ←── 新增，并行不阻塞
-  阶段四执行中（前台）：Grader 批量评审 batch-1
-  ...
-  阶段五开始时：report-template.md 已就绪，直接生成报告，无需等待文件读取
-```
+## 六、Comparator/Analyzer 适用范围（standard/full 模式）
 
-**节省估算**：report-template.md 读取约需 10-30 秒（文件较大），预加载后阶段五的启动延迟从 30-60 秒降到 < 5 秒。
+- **仅对** `happy_path` + `e2e` 类型用例运行，其他类型跳过
+- 非阻塞启动，主流程不等待其完成，直接继续下一批
+- smoke 模式完全跳过 Comparator/Analyzer
+- 进入 sentry-report 前，确认所有 Comparator/Analyzer 已完成
 
-> **安全性**：报告模板不依赖测评结果，任何时候读取内容都相同，提前加载不影响正确性。
+---
+
+## 七、报告模板预加载时机
+
+`references/report-template.md` 在第一批 Executor 完成后后台预加载（不阻塞主流程），
+sentry-report 启动时直接使用缓存，无需等待文件读取。
