@@ -2,74 +2,143 @@
 
 > 让每一个上线的 Skill 都经过可追溯、可信赖的真实验证——而不是凭感觉说「应该没问题」。
 
-SkillSentry 是一套专为 AI Skill 发布质量把关而设计的端到端测评系统。从读取 SKILL.md 到输出 HTML 报告，全程自动化，覆盖从触发准确性到行为质量的完整验证链路。
+---
+
+## 5 分钟安装
+
+**前提**：已安装 [Claude Code](https://claude.ai/code)。
+
+**第一步：下载文件**
+
+```bash
+# 克隆或下载整个 SkillSentry 仓库
+git clone https://github.com/xingzaidadi/SkillSentry.git
+```
+
+**第二步：把 6 个目录放到 Claude Code 的 skills 文件夹**
+
+```bash
+# macOS / Linux
+SKILLS_DIR="$HOME/.claude/skills"
+
+cp -r SkillSentry/         "$SKILLS_DIR/"
+cp -r sentry-lint/         "$SKILLS_DIR/"
+cp -r sentry-trigger/      "$SKILLS_DIR/"
+cp -r sentry-cases/        "$SKILLS_DIR/"
+cp -r sentry-executor/     "$SKILLS_DIR/"
+cp -r sentry-report/       "$SKILLS_DIR/"
+```
+
+```powershell
+# Windows（PowerShell）
+$skills = "$env:USERPROFILE\.claude\skills"
+
+foreach ($t in @("SkillSentry","sentry-lint","sentry-trigger","sentry-cases","sentry-executor","sentry-report")) {
+    Copy-Item -Recurse -Force $t "$skills\"
+}
+```
+
+安装完毕。`~/.claude/skills/` 下应该多出这 6 个目录。
 
 ---
 
-## 核心能力
+## 第一次使用（30 秒）
 
-| 能力 | 说明 |
-|------|------|
-| **规则自动提炼** | 从任意 SKILL.md 识别条件判断、数值限制、禁止行为、路由规则 |
-| **Skill 类型自动检测** | 启动时自动识别 mcp_based / text_generation / code_execution，切换对应执行模式 |
-| **7 类用例自动生成** | Happy Path / 原子 / 业务逻辑 / 边界 / 鲁棒性 / 负向 / 一致性 |
-| **断言强度分级** | 断言分精确★ / 语义◆ / 存在性○三级，准入判断只看精确通过率，避免存在性断言虚高结论 |
-| **四层验证体系** | Executor（真实执行）→ Ground Truth（精确校验）→ Grader（独立评审）→ Comparator + Analyzer（盲测对比）|
-| **文件系统隔离** | with_skill / without_skill 各有独立 workspace 沙箱，禁止互相读取，确保 Δ 可信 |
-| **transcript 双分离** | `[tool_calls]`（原始数据）与 `[agent_notes]`（AI 解释）严格分区，Grader 优先引用原始数据 |
-| **触发率预评估** | 阶段一自动运行 AI 模拟，生成 10 条测试 prompt，产出置信度估算；低置信自动降级发布决策 |
-| **效率指标采集** | timing.json 自动读取，报告展示 P50/P95 响应时间和 Token 消耗 |
-| **外部用例导入** | 测评启动时自动创建 `inputs/<Skill名>/` 并告知路径，将 `.cases.md` 放入即可，自动识别为「黄金用例」优先测试 |
-| **跨迭代对比** | 自动检测历史 session 数据，在报告中展示迭代趋势 |
-| **发布决策** | PASS / CONDITIONAL PASS / FAIL，含 S/A/B/C 四级准入阈值 |
+确保你要测的 Skill 放在 `~/.claude/skills/<名字>/SKILL.md`，然后打开 Claude Code，直接说：
+
+```
+测评 <你的Skill名字>
+```
+
+例如：
+
+```
+测评 em-reimbursement-v3
+```
+
+**系统会自动**：
+1. 找到 Skill 文件
+2. 检测上次测评状态，推荐最合适的工作流
+3. 等你确认（或 30 秒后自动开始）
+4. 执行测评，输出报告
+
+**不需要你选模式**。系统根据当前状态自动推荐：
+
+| 你的情况 | 系统推荐 | 时间 |
+|---------|---------|------|
+| 第一次测这个 Skill | quick（完整流程） | ~15-20 分钟 |
+| 改了几行规则，验证没崩 | smoke（快速冒烟） | ~5-7 分钟 |
+| 规则没变，用已有用例复跑 | regression（直接跑） | ~5-10 分钟 |
+
+收到推荐后，直接回「开始」，或说「full」「quick」「smoke」换一个。
 
 ---
 
-## 快速开始
+## 常用快捷调用
 
-```
-帮我测一下 my-skill-name
-```
+不想跑完整流程？直接说单工具：
 
-或者指定路径：
-
-```
-测评这个 skill：/path/to/your-skill/SKILL.md
-```
-
-**SkillSentry 会自动**：
-1. 检测 Skill 类型，选择对应执行模式和文件隔离结构
-2. 创建 `inputs/<Skill名>/` 素材目录，并**主动告知完整路径**——你只需把测试文件放进去即可
-3. 运行触发率 AI 模拟预评估
-4. 扫描 `inputs/<Skill名>/` 下的素材和自定义用例
-5. 引导你选择测评模式（quick / standard / full）
-6. 执行测评，生成 HTML 报告，给出发布决策
+| 说这个 | 做这个 | 时间 |
+|--------|--------|------|
+| `检查结构 <Skill名>` | 静态检查 HiL、复杂度、冗余规则 | ~30 秒 |
+| `测触发率 <Skill名>` | 验证 description 触发是否准确 | ~2 分钟 |
+| `设计用例 <Skill名>` | 只出 evals.json，不执行 | ~5-10 分钟 |
+| `出报告` | 基于已有结果生成报告 | ~1 分钟 |
 
 ---
 
-## 测评模式
+## 放入自己的测试素材（可选）
 
-| 模式 | 覆盖率目标 | 每用例运行次数 | 适用场景 |
-|------|----------|------------|---------|
-| **quick** | ≥ 40% | 2 次（取均值，差距 >15% 报告标红） | 快速冒烟、Bug 修复验证 |
-| **standard** | ≥ 70% | 3 次 | 常规迭代发布（推荐） |
-| **full** | ≥ 90% | 3 次 | S/A 级关键业务正式发布 |
+测评启动后，系统会自动创建：
+
+```
+~/.claude/skills/SkillSentry/inputs/<Skill名>/
+```
+
+把以下文件放进去，系统会自动识别并纳入测评：
+
+| 文件类型 | 用途 |
+|---------|------|
+| `*.cases.md` | 自定义测试用例（格式见 `references/custom-cases-template.md`） |
+| `*.pdf` / `*.png` | 测试素材（发票、截图等），供测试用例引用 |
 
 ---
 
-## 执行可信度设计
+## 工作流一览
 
-SkillSentry 通过以下机制保障测评结论的可信度，而不是依赖 AI「感觉正确」：
+| 工作流 | 工具链 | 时间 | 适用场景 |
+|--------|--------|------|---------|
+| smoke | cases(4-5个) → executor(1次) → grader → report | 5-7 分钟 | 改了规则，快速确认没崩 |
+| quick | cases → executor(2次) → grader → report | 15-20 分钟 | 迭代完成，准备提测 |
+| regression | executor(已有用例) → grader → report | 5-10 分钟 | 规则没变，复跑基准 |
+| standard | cases → executor(3次) → grader → comparator → report | 30-45 分钟 | 重要迭代正式提测 |
+| full | lint → trigger → cases → executor(3次) → grader → comparator → analyzer → report | 45 分钟+ | 正式发布前全量验证 |
 
-**文件系统隔离**：with_skill 和 without_skill 各自运行在独立 workspace 沙箱中，禁止跨目录读取。审计发现若不隔离，without_skill 会「借用」with_skill 上传的文件，导致 Δ 被系统性低估。
+---
 
-**transcript 双分离格式**：执行日志强制分为 `[tool_calls]`（MCP/Bash 原始返回，一字不改）和 `[agent_notes]`（AI 主观解释）两个区块。Grader 优先引用 `[tool_calls]` 作为 evidence，只有 `[agent_notes]` 支撑而无 `[tool_calls]` 佐证的断言直接判 FAIL。
+## 报告怎么看
 
-**断言强度分级**：每条断言标注 `precision`（精确★ / 语义◆ / 存在性○），准入判断只看精确断言通过率。存在性断言（如「输出非空」）不计入准入，避免通过率虚高。
+测评完成后输出：
 
-**quick 双次运行**：quick 模式强制运行 2 次取均值，两次差距 > 15% 时报告标红「结果不稳定」，发布决策自动降为 CONDITIONAL PASS。
+```
+发布决策：PASS S级 / CONDITIONAL PASS / FAIL
 
-**触发率置信度门槛**：触发率 AI 估算置信度 low、TP 估算 < 70% 或 TN 有误触发时，S/A 级发布决策强制降为 CONDITIONAL PASS，不允许静默放行。
+精确通过率：92%（准入依据）
+语义通过率：88%（参考）
+P95 响应时间：8.2s
+```
+
+**只看精确通过率**——存在性断言（如「输出非空」）不计入准入，避免虚高。
+
+| 等级 | 精确通过率 | 含义 |
+|------|----------|------|
+| S | ≥ 95% | 可直接发布 |
+| A | ≥ 90% | 可发布 |
+| B | ≥ 80% | 建议修复后发布 |
+| C | ≥ 70% | 需修复 |
+| FAIL | < 70% | 不可发布 |
+
+完整报告保存为 HTML，路径在输出末尾提示。
 
 ---
 
@@ -77,88 +146,50 @@ SkillSentry 通过以下机制保障测评结论的可信度，而不是依赖 A
 
 ```
 SkillSentry/
-├── SKILL.md                    # 主定义文件（AI 执行规程）
+├── SKILL.md                    # 主编排器（AI 执行规程）
 ├── README.md                   # 本文件
 ├── agents/
-│   ├── grader.md               # 独立评审 Agent（支持3种 Skill 类型 + 断言强度分级）
+│   ├── grader.md               # 独立评审 Agent
 │   ├── comparator.md           # 盲测对比 Agent
 │   └── analyzer.md             # 根因分析 Agent
 ├── references/
-│   ├── eval-dimensions.md      # 9 层测评维度详解
-│   ├── admission-criteria.md   # S/A/B/C 发布准入阈值表（含断言分级规则）
-│   ├── case-matrix-templates.md # 7 类用例 + 断言写法模板
-│   ├── report-template.md      # 12 章 HTML 报告模板
-│   ├── custom-cases-template.md # 自定义用例填写模板
-│   └── skill-creator-capability-notes.md # 与 skill-creator 的能力关系说明
-├── scripts/
-│   └── generate_html_report.py # HTML 报告生成脚本
-├── inputs/                     # 各 Skill 测评素材（测评启动时自动创建对应子目录并告知路径）
-│   └── <skill-name>/           # SkillSentry 自动创建，放入 PDF、图片、.cases.md 等测试素材
+│   ├── eval-dimensions.md      # 测评维度详解
+│   ├── admission-criteria.md   # 发布准入阈值
+│   ├── case-matrix-templates.md
+│   ├── report-template.md
+│   ├── custom-cases-template.md
+│   └── execution-phases.md     # 工具间数据接口定义
+├── inputs/                     # 测评素材（测评启动时自动创建子目录）
 └── sessions/                   # 测评结果（自动生成，永不覆盖）
-    └── <skill-name>/<date>_NNN/
+```
+
+独立工具目录（安装在同级）：
+
+```
+~/.claude/skills/
+├── sentry-lint/      # 静态结构检查
+├── sentry-trigger/   # 触发率评估
+├── sentry-cases/     # 用例设计
+├── sentry-executor/  # 用例执行
+└── sentry-report/    # 报告生成
 ```
 
 ---
 
-## 模型路由（可选，锦上添花）
+## 常见问题
 
-SkillSentry 默认使用单一模型完成所有角色（执行、评审、对比）。这在绝大多数场景下已经足够可信，原因如下：
+**Q：测评的 Skill 必须有 MCP 工具吗？**
+A：不是。`sentry-lint` 和 `sentry-trigger` 纯静态分析，不需要任何工具连接。`sentry-executor` 执行时会调用 Skill 定义的工具，Skill 没有工具就测文本生成能力。
 
-**为什么单模型已经足够？**
+**Q：第一次跑要多久？**
+A：quick 模式约 15-20 分钟。之后如果 SKILL.md 没有改动，regression 模式只需 5-10 分钟。
 
-1. **上下文天然隔离**：OpenCode 的每个 subagent 都运行在全新的、独立的上下文中，不继承任何父级对话历史（来源：[OpenCode Agents 文档](https://opencode.ai/docs/agents/)）。Grader 启动时完全不知道 transcript 是谁生成的，「自我评审」这件事在上下文层面就已经不存在。
-2. **核心断言是事实判断，不是风格判断**：SkillSentry 的准入判断依赖 `exact_match` 精确断言（如「docStatus 字段值是否等于 10」）。这类判断没有风格偏好空间，无论哪个模型来评审，结论是一样的。
-3. **Self-Preference Bias 的适用场景不符**：学术研究（Zheng et al. 2023, MT-Bench, arXiv:2306.05685）揭示的模型自我偏好，主要出现在「开放式内容质量评分」场景，而不是结构化事实校验场景。
+**Q：能测自己写的任何 Skill 吗？**
+A：能，只要有 `SKILL.md` 文件。SkillSentry 会自动识别 Skill 类型（mcp_based / text_generation / code_execution）并切换对应执行模式。
 
-**异构模型有没有任何价值？**
-
-有，但很有限，仅在一个场景有微弱收益：**Comparator（盲测对比）对纯文本生成型 Skill 的主观质量评分**。这类断言是 semantic 级别，确实存在风格偏好空间。但 Comparator 的结论在报告里属于参考性指标，不是发布决策的硬性依据。
-
-**结论：不配置也没问题，配了也没坏处。**
-
-如果你有多厂商 API Key 且希望追求极致的评审独立性，可以按以下方式配置。配置后 Grader subagent 会使用你指定的模型，其余逻辑完全不变。
-
-### 配置方式（仅供参考）
-
-**Step 1：添加第二个 Provider 的 API Key**
-
-在 OpenCode TUI 里执行 `/connect`，选择对应 Provider，输入 API Key。Key 安全存储在 `~/.local/share/opencode/auth.json`，不会出现在任何配置文件里：
-
-```
-/connect
-```
-
-**Step 2：在 `opencode.json` 里定义专用 Agent**
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "agent": {
-    "skillsentry-grader": {
-      "description": "SkillSentry 评审层：独立审计 transcript，输出 grading.json",
-      "mode": "subagent",
-      "model": "openai/gpt-4o",
-      "hidden": true,
-      "temperature": 0.1,
-      "permission": {
-        "edit": "deny",
-        "bash": "deny"
-      }
-    }
-  }
-}
-```
-
-> `opencode.json` 只写模型和权限配置，不写任何 Key，可以安全提交到 git。
+**Q：测评结果存在哪里？**
+A：`SkillSentry/sessions/<Skill名>/<日期>_<序号>/`，永不覆盖，可以对比不同版本的测评结果。
 
 ---
 
-| 局限 | 说明 |
-|------|------|
-| 触发率精确测量 | 当前为 AI 模拟估算；精确测量需 claude CLI + skill-creator `run_eval.py` |
-| description 自动优化 | 依赖触发率精确测量，待后续集成 |
-| 实时 live report | 当前报告在测评完成后生成 |
-
----
-
-*Last Updated: 2026-03-26*
+*Last Updated: 2026-04-09*
