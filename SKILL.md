@@ -203,14 +203,45 @@ trigger_eval.json → sentry-report 读取（full 模式）
 comparison.json → sentry-report 读取（standard/full 模式）
 ```
 
-**Grader 规则**（内部使用，适用所有非 smoke 工作流）：
+**Grader 规则**（内部使用）：
 - 每次调用必须传入 ≥ 2 个用例的 transcript（smoke 除外）
 - 使用 `explore` subagent 类型（只读，更快）
 - 详细规范见 `agents/grader.md`
 
+**Grader 调度模式**（流水线执行）：
+
+| 工作流 | Grader 调度 | 原因 |
+|--------|------------|------|
+| smoke | 同步等待（阻塞） | 用例少（4-5个），流水线收益低 |
+| quick / regression / standard / full | **后台非阻塞启动** | 多批次执行，重叠 Grader 与下一批 Executor |
+
+**非阻塞模式执行顺序**：
+```
+每批 Executor 完成
+  → 并行审计（写 eval_environment.json）
+  → 启动该批 Grader（后台，不等待）
+  → 立即启动下一批 Executor          ← 不再等 Grader 完成
+
+Grader 后台完成时（task notification）
+  → 上下文压缩（该批摘要）
+  → 若处于下一批 Executor 执行中，压缩操作在下一批启动声明之后处理
+```
+
+**进入 sentry-report 前的强制等待点**：
+```
+所有 Executor 批次完成后：
+  检查所有 eval-N/grading.json 是否存在且非空
+  → 全部就绪 → 立即启动 sentry-report
+  → 有未完成 → 输出「⏳ 等待 Grader 完成（已完成 N/M）」
+               每 30 秒检查一次
+               最长等待 10 分钟
+               超时则输出告警并跳过未完成的 eval
+```
+
 **Comparator/Analyzer**（standard/full 模式）：
 - 仅对 happy_path + e2e 类型用例运行
 - 非阻塞启动，不等待其完成再进行下一批
+- 同样在进入 sentry-report 前确认完成
 
 ---
 

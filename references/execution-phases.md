@@ -100,9 +100,11 @@
 
 ---
 
-## 三、Grader 上下文压缩规范（每批 Grader 完成后执行）
+## 三、Grader 上下文压缩规范
 
-每批 Grader 完成后，主 agent 将详细评审结果**压缩为紧凑摘要**，只在上下文保留摘要：
+**触发时机**（流水线模式下）：每个后台 Grader 完成时（收到 task notification）立即压缩该批结果，不等待其他批次。若通知在下一批 Executor 执行期间到达，完成当前批次启动声明后再处理压缩。smoke 模式（同步 Grader）保持原有「完成后立即压缩」逻辑。
+
+每个 Grader 后台任务完成后，主 agent 将详细评审结果**压缩为紧凑摘要**，只在上下文保留摘要：
 
 **压缩格式**（每 eval ≤ 1 行）：
 ```
@@ -141,6 +143,11 @@ batch_parallel_rate = parallel_count / total_count
 - 使用 `explore` subagent 类型（只读，无需写权限）
 - transcript 精简传输：只传 `[tool_calls]` 区块 + response.md 全文，截断超 500 字的 JSON 返回体
 - 启动前输出：`【Grader 启动声明】本次传入：eval-[X], eval-[Y]（共 [N] 个用例）`
+
+**调度行为**：
+- smoke：同步启动，等待完成后再执行后续步骤
+- quick / regression / standard / full：后台非阻塞启动，每批 Executor 完成后立即触发，无需等待上一批 Grader 结束
+- 所有 Grader 的最终完成检查在 sentry-report 启动前统一执行（由 SKILL.md 强制等待点保障）
 
 ---
 
