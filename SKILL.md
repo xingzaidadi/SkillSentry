@@ -39,35 +39,7 @@ description: >
 
 ---
 
-## Step 1：工作流路由
-
-根据用户输入，路由到对应工作流：
-
-### 预设工作流
-
-| 用户说 | 工作流 | 工具链 | 预计时间 |
-|--------|--------|--------|---------|
-| `smoke 测评` / `冒烟` / `快速看看` | **smoke** | cases(4-5个) → executor(1次,with_skill) → grader → report | ~5-7min |
-| `一次测评` / `quick` / `迭代完了测一下` | **quick** | cases → executor(2次) → grader → report | ~15-20min |
-| `迭代测评` / `regression` / `改了规则再跑` | **regression** | executor(golden only) → grader → report | ~5-10min |
-| `standard 测评` / `提测前` | **standard** | cases → executor(3次) → grader → comparator → analyzer → report | ~30-45min |
-| `full 测评` / `正式发布前` / `全量` | **full** | lint → trigger → cases → executor(3次) → grader → comparator → analyzer → report | 45min+ |
-
-### 单工具路由
-
-| 用户说 | 直接调用 |
-|--------|---------|
-| `只检查结构` / `lint` | sentry-lint only |
-| `只测触发率` / `trigger` | sentry-trigger only |
-| `只设计用例` / `只出 cases` | sentry-cases only |
-| `用现有用例跑` / `跳过用例设计` | executor → grader → report |
-| `出报告` / `看结果` | sentry-report only（需已有 grading.json） |
-
-**OpenClaw 简化语法**：`测评 skill-name smoke` / `测评 skill-name quick 自动`（跳过确认）
-
----
-
-## Step 2：初始化工作目录
+## Step 1：定位被测 Skill + 初始化工作目录
 
 **Skill 查找优先级**：
 1. 用户提供路径 → 直接使用
@@ -80,25 +52,82 @@ workspace_dir = <SkillSentry路径>/sessions/<被测Skill名>/<YYYY-MM-DD>_<NNN>
 inputs_dir    = <SkillSentry路径>/inputs/<被测Skill名>/
 ```
 
-告知用户：
+---
+
+## Step 2：智能工作流推断
+
+### 优先级一：单工具调用（用户明确指定，直接执行，跳过推断）
+
+| 用户说 | 直接调用 | 时间 |
+|--------|---------|------|
+| `检查结构` / `lint` / `有没有HiL问题` | sentry-lint | ~30s |
+| `测触发率` / `description准不准` | sentry-trigger | ~2min |
+| `只设计用例` / `先出 cases 我来看` | sentry-cases | ~5-10min |
+| `用现有用例跑` / `跳过用例设计` | executor → grader → report | ~10-15min |
+| `出报告` / `通过了吗` / `看结果` | sentry-report（需已有 grading.json）| ~1min |
+
+### 优先级二：用户显式指定工作流（直接使用，跳过推断）
+
+| 用户说 | 工作流 | 工具链 | 预计时间 |
+|--------|--------|--------|---------|
+| `smoke` / `冒烟` | smoke | cases(4-5个) → executor(1次,with_skill) → grader → report | ~5-7min |
+| `quick` | quick | cases → executor(2次) → grader → report | ~15-20min |
+| `regression` | regression | executor(golden only) → grader → report | ~5-10min |
+| `standard` / `提测前` | standard | cases → executor(3次) → grader → comparator → report | ~30-45min |
+| `full` / `正式发布前` | full | lint → trigger → cases → executor(3次) → grader → comparator → analyzer → report | 45min+ |
+
+### 优先级三：上下文推断（用户只说「测评 xxx」，系统自动判断）
+
+用户未指定工作流时，计算 SKILL.md 的 MD5，对比缓存状态，推断最合适的工作流：
+
 ```
-✅ 已找到被测 Skill：<名称>，路径：<完整路径>
-📂 工作流：<选中的工作流名称>
-🛠️ 工具链：<工具列表>
-⏱️ 预计时间：<时间>
+Step 1：计算当前 SKILL.md 的 MD5
+  python3 -c "import hashlib,sys; print(hashlib.md5(open(sys.argv[1],'rb').read()).hexdigest())" <skill_path>/SKILL.md
+
+Step 2：读取 inputs_dir/rules.cache.json
+
+推断逻辑：
+  ┌─ rules.cache.json 不存在
+  │     → 从未测过，推断：quick（首次测评需完整流程）
+  │
+  ├─ hash 不匹配（SKILL.md 有变更）
+  │     → 规则变了，推断：smoke（先快速验证核心路径是否崩溃）
+  │
+  └─ hash 匹配（SKILL.md 未变）
+        ├─ cases.cache.json 存在 → 推断：regression（规则和用例都没变，直接跑）
+        └─ cases.cache.json 不存在 → 推断：quick（规则没变但用例还没设计）
 ```
+
+### Step 2 完成后：输出确认提示（必须等用户确认或超时后再执行）
+
+```
+✅ 已找到被测 Skill：<名称>（<路径>）
+
+📊 状态检测：
+  规则缓存：[命中，hash: <前8位> / 未命中（SKILL.md 已变更）/ 首次测评]
+  用例缓存：[命中，共 <N> 个用例 / 不存在]
+
+→ 推荐工作流：<工作流名>
+   原因：<一句话说明推断依据>
+   工具链：<工具列表>
+   预计时间：<时间>
+
+直接回复「开始」或不回复则 30 秒后自动开始。
+如需调整，说：「full」「quick」「smoke」「regression」「lint」
+```
+
+**OpenClaw 模式**：简化语法 `测评 skill-name quick 自动` 跳过确认，直接执行。
 
 ---
 
-## Step 3：规则缓存检查（regression 模式跳过）
+## Step 3：规则缓存写入（推断完成后，执行前）
 
-```bash
-python3 -c "import hashlib,sys; print(hashlib.md5(open(sys.argv[1],'rb').read()).hexdigest())" <skill_path>/SKILL.md
-```
-
-检查 `inputs_dir/rules.cache.json`：
-- 命中 → 「⚡ 规则缓存命中，跳过规则提炼」
-- 未命中 → 正常提炼，写入 `rules.cache.json`
+推断阶段已读取 rules.cache.json，执行阶段根据命中状态决定：
+- 命中 → 直接加载规则列表，跳过规则提炼
+- 未命中 → 执行规则提炼，完成后写入 `rules.cache.json`：
+  ```json
+  { "skill_hash": "<md5>", "extracted_at": "<ISO时间>", "rules": [...] }
+  ```
 
 ---
 
