@@ -29,12 +29,37 @@ description: >
 
 ---
 
-## Step 0：检测运行环境
+## Step 0：检测运行环境 + 特殊命令处理
 
 ```
 触发消息来自飞书/Telegram 等聊天工具？
   → 是：runtime = "openclaw"，启用飞书进度推送
-  → 否：runtime = "opencode"，正常输出终端
+  → 否：runtime = "claude_code / opencode"，正常输出终端
+```
+
+**特殊命令（识别后直接执行，跳过后续步骤）**：
+
+| 用户说 | 动作 |
+|--------|------|
+| `验证安装` / `验证 SkillSentry 安装` | 检查所有 sentry-* 工具是否存在，逐一列出状态 |
+
+验证安装输出格式：
+```
+🔍 SkillSentry 安装状态检查
+
+平台：Claude Code（~/.claude/skills/）
+  ✅ SkillSentry
+  ✅ sentry-lint
+  ✅ sentry-trigger
+  ✅ sentry-cases
+  ✅ sentry-executor
+  ✅ sentry-report
+
+平台：OpenCode（~/.config/opencode/skills/）
+  ✅ SkillSentry
+  ❌ sentry-cases（未找到）← 示例
+
+如有缺失，重新运行 install.sh / install.ps1 即可。
 ```
 
 ---
@@ -45,6 +70,40 @@ description: >
 1. 用户提供路径 → 直接使用
 2. 用户只说名字 → `~/.claude/skills/<名字>/` → `~/.config/opencode/skills/<名字>/`
 3. 「测评这个 skill」→ 当前工作目录下的 SKILL.md
+
+**找不到时的友好提示（禁止直接报错退出）**：
+```
+❌ 找不到 Skill：<名字>
+
+已搜索以下路径：
+  • ~/.claude/skills/<名字>/SKILL.md
+  • ~/.config/opencode/skills/<名字>/SKILL.md
+
+请确认：
+  1. Skill 名字拼写是否正确？
+  2. SKILL.md 是否放在上述目录之一？
+  3. 或直接提供完整路径：「测评 /path/to/your-skill/SKILL.md」
+```
+
+**MCP 工具可用性预检（仅 mcp_based Skill，执行工作流前自动运行）**：
+
+读取被测 SKILL.md，检测 Skill 类型（mcp_based / text_generation / code_execution）：
+
+```
+mcp_based → 列出 SKILL.md 中引用的工具名（如 saveExpenseDoc、uploadFile 等）
+           → 尝试调用一次 list_tools 或读取当前可用工具列表
+           → 对比：引用工具 vs 当前可用工具
+
+预检通过：✅ 所有 MCP 工具可用，继续执行
+预检失败：
+  ⚠️ 以下工具当前不可用：[工具名列表]
+  可能原因：MCP server 未启动 / 未配置 / 权限问题
+  选项：
+    [继续] 跳过预检强制执行（结果可能不准确）
+    [中止] 先确认 MCP 环境再测评
+```
+
+text_generation / code_execution → 跳过预检
 
 工作路径：
 ```
@@ -111,6 +170,7 @@ Step 2：读取 inputs_dir/rules.cache.json
    原因：<一句话说明推断依据>
    工具链：<工具列表>
    预计时间：<时间>
+   Token 预估：<smoke:~1-2万 / quick:~5-10万 / regression:~3-5万 / full:~15-20万>
 
 直接回复「开始」或不回复则 30 秒后自动开始。
 如需调整，说：「full」「quick」「smoke」「regression」「lint」
