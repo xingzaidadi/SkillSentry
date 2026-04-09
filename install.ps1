@@ -87,5 +87,14 @@ foreach ($target in $Targets) {
 Verify-Install
 
 Write-Host ""
-Write-Host "使用方式：Claude Code / OpenCode 中直接说：「测评 <你的Skill名>」"
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor White
+Write-Host "快速开始（直接复制到 Claude Code / OpenCode）：" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  检查结构 <Skill名>      ← 30 秒，先做这个热个身"
+Write-Host "  测评 <Skill名>          ← 系统自动推荐工作流，不用选"
+Write-Host ""
+Write-Host "不知道 Skill 名？把 SKILL.md 放到："
+Write-Host "  Claude Code：  ~\.claude\skills\<Skill名>\SKILL.md"
+Write-Host "  OpenCode：     %APPDATA%\opencode\skills\<Skill名>\SKILL.md"
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor White
 Write-Host ""

@@ -81,6 +81,14 @@ done
 verify
 
 echo ""
-echo "使用方式："
-echo "  Claude Code / OpenCode 中直接说：「测评 <你的Skill名>」"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "快速开始（直接复制到 Claude Code / OpenCode）："
+echo ""
+echo "  检查结构 <Skill名>      ← 30 秒，先做这个热个身"
+echo "  测评 <Skill名>          ← 系统自动推荐工作流，不用选"
+echo ""
+echo "不知道 Skill 名？把 SKILL.md 放到："
+echo "  Claude Code：  ~/.claude/skills/<Skill名>/SKILL.md"
+echo "  OpenCode：     ~/.config/opencode/skills/<Skill名>/SKILL.md"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
