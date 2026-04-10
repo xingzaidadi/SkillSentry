@@ -90,6 +90,35 @@ E-3：复杂度（从 execution-phases 数据中读取，若有）
 
 ---
 
+## Step 4.5：历史趋势对比
+
+读取 `inputs/<Skill名>/history.json`（若存在），对比本次结果与历史：
+
+```
+历史记录存在（≥ 2 条）时，输出趋势区块：
+
+  📈 历史趋势（最近 5 次 quick/standard/full，不含 smoke）
+  ─────────────────────────────────────────
+  日期        模式     精确通过率  Δ       判决
+  2026-04-03  quick    75.0%   +3.2%   B
+  2026-04-07  quick    78.5%   +4.1%   B
+  2026-04-10  quick    83.0%   +5.0%   A   ← 本次
+  ─────────────────────────────────────────
+  趋势：精确通过率 ↑ 持续上升（+8.0% over 3 runs）
+```
+
+**趋势判断规则**：
+- 取同类型模式（quick 对比 quick）最近 5 条记录
+- 比较首尾值，差距 > 5% 视为显著趋势
+- 连续 2 次下降 → ⚠️ 标红「质量趋势下降」
+- 连续 3 次稳定（差距 < 3%）→ ✅「质量稳定」
+
+**smoke 模式**：历史趋势区块显示但不影响发布决策，仅展示最近 3 次 smoke 结果。
+
+**首次测评或历史数据 < 2 条**：输出「📝 首次测评，建立历史基线」，不输出趋势。
+
+---
+
 ## Step 5：生成报告
 
 读取 `~/.claude/skills/SkillSentry/references/report-template.md`，填充以下章节：
@@ -97,19 +126,53 @@ E-3：复杂度（从 execution-phases 数据中读取，若有）
 ```
 一、测评概览（Skill名/模式/日期/总用例数）
 二、核心指标（精确/语义/综合通过率 + 等级）
-三、用例覆盖（类型分布饼图文字描述）
-四、失败用例分析（grading.json 中 passed=false 的断言列表）
-五、增益分析（with vs without Δ，若有 Comparator 结果则附上）
-六、HiL 合规检查（来自 grading.json 中的 HiL 断言）
-七、效率指标（P50/P95 响应时间，Token 消耗）
-八、改进建议（来自 Grader eval_feedback + Analyzer analysis.json）
-九、发布决策（PASS/CONDITIONAL PASS/FAIL + 等级）
-十、下一步行动（具体可执行的改进项）
-十一、触发率预评估（若有 trigger_eval.json）
-十二、效率诊断（E-1/E-2/E-3 结果）
+三、历史趋势（折线图：最近 10 次精确通过率，来自 history.json）← 新增
+四、用例覆盖（类型分布饼图文字描述）
+五、失败用例分析（grading.json 中 passed=false 的断言列表）
+六、增益分析（with vs without Δ，若有 Comparator 结果则附上）
+七、HiL 合规检查（来自 grading.json 中的 HiL 断言）
+八、效率指标（P50/P95 响应时间，Token 消耗）
+九、改进建议（来自 Grader eval_feedback + Analyzer analysis.json）
+十、发布决策（PASS/CONDITIONAL PASS/FAIL + 等级）
+十一、下一步行动（具体可执行的改进项）
+十二、触发率预评估（若有 trigger_eval.json）
+十三、效率诊断（E-1/E-2/E-3 结果）
 ```
 
 保存为 `workspace_dir/report.html`（使用 report-template.md 中的 HTML 模板）。
+
+**历史折线图规范**（嵌入 HTML）：
+```html
+<!-- 用内联 SVG 或 Chart.js CDN，折线图显示精确通过率随时间变化 -->
+<!-- 数据来源：history.json 最近 10 条记录（仅 quick/standard/full 模式） -->
+<!-- X 轴：日期，Y 轴：精确通过率（0-100%），参考线：80%（B 级）和 90%（A 级） -->
+```
+
+---
+
+## Step 6：更新历史记录
+
+报告生成完成后，将本次结果追加到 `inputs/<Skill名>/history.json`：
+
+```bash
+python3 ~/.claude/skills/SkillSentry/scripts/update_history.py \
+  --skill <skill_name> \
+  --session-dir <workspace_dir> \
+  --mode <mode>
+```
+
+若脚本不可用，手动构造条目并追加：
+```json
+{
+  "run_at": "<ISO时间>",
+  "session": "<session目录名>",
+  "mode": "<mode>",
+  "eval_count": <N>,
+  "exact_pass_rate": <0.xx>,
+  "avg_delta": <0.xx>,
+  "verdict": "<S|A|B|C|FAIL>"
+}
+```
 
 ---
 

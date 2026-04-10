@@ -1,0 +1,220 @@
+name: SkillSentry Eval
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/SKILL.md'
+      - '.github/workflows/skill-eval.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/SKILL.md'
+  workflow_dispatch:
+    inputs:
+      skill_name:
+        description: '被测 Skill 名称（留空则自动检测变更的 Skill）'
+        required: false
+      mode:
+        description: '测评模式'
+        required: false
+        default: 'smoke'
+        type: choice
+        options: [smoke, quick]
+
+permissions:
+  checks: write
+  contents: read
+
+jobs:
+  detect-changed-skills:
+    name: 检测变更的 Skill
+    runs-on: ubuntu-latest
+    outputs:
+      skills: ${{ steps.detect.outputs.skills }}
+      has_changes: ${{ steps.detect.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: 检测变更的 SKILL.md 文件
+        id: detect
+        run: |
+          if [ -n "${{ github.event.inputs.skill_name }}" ]; then
+            # 手动触发，使用指定的 Skill
+            SKILLS='["${{ github.event.inputs.skill_name }}"]'
+          else
+            # 自动检测变更的 SKILL.md（排除 SkillSentry 本身和 sentry-* 工具）
+            CHANGED=$(git diff --name-only HEAD~1 HEAD -- '*/SKILL.md' | \
+              grep -v 'SkillSentry/SKILL.md' | \
+              grep -v 'sentry-[^/]*/SKILL.md' | \
+              grep -v 'tools/' | \
+              xargs -I{} dirname {} | \
+              xargs -I{} basename {} | \
+              jq -R . | jq -cs .)
+            SKILLS="$CHANGED"
+          fi
+          echo "skills=$SKILLS" >> $GITHUB_OUTPUT
+          COUNT=$(echo "$SKILLS" | jq 'length')
+          echo "has_changes=$([ $COUNT -gt 0 ] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          echo "检测到变更的 Skill: $SKILLS"
+
+  eval:
+    name: 测评 ${{ matrix.skill }}
+    runs-on: ubuntu-latest
+    needs: detect-changed-skills
+    if: needs.detect-changed-skills.outputs.has_changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        skill: ${{ fromJson(needs.detect-changed-skills.outputs.skills) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Claude Code CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 部署 SkillSentry Skills
+        run: |
+          mkdir -p ~/.claude/skills
+          # 部署主编排器
+          cp -r . ~/.claude/skills/SkillSentry
+          # 部署各原子工具
+          for tool_dir in tools/sentry-*/; do
+            tool_name=$(basename "$tool_dir")
+            mkdir -p ~/.claude/skills/$tool_name
+            cp "$tool_dir/SKILL.md" ~/.claude/skills/$tool_name/SKILL.md
+          done
+          echo "SkillSentry 部署完成"
+
+      - name: 复制被测 Skill 到 skills 目录
+        run: |
+          SKILL_DIR=$(find . -name "SKILL.md" -path "*/${{ matrix.skill }}/SKILL.md" | head -1 | xargs dirname)
+          if [ -n "$SKILL_DIR" ]; then
+            mkdir -p ~/.claude/skills/${{ matrix.skill }}
+            cp "$SKILL_DIR/SKILL.md" ~/.claude/skills/${{ matrix.skill }}/SKILL.md
+            echo "已复制 ${{ matrix.skill }} 到 ~/.claude/skills/"
+          else
+            echo "⚠️ 找不到 Skill: ${{ matrix.skill }}"
+            exit 0  # 跳过，不 fail
+          fi
+
+      - name: 运行 SkillSentry 测评（${{ github.event.inputs.mode || 'smoke' }} 模式）
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_MAX_OUTPUT_TOKENS: 8192
+        run: |
+          MODE="${{ github.event.inputs.mode || 'smoke' }}"
+          # 非交互模式：自动确认（利用 --yes 标志和 stdin 重定向）
+          echo "开始" | claude --dangerously-skip-permissions \
+            "测评 ${{ matrix.skill }} 模式=$MODE 自动" \
+            --output-format text \
+            2>&1 | tee eval-output.log
+          echo "测评输出已写入 eval-output.log"
+
+      - name: 汇总评估结果
+        id: summarize
+        run: |
+          python3 ~/.claude/skills/SkillSentry/scripts/ci_eval.py \
+            --skill ${{ matrix.skill }} \
+            --mode ${{ github.event.inputs.mode || 'smoke' }} \
+            --threshold 0.80 \
+            --output-dir ./ci-eval-results/${{ matrix.skill }} \
+            --github-output
+        continue-on-error: true  # 允许 FAIL 时继续（以便推送 Check）
+
+      - name: 更新历史记录
+        if: always()
+        run: |
+          SESSION=$(find ~/.claude/skills/SkillSentry/sessions/${{ matrix.skill }} -maxdepth 1 -mindepth 1 -type d | sort | tail -1)
+          if [ -n "$SESSION" ]; then
+            python3 ~/.claude/skills/SkillSentry/scripts/update_history.py \
+              --skill ${{ matrix.skill }} \
+              --session-dir "$SESSION" \
+              --mode ${{ github.event.inputs.mode || 'smoke' }} \
+              --git-sha ${{ github.sha }} \
+              --note "CI: ${{ github.event.head_commit.message || 'workflow_dispatch' }}" || true
+            # 将 history.json 复制到工作目录，便于提交
+            cp ~/.claude/skills/SkillSentry/inputs/${{ matrix.skill }}/history.json \
+               ./ci-eval-results/${{ matrix.skill }}/history.json 2>/dev/null || true
+          fi
+
+      - name: 提交历史记录到仓库（可选）
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          HISTORY_SRC="./ci-eval-results/${{ matrix.skill }}/history.json"
+          HISTORY_DEST=".sentry-history/${{ matrix.skill }}/history.json"
+          if [ -f "$HISTORY_SRC" ]; then
+            mkdir -p ".sentry-history/${{ matrix.skill }}"
+            cp "$HISTORY_SRC" "$HISTORY_DEST"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$HISTORY_DEST"
+            git diff --staged --quiet || git commit -m "chore: update SkillSentry history for ${{ matrix.skill }} [skip ci]"
+            git push
+          fi
+
+      - name: 推送到 GitHub Checks
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RESULT_FILE="./ci-eval-results/${{ matrix.skill }}/eval_result.json"
+          if [ -f "$RESULT_FILE" ]; then
+            python3 ~/.claude/skills/SkillSentry/scripts/report_to_checks.py \
+              --result "$RESULT_FILE" \
+              --check-name "SkillSentry / ${{ matrix.skill }}"
+          else
+            echo "⚠️ 未找到 eval_result.json，跳过 Checks 推送"
+          fi
+
+      - name: 上传测评产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ matrix.skill }}
+          path: |
+            ci-eval-results/${{ matrix.skill }}/
+            eval-output.log
+          retention-days: 30
+
+      - name: 设置退出码
+        run: |
+          RESULT_FILE="./ci-eval-results/${{ matrix.skill }}/eval_result.json"
+          if [ -f "$RESULT_FILE" ]; then
+            VERDICT=$(python3 -c "import json; d=json.load(open('$RESULT_FILE')); print(d['verdict'])")
+            if [ "$VERDICT" != "PASS" ]; then
+              echo "❌ 测评 FAIL: ${{ matrix.skill }}"
+              exit 1
+            fi
+            echo "✅ 测评 PASS: ${{ matrix.skill }}"
+          else
+            echo "⚠️ 无法确认测评结果，视为失败"
+            exit 1
+          fi
+
+  summary:
+    name: 汇总结果
+    runs-on: ubuntu-latest
+    needs: eval
+    if: always()
+    steps:
+      - name: 生成汇总
+        run: |
+          echo "## SkillSentry CI 测评汇总" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.eval.result }}" = "success" ]; then
+            echo "✅ 所有 Skill 测评通过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ 部分 Skill 测评未通过，请查看各 Job 详情" >> $GITHUB_STEP_SUMMARY
+          fi

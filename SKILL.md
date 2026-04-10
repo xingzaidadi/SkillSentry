@@ -176,7 +176,9 @@ Step 2：读取 inputs_dir/rules.cache.json
 如需调整，说：「full」「quick」「smoke」「regression」「lint」
 ```
 
-**OpenClaw 模式**：简化语法 `测评 skill-name quick 自动` 跳过确认，直接执行。
+**自动模式**（任何运行环境）：prompt 中包含 `自动` 或 `--ci` 时，跳过 30 秒等待，立即开始执行。
+- 示例：`测评 skill-name quick 自动`
+- CI/CD 场景推荐：在 GitHub Actions 中使用 `测评 skill-name smoke 自动`
 
 ---
 
