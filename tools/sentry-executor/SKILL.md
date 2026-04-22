@@ -25,6 +25,26 @@ description: >
 
 ---
 
+## Step 0：飞书用例同步（PULL）
+
+执行前调用 sentry-sync 操作一（PULL），将飞书中 active 用例合并到本地 evals.json：
+
+```
+检查 ~/.claude/skills/SkillSentry/config.json
+  → 不存在：跳过，直接进入下一步
+  → 存在：调用 sentry-sync PULL
+    → 拉取飞书 active 用例，写入 inputs_dir/cases.feishu.json
+    → 与 evals.json 合并（飞书 human 用例 + 本地 ai-generated 用例，飞书优先）
+    → 输出：「🔄 已从飞书同步 [N] 条用例」
+```
+
+合并规则：
+- 飞书中存在的用例（按 case_id 匹配）：使用飞书版本（人工已 review，优先级更高）
+- 飞书中不存在的本地用例：保留（AI 生成的补充覆盖用例）
+- 合并结果覆盖写入 evals.json，原 evals.json 备份为 evals.json.bak
+
+---
+
 ## 用例筛选（regression 模式专属，必须在断点续跑前执行）
 
 ```

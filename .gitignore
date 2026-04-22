@@ -2,3 +2,4 @@ sessions/
 inputs/*
 !inputs/manifest.json
 __pycache__/
+config.json

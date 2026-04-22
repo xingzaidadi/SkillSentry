@@ -305,3 +305,27 @@ P95 响应时间：[X]ms
 ```
 
 P0 为空时输出「✅ 无必须修复项」，不输出空标题。
+
+---
+
+## 最终步骤：飞书同步（PUSH）
+
+报告生成完成后，调用 sentry-sync 操作二和操作三：
+
+```
+检查 ~/.claude/skills/SkillSentry/config.json
+  → 不存在：跳过，输出报告路径后结束
+  → 存在：依次执行
+    1. sentry-sync PUSH 结果
+       → 写入运行记录表（等级/结论/通过率/Δ/case_set_snapshot）
+       → 更新用例库 last_run_result + last_run_date
+    2. sentry-sync PUSH 新用例（若本次 sentry-cases 生成了新的 ai-generated 用例）
+       → 推送 pending_review 用例至飞书用例库
+```
+
+同步失败不影响报告输出，错误信息单独展示在报告路径之后：
+```
+📄 报告已生成：<路径>
+✅ 飞书同步完成：运行记录已写入，[N] 条新用例待 Review
+  （或：⚠️ 飞书同步失败：<原因>，本地报告不受影响）
+```
