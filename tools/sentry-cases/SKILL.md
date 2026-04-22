@@ -38,7 +38,84 @@ workspace 中的产物：
 
 ---
 
-## Step 0：用例缓存检查（最优先）
+## Step 0：需求分析（用户确认测什么）
+
+> **跳过条件**：prompt 中含 `--skip-analysis` 时，直接进入 Step 1。
+
+### 0.1 加载或生成需求分析
+
+检查 `inputs_dir/requirements.cache.json` 是否存在且 `skill_hash` 匹配：
+
+```
+命中 → 直接加载，跳过三步扫描（规则没变，分析结果有效）
+未命中 → 读取被测 SKILL.md，执行三步扫描，写入 requirements.cache.json
+```
+
+**三步扫描**：
+
+| 步骤 | 扫描方式 | 找什么 |
+|------|---------|--------|
+| 语义扫描 | 找「如果…则…」「必须」「禁止」「固定为」 | 显性规则 |
+| 角色流扫描 | 梳理完整执行序列，每步问「这里可能失败吗？」 | 流程规则 |
+| 负向空间推演 | 找「没明说但显然不该有」的行为 | 隐性规则 ⚠️ |
+
+**requirements.cache.json 结构**：
+```json
+{
+  "skill_hash": "<md5>",
+  "analyzed_at": "<ISO>",
+  "rules": {
+    "explicit":  [{"ref": "R-01", "description": "...", "risk": "high/medium/low"}],
+    "process":   [{"ref": "F-01", "description": "..."}],
+    "implicit":  [{"ref": "I-01", "description": "...", "risk": "high"}]
+  },
+  "extra_rules": [],
+  "test_plan": {
+    "mode": "<当前模式>",
+    "coverage_target": "≥70%",
+    "estimated_cases": 22,
+    "focus_areas": ["R-07", "I-01"]
+  }
+}
+```
+
+### 0.2 展示需求分析结果（必须等用户确认）
+
+```
+📋 需求分析 · <Skill名>
+
+发现规则 [N] 条：
+
+显性规则（[N]条）—— 规范里明确写出来的
+  R-01  saveExpenseDoc 入参 docStatus 必须为 '10'（草稿）         [高风险]
+  R-05  金额 ≥ 5000 触发大额警告                                  [中风险]
+  R-07  saveExpenseDoc 成功后禁止再次调用                         [高风险]
+  ...
+
+流程规则（[N]条）—— 从执行路径推导出来的
+  F-01  发票识别失败时必须降级追问用户                             [中风险]
+  ...
+
+隐性规则（[N]条）—— 规范没写，但显然不该有的行为 ⚠️ 最易漏测
+  I-01  未经用户确认不得直接提交审批                              [高风险]
+  ...
+
+测试计划：<mode> 模式，目标覆盖 ≥[X]%，预计 [N] 个用例
+重点关注：[高风险规则列表]
+
+有遗漏的业务场景，或需要补充的规则吗？
+→ 没有，开始生成用例
+→ 补充：________
+```
+
+### 0.3 处理用户补充
+
+用户有补充 → 将补充内容以自然语言追加到 `extra_rules`，作为 Step 3 AI 补齐的额外输入。
+用户无补充（或 30 秒无响应）→ 直接进入 Step 1。
+
+---
+
+## Step 1：用例缓存检查
 
 各模式所需最少用例数：smoke=4，quick=8，standard=20，full=30。
 
@@ -46,23 +123,23 @@ workspace 中的产物：
 
 ```
 缓存未命中（文件不存在 或 hash 不一致）
-  → 执行 Step 1-5，设计完成后写入 cases.cache.json
+  → 执行 Step 2-6，设计完成后写入 cases.cache.json
 
 缓存命中 + 缓存用例数 < 当前模式所需最少数（如缓存 smoke=4 个，当前需 quick=8 个）
   → 用例不足，缓存视为未命中，重新设计
 
 缓存命中 + 缓存用例数 ≥ 当前模式所需最少数
-  缓存 mode == 当前 mode：全量复用，跳过 Step 1-5
+  缓存 mode == 当前 mode：全量复用，跳过 Step 2-6
   缓存 mode 级别 > 当前 mode（如 quick 缓存用于 smoke）：
     按 happy_path > e2e > edge_case 优先级取前 N 个（N = 当前模式上限）
     标注「⚡ 从 [缓存mode] 用例中取子集（[N]/[总数]），规则未变更」
-  smoke/quick：自动复用，跳过 Step 1-5
+  smoke/quick：自动复用，跳过 Step 2-6
   standard/full：展示摘要，询问「复用上次设计 / 重新设计？」
 ```
 
 ---
 
-## Step 1：提炼被测 Skill 的规则
+## Step 2：提炼被测 Skill 的规则
 
 若 `inputs_dir/rules.cache.json` 存在：直接加载规则列表，跳过提炼。
 否则：读取被测 SKILL.md，提炼所有 P1/P2 规则，写入 `rules.cache.json`：
@@ -70,9 +147,11 @@ workspace 中的产物：
 { "skill_hash": "<md5>", "extracted_at": "<ISO>", "rules": ["规则1", "规则2", ...] }
 ```
 
+> `requirements.cache.json`（Step 0 产物）与 `rules.cache.json` 并存：前者是分类后供用户确认的完整需求视图，后者是 AI 补齐用例时使用的规则列表，两者来源相同但用途不同。
+
 ---
 
-## Step 2：加载外部用例（Golden Set）
+## Step 3：加载外部用例（Golden Set）
 
 扫描 `inputs_dir/` 下的 `*.cases.md` 和 `cases.json`：
 
@@ -85,9 +164,10 @@ workspace 中的产物：
 
 ---
 
-## Step 3：AI 补齐用例（双源合流）
+## Step 4：AI 补齐用例（双源合流）
 
-根据模式覆盖率目标，针对外部用例未覆盖的路径，AI 补齐：
+根据模式覆盖率目标，针对外部用例未覆盖的路径，AI 补齐。
+输入来源：`rules.cache.json` 规则列表 + `requirements.cache.json` 中的 `extra_rules`（用户在 Step 0 补充的业务场景）。
 
 | 模式 | 用例数上限 | 覆盖目标 | 每用例运行次数 |
 |------|-----------|---------|--------------|
@@ -129,7 +209,7 @@ regression      已知缺陷回归
 
 ---
 
-## Step 4：HiL 检查（被测 Skill 含不可逆操作时必须执行）
+## Step 5：HiL 检查（被测 Skill 含不可逆操作时必须执行）
 
 ```
 HiL-1：不可逆操作前是否有用户确认步骤？→ 无：标注 ⚠️
@@ -138,7 +218,7 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 
 ---
 
-## Step 5：skip_without_skill 标记
+## Step 6：skip_without_skill 标记
 
 用例设计完成后，对每个用例标记是否跳过 without_skill 执行：
 
@@ -153,7 +233,7 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 
 ---
 
-## Step 6：写出 evals.json + cases.cache.json
+## Step 7：写出 evals.json + cases.cache.json
 
 **evals.json**：对象数组，每条用例含 `id`、`display_name`、`type`、`source`、`prompt`、`skip_without_skill`、`expectations[]{text, precision, rule_ref}`。
 
