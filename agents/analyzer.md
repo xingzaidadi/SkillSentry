@@ -11,12 +11,23 @@
 ## 输入
 
 - `winner`：`"A"` 或 `"B"`（来自 comparator 结论）
-- `winner_skill_path`：获胜方使用的 Skill 路径
-- `winner_transcript_path`：获胜方执行 transcript
-- `loser_skill_path`：失败方使用的 Skill 路径（通常是需要改进的 Skill）
-- `loser_transcript_path`：失败方执行 transcript
+- `winner_is_with_skill`：`true` / `false`（由调用方传入，告知获胜方是否是 with_skill）
+- `evaluated_skill_path`：被评测 Skill 的路径（始终是需要改进的对象）
+- `with_skill_transcript_path`：with_skill 执行 transcript
+- `without_skill_transcript_path`：without_skill 执行 transcript（若有）
 - `comparison_result_path`：comparator 输出的 comparison.json
 - `output_path`：analysis.json 保存路径
+
+**角色映射规则**：
+```
+winner_is_with_skill = true（预期情况）：
+  → with_skill 赢了，改进建议方向：锦上添花，进一步优化已胜出的 Skill
+  → 失败方是 without_skill（无 Skill 路径），分析其失败原因以验证 Skill 价值
+
+winner_is_with_skill = false（异常情况，Skill 反而拖累了输出）：
+  → without_skill 赢了，evaluated_skill_path 是需要改进的 Skill
+  → 改进建议优先级最高（Skill 有明确有害规则）
+```
 
 ## 流程
 
@@ -24,9 +35,9 @@
 
 读取 comparison.json，理解 Comparator 重视什么、判决理由是什么。
 
-### Step 2：读取双方 Skill 文件
+### Step 2：读取 Skill 文件
 
-读取 winner 和 loser 的 SKILL.md 及关键引用文件，对比：
+读取 `evaluated_skill_path` 的 SKILL.md 及关键引用文件，分析：
 - 指令的清晰度和具体性
 - 是否提供了必要的脚本/工具
 - 边界情况的处理指导
@@ -83,8 +94,8 @@
 {
   "comparison_summary": {
     "winner": "A",
-    "winner_skill": "path/to/winner/skill",
-    "loser_skill": "path/to/loser/skill",
+    "winner_is_with_skill": true,
+    "evaluated_skill": "path/to/evaluated/skill",
     "comparator_reasoning": "A 的输出字段完整，详情链接可用；B 缺少收款账户，链接含占位符"
   },
   "winner_strengths": [

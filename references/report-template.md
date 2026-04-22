@@ -4,26 +4,6 @@
 
 ---
 
-## 报告章节结构（固定顺序，不得增删）
-
-```
-📖 名词速查（固定开头，帮助不熟悉术语的读者）
-一、执行摘要（3-5句，能不能上线+主要理由）
-二、关键指标卡 + 发布准入达成表
-三、真实 MCP 接口调用记录（正常路径用例，可展开入参/返回）[mcp_based 专有，text_generation 跳过]
-四、各用例执行情况（所有用例逐条，可展开断言/with vs without/MCP调用统计）
-五、发现的问题（P0/P1/P2分级）
-六、测评覆盖率（路径/规则/断言，含未覆盖规则列表）
-七、Benchmark 数据（with vs without 通过率/调用次数对比）
-八、改进建议（P0/P1/P2优先级表格）
-九、Skill 复杂度评估
-十、测评环境
-十一、触发率预评估（AI 模拟）[新增，所有 Skill 类型必须包含]
-十二、效率指标汇总 [新增，timing.json 有数据时包含，无数据则标注 N/A]
-```
-
----
-
 ## 报告生成注意事项
 
 1. **名词速查是固定开头**——帮助不熟悉术语的读者理解报告，每次生成都必须包含。
@@ -35,9 +15,9 @@
 7. **rule-tag 必须带中文描述**——不能只写 `R-06`，必须写 `<span class="rule-tag"><span class="rule-id">R-06</span> 住宿发票检测</span>`。
 8. **INCONCLUSIVE 用例**：class 用 `eval-warn`，底部必须加 `detail-warn` 块说明原因和补充方式。
 9. **灾难场景单独列**——它是一票否决的红线，不能埋在正常测试结果里（full 模式才有）。
-10. **text_generation Skill 跳过第三章**——纯文本 Skill 没有 MCP 调用记录，第三章替换为：`<p style="color:#888;">⚠ 纯文本生成型 Skill，无 MCP 接口调用记录。</p>`
-11. **触发率章节（第十一章）必须包含**——即使置信度为 low，也要如实呈现，并附 AI 模拟免责声明。
-12. **效率指标章节（第十二章）**——timing.json 数据存在时展示；全部缺失时保留章节标题，正文注明「⚠ 本次测评未采集 timing 数据」。
+10. **text_generation Skill 跳过 MCP 调用记录 HTML 节**——纯文本 Skill 没有 MCP 调用记录，该 HTML 节替换为：`<p style="color:#888;">⚠ 纯文本生成型 Skill，无 MCP 接口调用记录。</p>`（第三章「历史趋势」所有类型都保留）
+11. **触发率章节（第十二章）必须包含**——即使置信度为 low，也要如实呈现，并附 AI 模拟免责声明。
+12. **效率指标章节（第八章）**——timing_with.json 数据存在时展示；全部缺失时保留章节标题，正文注明「⚠ 本次测评未采集 timing 数据」。
 
 ---
 
@@ -560,7 +540,7 @@ MCP 调用次数对比（正常路径用例）：
   <!-- <div class="warning-box"><div class="warning-title">⚠ 触发率估算偏低</div><ul><li>建议优化 description，明确「何时触发」的场景描述</li><li>建议增加典型触发场景举例</li></ul></div> -->
 </div>
 
-<!-- ⑮ 十二、效率指标汇总 — timing.json 有数据时展示，全部缺失时注明 N/A -->
+<!-- ⑮ 十二、效率指标汇总 — timing_with.json 有数据时展示，全部缺失时注明 N/A -->
 <div class="card">
   <h2>十二、效率指标汇总</h2>
   <!-- timing 数据存在时填充以下内容 -->
@@ -576,7 +556,7 @@ MCP 调用次数对比（正常路径用例）：
     <tr><td>[N]</td><td>[用例名]</td><td>[XX]ms</td><td>[XX]ms</td><td>[XX]</td><td><span class="badge [badge-pass|badge-fail|badge-na]">[✅ / ❌ / N/A]</span></td></tr>
   </table>
   <!-- timing 数据全部缺失时替换为以下内容 -->
-  <!-- <div class="warning-box"><div class="warning-title">⚠ 本次测评未采集 timing 数据</div><ul><li>原因：subagent 执行结束时未写入 timing.json</li><li>下次测评时，请确保在 subagent 完成后立即写入 executor_start_ms、executor_end_ms、total_tokens 字段</li></ul></div> -->
+  <!-- <div class="warning-box"><div class="warning-title">⚠ 本次测评未采集 timing 数据</div><ul><li>原因：subagent 执行结束时未写入 timing_with.json / timing_without.json</li><li>下次测评时，请确保在 subagent 完成后立即写入 executor_start_ms、executor_end_ms、total_tokens 字段</li></ul></div> -->
 </div>
 
 <!-- Footer -->

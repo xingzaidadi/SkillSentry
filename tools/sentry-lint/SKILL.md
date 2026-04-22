@@ -47,7 +47,14 @@ description: >
 扫描 SKILL.md 全文，查找「不可逆操作」关键词：
 
 ```
-不可逆操作关键词：提交、删除、创建、写入、发送、上传、支付、更新、修改、save、submit、delete、create、write、send
+通用文字关键词：提交、删除、创建、写入、发送、上传、支付、更新、修改、
+               save、submit、delete、create、write、send、update、publish
+
+mcp_based Skill 额外扫描：
+  在 SKILL.md 中出现的业务工具名（camelCase 或 snake_case），检查工具名本身是否含：
+  save* / delete* / submit* / update* / create* / publish* / send* / upload*
+  例：saveExpenseDoc、deleteDocument、submitApproval → 不可逆操作，须有 HiL 确认
+  例：queryExpenseItems、getFile → 只读操作，跳过
 ```
 
 对每个发现的不可逆操作：

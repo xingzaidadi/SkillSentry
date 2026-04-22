@@ -26,6 +26,8 @@ def parse_args():
     parser.add_argument("--mode", default=None, help="测评模式（smoke/quick/standard/full）")
     parser.add_argument("--git-sha", default=None, help="当前 SKILL.md 对应的 git commit SHA")
     parser.add_argument("--note", default="", help="附加备注（如 PR 标题）")
+    parser.add_argument("--avg-delta", type=float, default=None, dest="avg_delta",
+                        help="平均增益 Δ（with_skill 精确通过率 - without_skill 精确通过率），由 sentry-report 计算后传入")
     return parser.parse_args()
 
 
@@ -44,12 +46,11 @@ def collect_grading_results(session_dir: Path) -> list[dict]:
     return results
 
 
-def compute_entry(grading_results: list[dict], mode: str, session_dir: Path) -> dict:
+def compute_entry(grading_results: list[dict], mode: str, session_dir: Path, skill: str) -> dict:
     """计算本次测评的聚合数据，格式化为历史条目"""
     total_exact = exact_passed = 0
     total_sem = sem_passed = 0
     total_all = all_passed = 0
-    deltas = []
     p95_times = []
 
     for r in grading_results:
@@ -68,27 +69,20 @@ def compute_entry(grading_results: list[dict], mode: str, session_dir: Path) -> 
         total_all += summary.get("total", 0)
         all_passed += summary.get("passed", 0)
 
-        if "delta" in data:
-            deltas.append(data["delta"])
-
         timing = data.get("timing", {})
         if "p95_ms" in timing:
             p95_times.append(timing["p95_ms"])
 
-    # 读取 skill hash（从 session 目录内的 rules.cache.json）
+    # 读取 skill hash（从 inputs/<skill>/rules.cache.json）
     skill_hash = None
-    rules_cache = session_dir.parent.parent.parent / "inputs" / session_dir.parent.name / "rules.cache.json"
-    if not rules_cache.exists():
-        # 也可能在 session 同级的 inputs 下
-        pass
-    # 尝试从当前 session 找
-    for f in session_dir.iterdir():
-        if f.name == "rules.cache.json":
-            try:
-                with open(f, encoding="utf-8") as fp:
-                    skill_hash = json.load(fp).get("skill_hash", "")[:8]
-            except Exception:
-                pass
+    sentry_base = Path.home() / ".claude" / "skills" / "SkillSentry"
+    rules_cache = sentry_base / "inputs" / skill / "rules.cache.json"
+    if rules_cache.exists():
+        try:
+            with open(rules_cache, encoding="utf-8") as fp:
+                skill_hash = json.load(fp).get("skill_hash", "")[:8]
+        except Exception:
+            pass
 
     entry = {
         "run_at": datetime.now(tz=timezone.utc).isoformat(),
@@ -99,7 +93,7 @@ def compute_entry(grading_results: list[dict], mode: str, session_dir: Path) -> 
         "exact_pass_rate": round(exact_passed / total_exact, 4) if total_exact > 0 else None,
         "semantic_pass_rate": round(sem_passed / total_sem, 4) if total_sem > 0 else None,
         "overall_pass_rate": round(all_passed / total_all, 4) if total_all > 0 else None,
-        "avg_delta": round(sum(deltas) / len(deltas), 4) if deltas else None,
+        "avg_delta": None,  # 由调用方（sentry-report）通过 --avg-delta 传入
         "p95_ms": round(max(p95_times), 0) if p95_times else None,
     }
 
@@ -192,14 +186,23 @@ def main():
         sys.exit(0)
 
     # 计算本次条目
-    entry = compute_entry(grading_results, args.mode, session_dir)
+    entry = compute_entry(grading_results, args.mode, session_dir, args.skill)
     if args.git_sha:
         entry["git_sha"] = args.git_sha[:8]
     if args.note:
         entry["note"] = args.note
+    if args.avg_delta is not None:
+        entry["avg_delta"] = round(args.avg_delta, 4)
+        # 有 delta 时重新判决：delta < 0 直接 FAIL
+        if args.avg_delta < 0 and entry.get("verdict") not in ("ERROR", "FAIL"):
+            entry["verdict"] = "FAIL"
 
-    # 加载 + 追加 + 保存
+    # 加载 + 幂等检查 + 追加 + 保存
     history = load_history(history_file)
+    if any(e.get("session") == entry["session"] for e in history):
+        print(f"ℹ️  Session {entry['session']} 已在历史记录中，跳过重复追加")
+        print_trend(history)
+        sys.exit(0)
     history.append(entry)
     save_history(history_file, history)
 

@@ -40,15 +40,24 @@ workspace 中的产物：
 
 ## Step 0：用例缓存检查（最优先）
 
+各模式所需最少用例数：smoke=4，quick=8，standard=20，full=30。
+
 检查 `inputs_dir/cases.cache.json` 是否存在，且 `rules_hash` 与 `inputs_dir/rules.cache.json` 中的 `skill_hash` 一致：
 
 ```
-缓存命中 →
-  smoke/quick 模式：自动复用，直接输出缓存中的 evals 列表，跳过后续设计
-  standard/full 模式：展示摘要，询问「复用上次设计 / 重新设计？」
-  告知用户：「⚡ 用例缓存命中（规则未变更），已加载上次设计的 [N] 个用例」
+缓存未命中（文件不存在 或 hash 不一致）
+  → 执行 Step 1-5，设计完成后写入 cases.cache.json
 
-缓存未命中 → 执行 Step 1-5，设计完成后写入 cases.cache.json
+缓存命中 + 缓存用例数 < 当前模式所需最少数（如缓存 smoke=4 个，当前需 quick=8 个）
+  → 用例不足，缓存视为未命中，重新设计
+
+缓存命中 + 缓存用例数 ≥ 当前模式所需最少数
+  缓存 mode == 当前 mode：全量复用，跳过 Step 1-5
+  缓存 mode 级别 > 当前 mode（如 quick 缓存用于 smoke）：
+    按 happy_path > e2e > edge_case 优先级取前 N 个（N = 当前模式上限）
+    标注「⚡ 从 [缓存mode] 用例中取子集（[N]/[总数]），规则未变更」
+  smoke/quick：自动复用，跳过 Step 1-5
+  standard/full：展示摘要，询问「复用上次设计 / 重新设计？」
 ```
 
 ---
@@ -133,46 +142,22 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 
 用例设计完成后，对每个用例标记是否跳过 without_skill 执行：
 
-| 条件 | 标记 |
-|------|------|
-| `type = "negative"` | `skip_without_skill: true` |
-| 所有断言 `precision = "existence"` | `skip_without_skill: true` |
-| `type = "robustness"` 且核心断言为负向存在性 | `skip_without_skill: true` |
+| 条件 | 标记 | 原因 |
+|------|------|------|
+| `skill_type = "mcp_based"` AND `mode ∈ {smoke, quick}` | **全部用例** `skip_without_skill: true` | mcp_based 模型无 Skill 指导时几乎必然调错工具，Δ 总为正，without_skill 无增量价值；standard/full 模式仍正常双侧以获取精确 Δ 数据 |
+| `type = "negative"` | `skip_without_skill: true` | 负向测试，without_skill 无对比价值 |
+| 所有断言 `precision = "existence"` | `skip_without_skill: true` | existence 断言对有无 Skill 不敏感 |
+| `type = "robustness"` 且核心断言为负向存在性 | `skip_without_skill: true` | 鲁棒性用例，without_skill 行为已知（混乱） |
+
+> **覆盖优先级**：mcp_based + smoke/quick 规则优先级最高，命中后直接标记，不再逐条判断。
 
 ---
 
 ## Step 6：写出 evals.json + cases.cache.json
 
-**evals.json 格式**：
-```json
-[
-  {
-    "id": 1,
-    "display_name": "正常报销流程",
-    "type": "happy_path",
-    "source": "ai_generated",
-    "prompt": "帮我报销一张 168 元的餐饮发票",
-    "skip_without_skill": false,
-    "expectations": [
-      {
-        "text": "saveExpenseDoc 调用参数 docStatus=10",
-        "precision": "exact_match",
-        "rule_ref": "规则3：提交时docStatus必须为10"
-      }
-    ]
-  }
-]
-```
+**evals.json**：对象数组，每条用例含 `id`、`display_name`、`type`、`source`、`prompt`、`skip_without_skill`、`expectations[]{text, precision, rule_ref}`。
 
-**cases.cache.json**：
-```json
-{
-  "rules_hash": "<与 rules.cache.json 相同的 hash>",
-  "designed_at": "<ISO时间>",
-  "mode": "quick",
-  "evals": [/* 同 evals.json */]
-}
-```
+**cases.cache.json**：`{ "rules_hash", "designed_at", "mode", "evals": [...同 evals.json...] }`
 
 ---
 

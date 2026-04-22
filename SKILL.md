@@ -87,7 +87,8 @@ description: >
 
 **MCP 工具可用性预检（仅 mcp_based Skill，执行工作流前自动运行）**：
 
-读取被测 SKILL.md，检测 Skill 类型（mcp_based / text_generation / code_execution）：
+读取被测 SKILL.md，检测 Skill 类型（mcp_based / text_generation / code_execution）。
+**检测规范**：见 `references/execution-phases.md` 第零章（skill_type 自动检测规范）。
 
 ```
 mcp_based → 列出 SKILL.md 中引用的工具名（如 saveExpenseDoc、uploadFile 等）
@@ -130,7 +131,7 @@ inputs_dir    = <SkillSentry路径>/inputs/<被测Skill名>/
 | 用户说 | 工作流 | 工具链 | 预计时间 |
 |--------|--------|--------|---------|
 | `smoke` / `冒烟` | smoke | cases(4-5个) → executor(1次,with_skill) → grader → report | ~5-7min |
-| `quick` | quick | cases → executor(2次) → grader → report | ~15-20min |
+| `quick` | quick | cases → executor(2次) → grader → report | ~8-10min（mcp_based）/ ~15-20min（其他） |
 | `regression` | regression | executor(golden only) → grader → report | ~5-10min |
 | `standard` / `提测前` | standard | cases → executor(3次) → grader → comparator → report | ~30-45min |
 | `full` / `正式发布前` | full | lint → trigger → cases → executor(3次) → grader → comparator → analyzer → report | 45min+ |
@@ -170,7 +171,7 @@ Step 2：读取 inputs_dir/rules.cache.json
    原因：<一句话说明推断依据>
    工具链：<工具列表>
    预计时间：<时间>
-   Token 预估：<smoke:~1-2万 / quick:~5-10万 / regression:~3-5万 / full:~15-20万>
+   Token 预估：<smoke:~1-2万 / quick(mcp_based):~3-5万 / quick(其他):~5-10万 / regression:~3-5万 / standard:~10-15万 / full:~15-20万>
 
 直接回复「开始」或不回复则 30 秒后自动开始。
 如需调整，说：「full」「quick」「smoke」「regression」「lint」
@@ -201,12 +202,12 @@ Step 2：读取 inputs_dir/rules.cache.json
 rules.cache.json → sentry-cases 读取
 evals.json → sentry-executor 读取
 grading.json → sentry-report 读取
-trigger_eval.json → sentry-report 读取（full 模式）
+trigger_eval.json → sentry-report 读取（full 模式，路径：inputs_dir/trigger_eval.json）
 comparison.json → sentry-report 读取（standard/full 模式）
 ```
 
 **Grader 规则**（内部使用）：
-- 每次调用必须传入 ≥ 2 个用例的 transcript（smoke 除外）
+- 每次调用必须传入 ≥ 2 个用例的 transcript
 - 使用 `explore` subagent 类型（只读，更快）
 - 详细规范见 `agents/grader.md`
 
@@ -215,7 +216,8 @@ comparison.json → sentry-report 读取（standard/full 模式）
 | 工作流 | Grader 调度 | 原因 |
 |--------|------------|------|
 | smoke | 同步等待（阻塞） | 用例少（4-5个），流水线收益低 |
-| quick / regression / standard / full | **后台非阻塞启动** | 多批次执行，重叠 Grader 与下一批 Executor |
+| quick | **第一批同步**（快速失败检测），其余批次非阻塞；mcp_based+quick 单批次整体同步 | 第一批结果用于判断是否提前终止 |
+| regression / standard / full | **后台非阻塞启动** | 多批次执行，重叠 Grader 与下一批 Executor |
 
 **非阻塞模式执行顺序**：
 ```
@@ -229,10 +231,26 @@ Grader 后台完成时（task notification）
   → 若处于下一批 Executor 执行中，压缩操作在下一批启动声明之后处理
 ```
 
+**快速失败检测**（仅 quick 模式，第一批完成后触发；smoke 本身已同步，自然触发）：
+```
+【quick 例外】第一批 Grader 强制同步等待（覆盖后续批次的非阻塞规则），拿到结果后：
+  读取第一批所有 grading.json 的 authoritative_pass_rate
+  计算平均值 first_batch_pass_rate
+
+  first_batch_pass_rate < 20%：
+    ⚠️ 前 [N] 个用例平均通过率 [X]%，Skill 可能存在根本性问题
+    失败集中在：[列出 fail 最多的断言类型]
+    选项：
+      [继续执行剩余用例]
+      [立即终止，查看当前结果] ← 默认，30 秒后自动选择
+
+  first_batch_pass_rate ≥ 20%：静默继续，后续 Grader 恢复非阻塞模式
+```
+
 **进入 sentry-report 前的强制等待点**：
 ```
 所有 Executor 批次完成后：
-  检查所有 eval-N/grading.json 是否存在且非空
+  检查所有 eval-N/grading.json（多次运行时为 eval-N/run-R/grading.json）是否存在且非空
   → 全部就绪 → 立即启动 sentry-report
   → 有未完成 → 输出「⏳ 等待 Grader 完成（已完成 N/M）」
                每 30 秒检查一次
@@ -267,8 +285,8 @@ Grader 后台完成时（task notification）
 
 with_skill 和 without_skill 必须使用完全独立的工作目录：
 ```
-eval-N/with_skill/workspace/     ← 仅 with_skill 可读写
-eval-N/without_skill/workspace/  ← 仅 without_skill 可读写
+eval-N/with_skill/workspace/              ← 仅 with_skill 可读写（多次运行：eval-N/run-R/with_skill/workspace/）
+eval-N/without_skill/workspace/           ← 仅 without_skill 可读写（多次运行：eval-N/run-R/without_skill/workspace/）
 ```
 without_skill 禁止读取 with_skill 目录下任何文件（含 transcript、uploads、中间产物）。
 
@@ -280,4 +298,4 @@ without_skill 禁止读取 with_skill 目录下任何文件（含 transcript、u
 
 ---
 
-*Last Updated: 2026-04-03*
+*Last Updated: 2026-04-13 (v2)*
