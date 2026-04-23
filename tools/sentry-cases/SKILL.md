@@ -235,7 +235,18 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 
 ## Step 7：写出 evals.json + cases.cache.json
 
-**evals.json**：对象数组，每条用例含 `id`、`display_name`、`type`、`source`、`prompt`、`skip_without_skill`、`expectations[]{text, precision, rule_ref}`。
+**evals.json**：对象数组，每条用例含 `id`、`display_name`、`type`、`source`、`prompt`、`skip_without_skill`、`expectations[]{text, precision, rule_ref}`，以及以下可选字段（有则填，无则省略）：
+
+| 可选字段 | 类型 | 用途 | 何时填写 |
+|---------|------|------|----------|
+| `tools_required` | string[] | 该用例预期必须调用的工具列表 | Skill 流程中有明确的工具调用序列时 |
+| `tools_forbidden` | string[] | 该用例禁止调用的工具列表 | Skill 规格中有明确的工具限制时 |
+| `critical_params` | object | 关键参数的预期值，格式 `{"tool.param": "expected_value"}` | 有可验证的参数值时 |
+| `reply_contains` | string[] | 回复中必须包含的关键词列表 | 有明确的输出内容要求时 |
+| `reply_not_contains` | string[] | 回复中禁止出现的关键词列表 | 有明确的输出禁区时 |
+| `min_reply_length` | number | 回复最小字符数 | 需要保证回复完整度时 |
+
+**向后兼容**：老用例没有这些字段时，对应指标（C1/C2/C5/E1）在 grading.json 中标记为 `"status": "not_applicable"`，不影响等级判定。
 
 **cases.cache.json**：`{ "rules_hash", "designed_at", "mode", "evals": [...同 evals.json...] }`
 

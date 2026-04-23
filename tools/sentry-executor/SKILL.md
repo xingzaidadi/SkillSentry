@@ -292,6 +292,55 @@ batch_parallel_rate = parallel_count / total_count
 
 ---
 
+## 指标提取（执行完成后自动执行）
+
+每个用例的 transcript 生成后，自动从 transcript 中提取以下指标原始数据，写入各用例目录下的 `metrics_raw.json`：
+
+| 指标 | 提取方式 | 数据来源 | 实现状态 |
+|------|---------|---------|----------|
+| A1 触发命中 | transcript 中是否出现 Skill 核心工具的 tool_calls | `[tool_calls]` 区块 | ✅ |
+| A2 崩溃率 | 是否有 abnormal_stop、error、空响应 | `[tool_calls]` Status 字段 | ✅ |
+| A3 响应率 | response.md 是否非空且非超时 | response.md 文件 | ✅ |
+| C1 工具完整率 | tools_required 是否都在 tools_called 中 | evals.json `tools_required` + transcript | 🔧 需 evals.json 有该字段 |
+| C2 工具越界率 | tools_forbidden 是否出现在 tools_called 中 | evals.json `tools_forbidden` + transcript | 🔧 需 evals.json 有该字段 |
+| C4 副作用率 | 是否有非预期的写操作（write/delete/patch/create/update/submit） | `[tool_calls]` Tool 名称 | 🔧 |
+| C5 参数正确率 | critical_params 中的参数值是否匹配 | evals.json `critical_params` + transcript Args | 🔧 需 evals.json 有该字段 |
+| E3 效率达标率 | Token ≤ 100,000 且耗时 ≤ 120s | timing_with.json | ✅ |
+
+**C3、C6、E1 由 Grader 判定**，不在 executor 里提取。
+**E2 由 report 跨轮次汇总**，不在 executor 里提取。
+
+### metrics_raw.json 格式
+
+```json
+{
+  "eval_id": "eval-1",
+  "A1_triggered": true,
+  "A1_tools_called": ["queryExpenseItems", "saveExpenseDoc"],
+  "A2_has_crash": false,
+  "A2_error_count": 0,
+  "A3_has_response": true,
+  "A3_response_length": 1245,
+  "C1_tools_complete": true,
+  "C1_missing_tools": [],
+  "C2_tools_violated": false,
+  "C2_violation_tools": [],
+  "C4_has_side_effect": false,
+  "C4_unexpected_writes": [],
+  "C5_params_correct": true,
+  "C5_param_mismatches": [],
+  "E3_token_total": 45000,
+  "E3_duration_s": 12.3,
+  "E3_efficient": true
+}
+```
+
+**向后兼容**：如果 evals.json 中没有 tools_required / tools_forbidden / critical_params 字段，对应指标标记为 `null`（不是 false），表示“无法判定”而非“未通过”。report 统计时跳过 null 值的指标。
+
+**失败处理**：指标提取失败不影响用例执行结果，仅在 metrics_raw.json 中标记 `"extraction_error": "<原因>"`。
+
+---
+
 ## 执行完成后的输出
 
 ```
@@ -299,6 +348,7 @@ batch_parallel_rate = parallel_count / total_count
 📊 完成：[N] 个用例 × [R] 次运行（[N×2 - skip数] 个 subagent）
 ⏱️ 总耗时：约 [X] 分钟
 🔄 并行率：[X]%（[N]/[N] 个用例并行）/ N/A（全部 skip_without_skill，无双侧对比）
+📊 指标采集：✅ A1/A2/A3/E3 已提取 | 🔧 C1/C2/C4/C5 视 evals.json 字段 | ⏳ C3/C6/E1/E2 待 Grader/Report
 
 下一步：
   评分 → 使用 SkillSentry 内置 Grader，或说「帮我评审这批结果」
