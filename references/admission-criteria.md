@@ -193,4 +193,4 @@
 
 ---
 
-*Last Updated: 2026-03-30*
+*Last Updated: 2026-04-24 · v4.4更新：新增 Pipeline 准出标准、HiL 确认节点、session.json 状态传递*

@@ -462,6 +462,7 @@ batch_parallel_rate = parallel_count / total_count
 1. **subagent 超时**：`sessions_spawn` 后等待 `runTimeoutSeconds`（默认 180s）无响应
 2. **subagent 返回空 transcript**：task 完成但 `eval-N/with_skill/outputs/transcript.md` 不存在或为空
 3. **subagent 异常退出**：task 返回错误状态
+4. **MCP 认证失败**：subagent 调 MCP 返回 401/403/500 且错误信息含 auth/token/permission 关键词——说明 subagent 没有继承主会话的 MCP 认证上下文，降级到主会话直跑（主会话有 mcporter 认证）
 
 ### 降级不触发的场景
 

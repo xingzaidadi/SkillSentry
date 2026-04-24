@@ -23,6 +23,7 @@ description: >
 
 **触发优先级**：主编排器 > 子工具。用户说「测评 xxx」→ 主编排器响应。说「帮我 lint xxx」→ 直接调子工具。
 **追问规则**：能推断的不问，最多追问 1 轮。默认 quick 模式。
+**飞书同步**：用例和结果自动同步到飞书多维表格（通过 sentry-sync）。executor 执行前 PULL，report 完成后 PUSH。
 
 ---
 
@@ -36,7 +37,15 @@ description: >
 
 检测 skill_type：含 MCP 工具引用 → mcp_based；含 exec/bash → code_execution；其他 → text_generation。
 
-输出：「✅ Step 1 完成 | {skill_name} | {skill_type} | 工作目录已创建」
+**MCP 预检（仅 mcp_based）**：
+1. 从 SKILL.md 提取引用的 MCP Server 名称
+2. 运行 `mcporter list` 检查哪些已配置且健康
+3. 对比结果：
+   - 全部可用 → 「✅ MCP 预检通过：{N} 个 Server 全部健康」
+   - 部分缺失 → 「⚠️ {name} 未配置。继续（结果不完整）/ 中止？」
+   - 全部不可用 → 「❌ 所有 MCP Server 不可用，无法测评。请先配置 MCP。」
+
+输出：「✅ Step 1 完成 | {skill_name} | {skill_type} | MCP {N}/{M} 可用 | 工作目录已创建」
 
 ---
 
@@ -66,11 +75,10 @@ description: >
 3. 输出进度回执：
    ✅ {步骤名} 完成 | ⏱ {耗时} | 进度 [{进度条}] {N}/{总数}
    {1-2 行关键数据}
-4. 【检查点】等用户指令：
-   继续 → 下一步
-   跳过 → 跳过当前步骤
-   中止 → 停止，基于已有结果出报告
-   重跑 → 重新执行当前步骤
+4. 【检查点】输出三段式回执：
+   ① 结果小结：刚才发现了什么，有什么问题，是否影响继续
+   ② 下一步预告：接下来要做什么，大约要多久
+   ③ 用户选项：继续 / 跳过 / 中止 / 重跑 / 切换模式
    （60s 无回复 → 自动继续）
 5. 更新 session.json 的 last_step
 ```
@@ -124,6 +132,18 @@ description: >
 ## 安全约束
 
 with_skill 和 without_skill 必须使用完全独立的工作目录，互不可读。
+
+---
+
+## 飞书同步（sentry-sync）
+
+| 时机 | 操作 | 说明 |
+|------|------|------|
+| executor 执行前 | PULL | 从飞书拉取 active 用例合并到 evals.json |
+| report 完成后 | PUSH 结果 | 写入运行记录（等级/通过率/Δ） |
+| report 完成后 | PUSH 新用例 | 推送 AI 生成的用例到飞书待 Review |
+
+前提：`~/.openclaw/skills/SkillSentry/config.json` 存在。不存在则跳过同步。
 
 ---
 
