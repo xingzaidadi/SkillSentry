@@ -31,7 +31,11 @@ description: >
 
 1. 找 SKILL.md：用户给路径 → 直接用；给名字 → `~/.openclaw/skills/<名字>/` 或 `~/.config/opencode/skills/<名字>/`
 2. 找不到 → 「❌ 找不到 Skill：{name}。已搜索：{paths}。请确认拼写或提供完整路径。」
-3. 创建工作目录：`sessions/<skill_name>/<YYYY-MM-DD>_<NNN>/`
+3. 检查 config.json：不存在时询问「是否要启用飞书同步？启用可在飞书多维表格中管理用例和查看报告」
+   - 用户说是 → 自动创建 Bitable + 写入 config.json
+   - 用户说否 → 跳过，纯本地模式
+   - 已存在 → 跳过
+4. 创建工作目录：`sessions/<skill_name>/<YYYY-MM-DD>_<NNN>/`
 4. 写 `session.json`（workspace_dir / inputs_dir / skill_name / skill_path / skill_type / mode / created_at / last_step）
 5. 所有路径必须是绝对路径
 
@@ -72,9 +76,23 @@ description: >
 ```
 1. 读取该子工具的 SKILL.md（如 sentry-lint/SKILL.md）
 2. 按子工具 SKILL.md 的指令执行（子工具自己决定怎么做）
-3. 输出进度回执：
-   ✅ {步骤名} 完成 | ⏱ {耗时} | 进度 [{进度条}] {N}/{总数}
+3. 输出进度回执（包含全局进度列表）：
+   ✅ {子工具名} 完成 | ⏱ {耗时}
    {1-2 行关键数据}
+   
+   全局进度：
+   sentry-lint（静态检查）      ✅ 完成
+   sentry-trigger（触发率）    ✅ 完成
+   sentry-cases（用例设计）     🔄 执行中
+   sentry-executor（用例执行）  ⏳ 待执行
+   sentry-grader（断言评审）    ⏳ 待执行
+   comparator（盲测对比）       ⏳ 待执行
+   analyzer（根因分析）         ⏳ 待执行
+   sentry-report（报告生成）    ⏳ 待执行
+   
+   格式：英文工具名 + 中文说明 + 状态。跳过的步骤标注「— 跳过」。
+   
+   注意：用子工具名（如 sentry-lint）作为步骤标题，不用 Step N
 4. 【检查点】输出三段式回执：
    ① 结果小结：刚才发现了什么，有什么问题，是否影响继续
    ② 下一步预告：接下来要做什么，大约要多久

@@ -478,9 +478,10 @@ batch_parallel_rate = parallel_count / total_count
 4. 在主会话中直接调用工具（feishu_* 等）执行用例
 5. 将工具调用过程写入 transcript.md（绝对路径）
 6. 将最终回复写入 response.md
-7. transcript 开头标注：「⚠️ 降级执行：主会话直跑（非 subagent）」
-8. timing_with.json 标记 "mode": "direct_fallback"
-9. 继续下一个 eval
+7. **按 SKILL.md 输出模板格式化 response.md**：不能直接记录 MCP 原始 JSON，必须按被测 SKILL.md 的输出规范转换为用户可读格式（包含中文字段名、审批状态等）。否则 semantic 断言会因为找不到中文关键词而误判为失败。
+8. transcript 开头标注：「⚠️ 降级执行：主会话直跑（非 subagent）」
+9. timing_with.json 标记 "mode": "direct_fallback"
+10. 继续下一个 eval
 ```
 
 ### 降级后的 grading 处理

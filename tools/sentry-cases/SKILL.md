@@ -307,6 +307,9 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 📁 已保存到：<workspace_dir>/evals.json
 
 下一步：
-  运行用例 → 使用 sentry-executor 或说「执行这些用例」
-  完整流程 → 使用 SkillSentry
+  继续 → 开始执行用例
+  去飞书调整用例 → <飞书多维表格链接>，改完说「继续」，会自动 PULL 最新用例
+  跳过 / 中止
 ```
+
+**飞书链接获取方式**：从 `config.json` 的 `bitable.app_token` 拼接 `https://mi.feishu.cn/base/{app_token}`。config.json 不存在时不展示飞书链接。
