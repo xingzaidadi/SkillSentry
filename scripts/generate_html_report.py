@@ -35,6 +35,139 @@ ADMISSION = {
 RISK_LABEL = {"S": "S级（关键）", "A": "A级（重要）",
               "B": "B级（一般）",  "C": "C级（辅助）"}
 
+# v3.0 六档等级标签
+GRADE_LABEL = {
+    "S": "标杆级", "A": "生产就绪", "B": "基本可用，需迭代",
+    "C": "需改进", "D": "严重缺陷", "F": "不可上线"
+}
+
+# v3.0 指标阈值
+METRIC_THRESHOLDS = {
+    "A1": 0.95, "A2": 0.0, "A3": 1.0,
+    "C1": 0.95, "C2": 0.0, "C3": 0.90, "C4": 0.0, "C5": 0.95, "C6": 1.0,
+    "E1": 0.85, "E2": 0.90, "E3": 0.80,
+}
+
+def compute_v3_grade(metrics, veto_triggered):
+    """v3.0 层级达标制：12 项指标 + 否决项 → S/A/B/C/D/F"""
+    if veto_triggered:
+        return "F", "FAIL"
+    
+    def count_fails(keys):
+        fails = 0
+        for k in keys:
+            v = metrics.get(k)
+            if v is None: continue  # 未采集，跳过
+            threshold = METRIC_THRESHOLDS.get(k, 0)
+            if k in ("A2", "C2", "C4"):  # 这些是 "= 0%" 的指标
+                if v > threshold: fails += 1
+            else:
+                if v < threshold: fails += 1
+        return fails
+    
+    avail_fails = count_fails(["A1", "A2", "A3"])
+    correct_fails = count_fails(["C1", "C2", "C3", "C4", "C5", "C6"])
+    exp_fails = count_fails(["E1", "E2", "E3"])
+    
+    if avail_fails >= 2: return "F", "FAIL"
+    if avail_fails == 1: return "D", "FAIL"
+    if correct_fails == 0 and exp_fails == 0: return "S", "PASS"
+    if correct_fails <= 1 and exp_fails <= 1: return "A", "PASS"
+    if correct_fails <= 2: return "B", "PASS"
+    return "C", "FAIL"
+
+def collect_v3_metrics(evals, ws_dir):
+    """从 metrics_raw.json 和 grading.json 汇总 12 项指标"""
+    metrics = {}
+    counts = {}
+    
+    for ev in evals:
+        eid = ev["id"]
+        # 尝试读取 metrics_raw.json
+        raw_path = os.path.join(ws_dir, f"eval-{eid}", "metrics_raw.json")
+        raw = load_json(raw_path)
+        
+        ws_g = ev.get("ws_g") or {}
+        
+        # A1: 触发命中
+        if raw and raw.get("A1_triggered") is not None:
+            counts.setdefault("A1", []).append(1 if raw["A1_triggered"] else 0)
+        elif ws_g:
+            counts.setdefault("A1", []).append(1)  # 有 grading 就算触发了
+        
+        # A2: 崩溃率
+        if raw and raw.get("A2_has_crash") is not None:
+            counts.setdefault("A2", []).append(1 if raw["A2_has_crash"] else 0)
+        elif ws_g:
+            counts.setdefault("A2", []).append(0)  # 有 grading 就没崩溃
+        
+        # A3: 响应率
+        if raw and raw.get("A3_has_response") is not None:
+            counts.setdefault("A3", []).append(1 if raw["A3_has_response"] else 0)
+        elif ws_g:
+            counts.setdefault("A3", []).append(1)
+        
+        # C3: 结果准确率 = exact_match 通过率
+        if ws_g and ws_g.get("summary"):
+            s = ws_g["summary"]
+            counts.setdefault("C3", []).append(s.get("pass_rate", 0))
+        
+        # C6: IFR
+        if ws_g:
+            exps = ws_g.get("expectations", [])
+            rule_exps = [e for e in exps if e.get("precision") == "exact_match"]
+            if rule_exps:
+                counts.setdefault("C6", []).append(
+                    sum(1 for e in rule_exps if e.get("passed")) / len(rule_exps)
+                )
+        
+        # E3: 效率
+        if raw and raw.get("E3_efficient") is not None:
+            counts.setdefault("E3", []).append(1 if raw["E3_efficient"] else 0)
+    
+    # 汇总
+    for k, vals in counts.items():
+        if k == "A2":  # 崩溃率是越低越好
+            metrics[k] = sum(vals) / len(vals) if vals else 0
+        elif k in ("A1", "A3"):  # 命中率/响应率
+            metrics[k] = sum(vals) / len(vals) if vals else 0
+        elif k == "C3":
+            metrics[k] = sum(vals) / len(vals) if vals else 0
+        elif k == "C6":
+            metrics[k] = sum(vals) / len(vals) if vals else 0
+        elif k == "E3":
+            metrics[k] = sum(vals) / len(vals) if vals else 0
+    
+    return metrics
+
+def check_veto(evals, ws_dir, overall_delta):
+    """检测 8 条否决项"""
+    veto_items = []
+    
+    for ev in evals:
+        eid = ev["id"]
+        raw_path = os.path.join(ws_dir, f"eval-{eid}", "metrics_raw.json")
+        raw = load_json(raw_path)
+        ws_g = ev.get("ws_g") or {}
+        
+        if raw:
+            if raw.get("C4_has_side_effect"): veto_items.append(f"V1 越权操作: eval-{eid}")
+            if raw.get("C2_tools_violated"): veto_items.append(f"V2 工具越界: eval-{eid}")
+        
+        # V3: 幻觉
+        if ws_g:
+            for exp in ws_g.get("expectations", []):
+                if exp.get("fabrication_risk") == "high":
+                    veto_items.append(f"V3 幻觉数据: eval-{eid}")
+                    break
+    
+    # V8: 负向增益
+    if overall_delta is not None and overall_delta < 0:
+        veto_items.append(f"V8 负向增益: Δ={overall_delta:.2%}")
+    
+    return veto_items
+
+
 TYPE_COLOR = {
     "happy_path": "#3b82f6", "atomic": "#8b5cf6",
     "business_logic": "#f59e0b", "boundary": "#06b6d4",
@@ -115,7 +248,7 @@ def collect_disaster(ws_dir):
             g = (load_json(os.path.join(d, "grading.json")) or
                  load_json(os.path.join(d, "outputs", "grading.json")))
             if g:
-                passed = g["summary"]["pass_rate"] >= 1.0
+                passed = g.get("summary", {}).get("pass_rate", 0) >= 1.0
                 disaster.append({"name": name, "grading": g, "passed": passed})
     seen = set()
     return [x for x in disaster if x["name"] not in seen and not seen.add(x["name"])]
@@ -140,8 +273,8 @@ def collect_other_iterations(ws_dir):
                 continue
             g = load_json(os.path.join(ef, "with_skill", "grading.json"))
             if g:
-                total_p += g["summary"]["passed"]
-                total_t += g["summary"]["total"]
+                total_p += g.get("summary", {}).get("passed", 0)
+                total_t += g.get("summary", {}).get("total", 0)
         if total_t:
             return {"name": label, "pass_rate": round(total_p / total_t, 4),
                     "passed": total_p, "total": total_t}
@@ -606,19 +739,26 @@ def build_report(ws_dir, skill_name, risk_level, user, output_path):
 
     for ev in evals:
         ws_g, wos_g = ev["ws_g"], ev["wos_g"]
-        ws_r  = ws_g["summary"]["pass_rate"]  if ws_g  else 0.0
-        wos_r = wos_g["summary"]["pass_rate"] if wos_g else 0.0
-        ws_p  = ws_g["summary"]["passed"]     if ws_g  else 0
-        ws_t  = ws_g["summary"]["total"]      if ws_g  else 0
-        wos_p = wos_g["summary"]["passed"]    if wos_g else 0
-        wos_t = wos_g["summary"]["total"]     if wos_g else 0
+        # v3.0: 兼容新旧 grading.json 格式
+        ws_s = (ws_g or {}).get("summary", {})
+        wos_s = (wos_g or {}).get("summary", {})
+        ws_r  = ws_s.get("pass_rate", 0.0)
+        wos_r = wos_s.get("pass_rate", 0.0)
+        ws_p  = ws_s.get("passed", 0)
+        ws_t  = ws_s.get("total", 0)
+        wos_p = wos_s.get("passed", 0)
+        wos_t = wos_s.get("total", 0)
         ev["ws_rate"]  = ws_r;  ev["wos_rate"] = wos_r
         ev["ws_p"] = ws_p;  ev["ws_t"] = ws_t
         ev["wos_p"] = wos_p; ev["wos_t"] = wos_t
         ev["delta"] = ws_r - wos_r
         total_ws_p  += ws_p;  total_ws_t  += ws_t
         total_wos_p += wos_p; total_wos_t += wos_t
-        if ev["delta"] < 0:
+        # v3.0: mcp_based 不计算 Δ，跳过负向增益判定
+        skill_type_detected = "mcp_based"  # 从第一个 grading.json 检测
+        if ev["ws_g"] and ev["ws_g"].get("skill_type"):
+            skill_type_detected = ev["ws_g"]["skill_type"]
+        if ev["delta"] < 0 and skill_type_detected not in ("mcp_based",):
             neg_delta.append(ev)
         etype = ev.get("type", "unknown")
         if etype not in type_stats:
@@ -653,16 +793,19 @@ def build_report(ws_dir, skill_name, risk_level, user, output_path):
 
     disaster_pass = all(d["passed"] for d in disaster) if disaster else True
 
-    # Decision（P4: 触发率降级逻辑在后段 trigger_html 生成后合并）
-    # 先用通用逻辑得到 base decision，后段可降级
-    if (authoritative_rate >= crit["pass_rate"] and len(neg_delta) == 0
-            and (not crit["disaster_required"] or disaster_pass)):
-        decision = "PASS"
+    # v3.0: 12 项指标 + 否决项 + 六档层级达标制
+    v3_metrics = collect_v3_metrics(evals, ws_dir)
+    veto_items = check_veto(evals, ws_dir, overall_delta if total_wos_t > 0 else None)
+    v3_grade, v3_verdict = compute_v3_grade(v3_metrics, len(veto_items) > 0)
+    
+    # 用 v3.0 结果作为主判定
+    decision = v3_verdict
+    grade = v3_grade
+    if decision == "PASS":
         decision_color = "#1a3a2a"
         decision_text_color = "#6ee7b7"
         decision_icon = "✅"
-    elif authoritative_rate >= crit["pass_rate"] - 0.05:
-        decision = "CONDITIONAL PASS"
+    elif decision == "CONDITIONAL PASS":
         decision_color = "#3a2a0a"
         decision_text_color = "#fde68a"
         decision_icon = "⚠️"
@@ -671,6 +814,15 @@ def build_report(ws_dir, skill_name, risk_level, user, output_path):
         decision_color = "#3a0a0a"
         decision_text_color = "#fca5a5"
         decision_icon = "❌"
+    
+    # CONDITIONAL PASS 检测：C3 在阈值 ±5% 内
+    c3_val = v3_metrics.get("C3")
+    if c3_val is not None and 0.85 <= c3_val < 0.90 and decision == "FAIL" and not veto_items:
+        decision = "CONDITIONAL PASS"
+        v3_verdict = "CONDITIONAL PASS"
+        decision_color = "#3a2a0a"
+        decision_text_color = "#fde68a"
+        decision_icon = "⚠️"
 
     # P3: quick 不稳定降级
     if run_stability and run_stability.get("unstable"):

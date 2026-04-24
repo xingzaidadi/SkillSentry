@@ -9,7 +9,11 @@ description: >
 
 # sentry-executor · Skill 测试用例执行层（Layer 1）
 
-读取 evals.json，并行执行所有测试用例（with_skill，视模式决定是否含 without_skill），输出带 transcript 的执行结果。
+读取 evals.json，执行所有测试用例（with_skill，视模式决定是否含 without_skill），输出带 transcript 的执行结果。
+
+**执行策略**：支持两种模式，自动选择：
+- **subagent 模式**（默认）：每个 eval 启动轻量 subagent（lightContext + 预编译），保留 AI 判断能力
+- **direct 模式**（降级兜底）：subagent 超时/失败时，AI 在主会话中直接执行兜底
 
 **前置条件**：workspace_dir 下必须存在 `evals.json`（可由 sentry-cases 生成）。
 
@@ -67,6 +71,21 @@ mode != "regression"：执行全部用例，跳过本节
 | regression | 1 |
 | standard | 3 |
 | full | 3 |
+
+---
+
+## Step 0.5：预编译（主会话预读文件，subagent 不再读）
+
+执行前，主会话一次性预读以下文件，后续所有 subagent 直接从 task 参数获取内容，不再自行读取文件：
+
+```
+1. 读取被测 SKILL.md → 缓存为 skill_content
+2. 读取 evals.json → 缓存为 evals_list
+3. 对每个 eval，构造 task 参数时直接注入 skill_content + eval.input
+```
+
+**收益**：每个 subagent 省 2-3 个 tool call（约 3-5s）。
+**验证**：subagent transcript 中不应出现 `read(evals.json)` 或 `read(SKILL.md)` 的 tool call。
 
 ---
 
@@ -152,50 +171,141 @@ workspace_dir/
 
 > subagent 启动时，工作目录传入 `eval-N/run-R/`；单次运行时传入 `eval-N/`（无 run-R 层）。
 
+**❗ 文件写入必须用绝对路径**：subagent prompt 中必须注入输出目录的绝对路径（如 `/root/.openclaw/skills/SkillSentry/sessions/xxx/eval-1/with_skill/outputs/`）。相对路径会导致 subagent 写到错误位置，产生「完成但没写文件」的问题。
+
 ---
 
 ## 每批启动前必须输出的声明（不声明禁止发出 subagent 调用）
 
 ```
 【批次启动声明 · Batch-N】
-用例：eval-[X], eval-[Y]（共 [N] 个）
-并行方式：[全部 with_skill only（skip_without_skill=true）/ with_skill + without_skill 双侧并行] ✓
+执行模式：[subagent / direct]
+用例：eval-[X]（共 1 个）
+skill_type=[类型] | skip_without_skill=[true/false]
 without_skill steps 上限：[8/6/5]（skill_type=[类型]）/ N/A（全部跳过）✓
 without_skill 早退指令：[已注入 / N/A（全部跳过）] ✓
 without_skill 策略：[全部跳过（mcp_based + smoke/quick 模式）/ 正常双侧执行（其他）] ✓
+降级策略：[超时 180s 自动降级 direct / N/A（无降级）] ✓
 ```
 
-声明写出后，在**同一消息**中发出所有 Agent 工具调用。
+声明写出后，在**同一消息**中发出 Agent 工具调用（subagent 模式）或启动 exec（direct 模式）。
 
 ---
 
 ## skip_without_skill 检查
 
+**自动跳过规则**：
+
+```
+mcp_based + 任何模式：skip_without_skill = true
+  → 原因：无 skill 指导时 AI 不知道调哪个 MCP 工具，Δ 数据无参考价值
+  → 报告标注：Δ=N/A（设计决策：mcp_based 跳过 without_skill）
+
+其他 skill_type：
+  smoke/quick/regression：视 evals.json 中 skip_without_skill 字段
+  standard/full：默认 skip_without_skill = false（保留 Δ 数据）
+```
+
 读取 evals.json 中每个用例的 `skip_without_skill` 字段：
 - `true`：只启动 with_skill，在声明中注明「eval-[N] without_skill 已跳过」
 - `false` 或不存在：正常启动双侧
+- **手动覆盖**：用户明确要求出 Δ 时，可设 skip_without_skill: false 强制双侧执行
 
 ---
 
-## 强制并行规则
+## 执行策略选择
 
-每个用例的 with_skill 和 without_skill **必须在同一批次同一消息中启动**：
+Executor 使用 subagent 模式（通过 `sessions_spawn` 启动子代理），并应用以下优化：
+
+### subagent 启动优化
 
 ```
-❌ 串行（时间 × 2）：eval-1 with → 等完成 → eval-1 without → ...
-✅ 并行：同时发出 eval-1 with + eval-1 without（同一消息）
+sessions_spawn(
+  mode: "run",
+  lightContext: true,      ← 第 2 层：轻量启动，跳过工作区文件
+  task: "[  ← 第 1 层：预编译内容直接注入
+    固定前缀（SKILL.md + 规范）
+    +
+    变量后缀（eval_id + input + 输出路径）
+  ]",
+  runTimeoutSeconds: 180   ← 超时后触发降级
+)
 ```
 
-**批次大小**：
-- quick 模式（mcp_based）：全部 8-10 个用例一次性启动（每 eval 仅 2 subagent，共 16-20 subagent，无需分批）
-- quick 模式（其他类型）：每批 4-5 个用例（16-20 subagent 并行）
-- standard/full 模式：每批 2-3 个用例（4-6 subagent）
+### with_skill prompt 构造规范（触发 prompt cache）
 
-**quick 模式 mega-batch**：2 次运行合并进同一批次，run1 和 run2 同时启动：
+prompt 必须按以下顺序组织，**固定前缀放最前，变量放最后**，以触发模型提供商的 prompt prefix cache：
+
 ```
-mcp_based+quick：[eval-1 run-1 with] [eval-1 run-2 with] [eval-2 run-1 with] [eval-2 run-2 with] [eval-3 ...]
-其他类型+quick：[eval-1 run-1 with] [eval-1 run-1 without] [eval-1 run-2 with] [eval-1 run-2 without] [eval-2 ...]
+[固定前缀 · 所有 eval 完全相同，可缓存]
+你是 SkillSentry Executor subagent。
+
+## 被测 SKILL.md
+{skill_content}    ← 主会话预读，直接注入
+
+## transcript 格式规范
+[tool_calls] Step N: <工具名>
+Tool: <exact_tool_name>
+Args: <完整 JSON>
+Return: <完整返回值>
+Status: success | error | timeout
+
+## 执行规则
+1. 按 SKILL.md 指导处理用户输入
+2. 所有工具调用记录到 transcript.md
+3. 最终回复写入 response.md
+4. 文件必须写入指定的绝对路径
+
+[变量后缀 · 每个 eval 不同，放最后]
+## 本次任务
+eval_id: {eval_id}
+用户输入: {eval_input}
+输出路径: {absolute_output_path}/
 ```
+
+**注意**：prompt cache 是 Claude API 特有优化，其他模型提供商可能无效（但不会出错）。
+
+### 降级规则
+
+当 subagent 超时或失败时，Executor AI 直接在主会话中执行该用例（direct 降级），而不是再次启动 subagent。详见「超时降级机制」章节。
+
+---
+
+## 并发适配（动态探测）
+
+### Step 0.8：网关并发探测（首次执行时自动运行）
+
+```
+1. 同时 spawn 2 个轻量 subagent：
+   sessions_spawn(mode: "run", lightContext: true,
+     task: "exec: echo ok > /tmp/probe_1.txt，然后回复 done",
+     runTimeoutSeconds: 30)
+
+2. 记录完成时间：
+   - 两个都在 15s 内完成 → gateway_concurrency >= 2
+   - 一个完成后另一个才开始 → gateway_concurrency = 1
+   - 两个都超时 → gateway_concurrency = 0（网关异常，退回串行）
+
+3. 写入 eval_environment.json：
+   {"gateway_concurrency": N, "probe_time": "ISO时间"}
+
+4. 整个测评期间只探测一次，结果缓存
+```
+
+### 批次大小（由探测结果决定）
+
+```
+gateway_concurrency = N
+
+smoke/regression：每批 N 个 eval
+quick：每批 N 个 eval，每 eval 的 run1+run2 同批（mega-batch 保留）
+standard/full：每批 N 个 eval，run 分批
+
+探测失败或未探测 → 默认 N=1（串行）
+```
+
+- 利用断点续跑加速（已完成的跳过）
+- direct 降级天然串行，不受影响
 
 ---
 
@@ -209,11 +319,13 @@ mcp_based+quick：[eval-1 run-1 with] [eval-1 run-2 with] [eval-2 run-1 with] [e
 
 ---
 
-## without_skill subagent prompt 必须注入
+## without_skill subagent prompt 构造
+
+**❗ 不注入被测 SKILL.md**：without_skill 测的是「没有 skill 指导时的自然行为」，注入 SKILL.md 违背测试目的。
 
 **沙箱隔离声明（所有 skill_type 通用，必须注入）**：
 ```
-你的工作目录是 eval-N/without_skill/workspace/（多次运行时：eval-N/run-R/without_skill/workspace/），禁止读取 eval-N/with_skill/ 下的任何文件。
+你的工作目录是 {absolute_output_path}/without_skill/workspace/，禁止读取 with_skill/ 下的任何文件。
 所有操作必须独立完成，不能复用 with_skill 的任何结果。
 你的目标是展示没有 Skill 指导时的自然行为。
 
@@ -341,13 +453,50 @@ batch_parallel_rate = parallel_count / total_count
 
 ---
 
+## 超时降级机制（subagent → 主会话直跑）
+
+当 subagent 超时或失败时，Executor AI 在主会话中直接执行该用例（不再启动新 subagent）。
+
+### 降级触发条件
+
+1. **subagent 超时**：`sessions_spawn` 后等待 `runTimeoutSeconds`（默认 180s）无响应
+2. **subagent 返回空 transcript**：task 完成但 `eval-N/with_skill/outputs/transcript.md` 不存在或为空
+3. **subagent 异常退出**：task 返回错误状态
+
+### 降级不触发的场景
+
+- subagent 返回错误但有 transcript（记录错误即可，不降级）
+- text_generation 类型（必须 AI 执行，无法主会话直跑）
+
+### 降级执行流程（Executor AI 在主会话中执行）
+
+```
+1. 输出：「⚠️ eval-N subagent 超时，降级到主会话直跑」
+2. 读取被测 SKILL.md
+3. 读取 evals.json 中 eval-N 的 input
+4. 在主会话中直接调用工具（feishu_* 等）执行用例
+5. 将工具调用过程写入 transcript.md（绝对路径）
+6. 将最终回复写入 response.md
+7. transcript 开头标注：「⚠️ 降级执行：主会话直跑（非 subagent）」
+8. timing_with.json 标记 "mode": "direct_fallback"
+9. 继续下一个 eval
+```
+
+### 降级后的 grading 处理
+
+- 降级用例的 metrics_raw.json 标记 `"direct_fallback": true`
+- grading 时：A1/A2/A3/E3 正常评分，C3/C6 标记为 `null`（非 subagent 执行，无法评判 skill 指导效果）
+- report 中单独统计降级比例：`direct_fallback_rate = N/total`
+
+---
+
 ## 执行完成后的输出
 
 ```
 ✅ 执行完成
-📊 完成：[N] 个用例 × [R] 次运行（[N×2 - skip数] 个 subagent）
+📊 完成：[N] 个用例 × [R] 次运行
 ⏱️ 总耗时：约 [X] 分钟
-🔄 并行率：[X]%（[N]/[N] 个用例并行）/ N/A（全部 skip_without_skill，无双侧对比）
+🔄 执行模式：[subagent / direct / 混合（subagent + N 个降级 direct）]
 📊 指标采集：✅ A1/A2/A3/E3 已提取 | 🔧 C1/C2/C4/C5 视 evals.json 字段 | ⏳ C3/C6/E1/E2 待 Grader/Report
 
 下一步：
