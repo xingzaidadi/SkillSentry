@@ -408,3 +408,29 @@ P0 为空时输出「✅ 无必须修复项」，不输出空标题。
 ✅ 飞书同步完成：运行记录已写入，[N] 条新用例待 Review
   （或：⚠️ 飞书同步失败：<原因>，本地报告不受影响）
 ```
+
+---
+
+## 发布决策确认（HiL 人工确认节点）
+
+报告生成后，**禁止直接结束**，必须等待用户确认：
+
+```
+📋 发布决策：[PASS/CONDITIONAL PASS/FAIL]（[等级]）
+
+⚠️ 此结论由 AI 生成，请人工确认后再作为最终发布依据。
+
+回复「确认发布」→ 标记为最终结论，写入 session.json
+回复「暂不发布」→ 标记为「待确认」
+30 分钟无响应 → 标记为「待确认」（不自动确认）
+```
+
+确认后更新 `workspace_dir/session.json`：
+```json
+{
+  "decision": "PASS",
+  "decision_confirmed": true,
+  "confirmed_by": "human",
+  "confirmed_at": "ISO时间"
+}
+```
