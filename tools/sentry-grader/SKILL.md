@@ -104,3 +104,16 @@ Grader subagent 超时（180s 无响应）时：
 每个 eval 目录下写入 `grading.json`，格式见 `agents/grader.md`。
 
 更新 `session.json` 的 `last_step` 为 `"step5_grader_done"`。
+
+---
+
+## 读取证明（主编排器校验用）
+
+输出的最后一行必须包含以下格式的校验标记：
+
+```
+[sentry-proof] skill=<本工具名> steps=<本次执行的步骤数> ts=<ISO时间>
+```
+
+主编排器通过检查此标记确认子工具确实读取并执行了 SKILL.md，而非凭记忆发挥。
+缺少此标记 → 主编排器判定为「未按 SKILL.md 执行」，要求重跑。

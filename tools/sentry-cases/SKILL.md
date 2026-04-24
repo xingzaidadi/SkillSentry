@@ -313,3 +313,16 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 ```
 
 **飞书链接获取方式**：从 `config.json` 的 `bitable.app_token` 拼接 `https://mi.feishu.cn/base/{app_token}`。config.json 不存在时不展示飞书链接。
+
+---
+
+## 读取证明（主编排器校验用）
+
+输出的最后一行必须包含以下格式的校验标记：
+
+```
+[sentry-proof] skill=<本工具名> steps=<本次执行的步骤数> ts=<ISO时间>
+```
+
+主编排器通过检查此标记确认子工具确实读取并执行了 SKILL.md，而非凭记忆发挥。
+缺少此标记 → 主编排器判定为「未按 SKILL.md 执行」，要求重跑。

@@ -505,3 +505,16 @@ batch_parallel_rate = parallel_count / total_count
   评分 → 使用 SkillSentry 内置 Grader，或说「帮我评审这批结果」
   报告 → 先运行 Grader，再使用 sentry-report
 ```
+
+---
+
+## 读取证明（主编排器校验用）
+
+输出的最后一行必须包含以下格式的校验标记：
+
+```
+[sentry-proof] skill=<本工具名> steps=<本次执行的步骤数> ts=<ISO时间>
+```
+
+主编排器通过检查此标记确认子工具确实读取并执行了 SKILL.md，而非凭记忆发挥。
+缺少此标记 → 主编排器判定为「未按 SKILL.md 执行」，要求重跑。
