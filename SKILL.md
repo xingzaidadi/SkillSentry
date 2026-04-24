@@ -27,6 +27,21 @@ description: >
 
 ---
 
+## 特殊命令
+
+| 用户说 | 动作 |
+|--------|------|
+| 「验证安装」「验证 SkillSentry」 | 检查所有 sentry-* 工具是否存在，逐一列出 ✅/❌ |
+
+## 素材自动存档
+
+用户发文件 + 说「存到 xxx 测评素材」「给 xxx 测评用的」时：
+1. 提取 Skill 名称
+2. 保存到 `inputs/<skill名>/`（保留原始文件名）
+3. 回执：「✅ 已存入 inputs/<skill名>/<文件名>」
+
+---
+
 ## Step 1：找 Skill + 初始化
 
 1. 找 SKILL.md：用户给路径 → 直接用；给名字 → `~/.openclaw/skills/<名字>/` 或 `~/.config/opencode/skills/<名字>/`
@@ -38,6 +53,7 @@ description: >
 4. 创建工作目录：`sessions/<skill_name>/<YYYY-MM-DD>_<NNN>/`
 4. 写 `session.json`（workspace_dir / inputs_dir / skill_name / skill_path / skill_type / mode / created_at / last_step）
 5. 所有路径必须是绝对路径
+6. 检测运行环境：来自飞书/Telegram → runtime="openclaw"；其他 → runtime="cli"。写入 session.json。
 
 检测 skill_type：含 MCP 工具引用 → mcp_based；含 exec/bash → code_execution；其他 → text_generation。
 
@@ -64,8 +80,17 @@ description: >
 
 默认 quick。用户说「冒烟」→ smoke；「提测前」→ standard；「正式发布前」→ full。
 
-输出：「📋 模式：{mode} | 步骤：{步骤列表} | 预计 {时间}」
-等用户确认（60s 无回复自动继续）。
+**自动模式**：用户说「自动」「全自动」「--ci」时，跳过所有检查点连续执行：
+- 测试数据：先自动查，没有就 mock，不问用户
+- 检查点：全部跳过，不停顿
+- 读取证明：仍然强制校验（跳过检查点 ≠ 跳过读取验证）
+- HiL 确认：**不跳过**（发布决策必须人工确认）
+
+示例：「测评 em-reimbursement-v3 standard 自动」→ standard 模式 + 自动执行
+
+输出：「📋 模式：{mode} | 步骤：{步骤列表} | 预计 {时间} | 自动模式：{是/否}」
+非自动模式：等用户确认（60s 无回复自动继续）。
+自动模式：直接开始，不等确认。
 
 ---
 
@@ -78,9 +103,17 @@ description: >
 2. 按子工具 SKILL.md 的指令执行（子工具自己决定怎么做）
    ⛔ 禁止凭记忆执行子工具逻辑。必须先 read 再执行。上下文再长也不能跳过读取。
    
-   **读取证明校验**：子工具执行完后，检查输出是否包含 `[sentry-proof]` 标记。
+   **读取证明校验**（所有模式强制，含全自动）：子工具执行完后，检查输出是否包含 `[sentry-proof]` 标记。
    - 有 → 继续下一步
    - 没有 → 判定为「未按 SKILL.md 执行」，重新读取并执行该子工具
+   ⛔ 全自动模式也不能跳过此校验。跳过检查点 ≠ 跳过读取验证。
+   
+   **代码级验证**（不靠 AI 自律）：子工具输出后，用 exec 调 `scripts/verify_proof.py` 检查：
+   ```
+   echo "<子工具输出>" | python3 scripts/verify_proof.py
+   返回码 0 → 继续
+   返回码 1 → 强制重新读取并执行
+   ```
 3. 输出进度回执（包含全局进度列表）：
    ✅ {子工具名} 完成 | ⏱ {耗时}
    {1-2 行关键数据}
