@@ -55,7 +55,6 @@ text_generation（默认兜底）：
 | `timing_with.json` / `timing_without.json` | sentry-executor | sentry-report | `executor_start_ms`, `executor_end_ms`, `duration_ms`, `total_tokens`, `input_tokens`, `output_tokens` |
 | `grading.json` | agents/grader | sentry-report | `skill_type`, `expectations[]`, `summary{passed,failed,total,precision_breakdown,authoritative_pass_rate}`, `timing`, `eval_feedback` |
 | `eval_environment.json` | sentry-executor | 审计用 | `parallelism_audit[]{batch,parallel_rate,violations[]}`, `overall_parallel_rate` |
-| `baseline.snapshot.json` | sentry-report（首次 PASS 时写入） | sentry-report（后续运行时读取对比） | `exact_match_pass_rate`, `avg_delta`, `stddev`, `IFR`, `p95_response_ms`, `verdict`, `skill_hash`, `mode`, `created_at`, `session` |
 
 ---
 

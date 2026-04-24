@@ -62,6 +62,25 @@ description: >
 如有缺失，重新运行 install.sh / install.ps1 即可。
 ```
 
+## 素材自动存档（文件上传触发）
+
+当用户发送文件（图片/PDF/Excel 等）并附带类似以下表述时，自动将文件存入对应 inputs 目录：
+
+**触发表述**：
+- 「存到 xxx 测评素材」
+- 「放到 xxx 的 inputs」
+- 「这是 xxx 的测评素材」
+- 「给 xxx 测评用的」
+- 「xxx 测评素材」
+
+**处理流程**：
+1. 从消息中提取 Skill 名称（xxx）
+2. 确认 `inputs/<skill名>/` 目录存在，不存在则自动创建
+3. 将文件保存到该目录（保留原始文件名）
+4. 回执：`✅ 已存入 SkillSentry/inputs/<skill名>/<文件名>`
+
+**多文件支持**：一次发多个文件 + 同一条触发表述 → 全部存入同一目录。
+
 ---
 
 ## Step 1：定位被测 Skill + 初始化工作目录
@@ -152,6 +171,7 @@ Step 2：读取 inputs_dir/rules.cache.json
   │
   ├─ hash 不匹配（SKILL.md 有变更）
   │     → 规则变了，推断：smoke（先快速验证核心路径是否崩溃）
+  │     → [OpenClaw] 自动标记 Bitable 中该 Skill 的 active 用例为 needs_review
   │
   └─ hash 匹配（SKILL.md 未变）
         ├─ cases.cache.json 存在 → 推断：regression（规则和用例都没变，直接跑）
@@ -173,8 +193,9 @@ Step 2：读取 inputs_dir/rules.cache.json
    预计时间：<时间>
    Token 预估：<smoke:~1-2万 / quick(mcp_based):~3-5万 / quick(其他):~5-10万 / regression:~3-5万 / standard:~10-15万 / full:~15-20万>
 
-直接回复「开始」或不回复则 30 秒后自动开始。
-如需调整，说：「full」「quick」「smoke」「regression」「lint」
+回复「开始」启动。每步完成后会回执进度，你可以选择：继续 / 跳过 / 中止。
+如需调整工作流，说：「full」「quick」「smoke」「regression」「lint」
+如需全自动（无检查点），说：「开始 自动」
 ```
 
 **自动模式**（任何运行环境）：prompt 中包含 `自动` 或 `--ci` 时，跳过 30 秒等待，立即开始执行。
@@ -192,11 +213,26 @@ Step 2：读取 inputs_dir/rules.cache.json
   { "skill_hash": "<md5>", "extracted_at": "<ISO时间>", "rules": [...] }
   ```
 
+### Bitable stale 标记（OpenClaw 模式 + hash 不匹配时）
+
+当 SKILL.md hash 与缓存不匹配时，自动标记 Bitable 中的过期用例：
+
+1. 调用 `feishu_app_bitable_app_table_record(action: list, filter)` 查询：
+   - 筛选：skill_name = 被测 Skill AND status = active AND created_skill_hash ≠ 当前 hash
+2. 对匹配的记录，调用 `feishu_app_bitable_app_table_record(action: batch_update)` 将 status 改为 needs_review
+3. 回执：`🔄 已标记 N 条用例为 needs_review（SKILL.md 已变更）`
+
 ---
 
-## Step 4：按工作流执行工具链
+## Step 4：按工作流执行工具链（分步透明执行）
 
-加载对应工具的 SKILL.md，按顺序执行。工具间通过 session 目录中的 JSON 文件传递状态：
+### 核心原则：每步可见，可中断
+
+**⚠️ 绝对禁止**：将整个工作流一次性扔进一个 subagent 跑完。必须在主会话中按步骤逐步执行，每步完成后向用户汇报进度。
+
+### 执行协议
+
+工具间通过 session 目录中的 JSON 文件传递状态：
 
 ```
 rules.cache.json → sentry-cases 读取
@@ -206,62 +242,185 @@ trigger_eval.json → sentry-report 读取（full 模式，路径：inputs_dir/t
 comparison.json → sentry-report 读取（standard/full 模式）
 ```
 
-**Grader 规则**（内部使用）：
+### 每步执行格式
+
+每完成一个步骤，必须输出进度回执：
+
+```
+✅ <步骤名> 完成 | ⏱ <耗时> | 📊 <关键数据>
+
+<1-3 行摘要，说明发现了什么>
+
+继续下一步（<下一步名称>）？回复：继续 / 跳过 / 中止出报告
+```
+
+**进度条**（飞书场景适用）：
+每次回执附带全局进度，格式：`进度 [█░░░░░░░░░] 2/8`
+- 用 █ 表示已完成步骤，░ 表示未完成
+- smoke 模式共 4 步，quick 共 5-6 步，standard 共 7-8 步，full 共 8-9 步
+
+### 用户检查点
+
+每步完成后等待用户指令（默认 60 秒无回复自动 `继续`）：
+
+| 用户指令 | 动作 |
+|----------|------|
+| `继续` / `next` / 直接回车 | 执行下一步 |
+| `跳过` | 跳过当前步骤，用缓存数据或空结果继续 |
+| `中止` / `abort` | 停止执行，基于已有结果出报告 |
+| `重跑` | 重新执行当前步骤 |
+
+**例外**：`自动` 模式下跳过所有检查点，连续执行。
+
+### 各步骤详解
+
+#### Step 4.1：sentry-lint
+- 加载 `sentry-lint/SKILL.md`，执行静态结构检查
+- 回执格式：
+  ```
+  ✅ sentry-lint 完成 | ⏱ 30s | 进度 [█░░░░░░░░░] 1/N
+  
+  通过 X 项 / ⚠️ 建议改进 Y 项 / ❌ 需修复 Z 项
+  P0 问题：<如有，列出 1 行摘要>
+  ```
+
+#### Step 4.2：sentry-trigger（full 模式）
+- 加载 `sentry-trigger/SKILL.md`，执行触发率模拟
+- 回执格式：
+  ```
+  ✅ sentry-trigger 完成 | ⏱ 2min | 进度 [██░░░░░░░░] 2/N
+  
+  TP: X% | TN: Y% | 置信度: high/medium/low
+  ```
+
+#### Step 4.3：规则提炼 + sentry-cases
+- 读取被测 SKILL.md 全文，提炼业务规则
+- 写入 rules.cache.json（附带当前 hash）
+- 加载 `sentry-cases/SKILL.md`，设计测试用例
+- 回执格式：
+  ```
+  ✅ sentry-cases 完成 | ⏱ Xmin | 进度 [███░░░░░░░] 3/N
+  
+  提炼规则：N 条 | 设计用例：M 个
+  用例分布：happy_path X / edge_case Y / negative Z / robustness W
+  
+  用例列表：
+  | # | 用例 | 类型 | 覆盖规则 |
+  |---|------|------|---------|
+  | eval-1 | xxx | happy_path | R1/R3 |
+  | eval-2 | xxx | edge_case | R5 |
+  ...
+  
+  如有缓存命中则跳过此步骤
+  ```
+
+#### Step 4.4：sentry-executor（多次运行）
+- 加载 `sentry-executor/SKILL.md`
+- 每个用例执行 with_skill 和 without_skill 对照
+- **每次 run 完成独立回执**：
+  ```
+  ✅ executor run-1 完成 | ⏱ Xmin | 进度 [████░░░░░░] 4/N
+  
+  执行用例：M 个 | with_skill: OK/FAIL | without_skill: OK/FAIL
+  跳过：<skip 的用例数>
+  ```
+- run-2、run-3 同理，每 run 一次回执一次
+
+#### Step 4.5：grader
+
+**Grader 流水线调度模式：**
+
+| 模式 | 首批 Executor | Grader 策略 | 尾批 Executor |
+|------|-------------|-----------|-------------|
+| smoke | eval-1 ~ eval-2 | **同步**（等本批结束再启下一批） | — |
+| quick | eval-1 ~ eval-3 | **同步等待前 ⌈N/3⌉ 个 eval 的 Grader 完成**，剩余 eval 非阻塞 | 后续 eval 并行 |
+| standard/full | eval-1 ~ eval-3 | **非阻塞**（Grader 与 Executor 并行） | 后续 eval 并行 |
+
+**非阻塞模式执行顺序：**
+1. **并行审计**：检查 Executor 的工具调用日志，检测隐藏错误（静默失败、误用 API、遗漏必选参数等）
+2. **启动 Grader 后台**：对前一批 eval 的 transcript 开始断言评审（异步，不阻塞后续 Executor）
+3. **立即启动下一批 Executor**：不等 Grader 完成，保持流水线满载
+
+**Grader 通用规则：**
+- 按 agents/grader.md 规范执行断言评审
+- 每批 ≥ 2 个用例的 transcript
+- 回执格式：
+  ```
+  ✅ grader 完成 | ⏱ Xmin | 进度 [█████░░░░░] 5/N
+  
+  总断言：N 条 | 通过：X | 失败：Y | 不确定：Z
+  精确通过率：X% | 综合通过率：Y%
+  ```
+
+#### Step 4.6：comparator（standard/full 模式）
+- 仅对 happy_path + e2e 用例
+- 回执格式：
+  ```
+  ✅ comparator 完成 | ⏱ Xmin | 进度 [██████░░░░] 6/N
+  
+  对比用例：N 个 | Skill 胜出：X | without 胜出：Y | 持平：Z
+  增益 Δ：<关键发现 1 行>
+  ```
+
+#### Step 4.7：analyzer（full 模式，仅 comparator 有失败时）
+- 回执格式：
+  ```
+  ✅ analyzer 完成 | ⏱ Xmin | 进度 [███████░░░] 7/N
+  
+  根因分析：N 个失败用例
+  主要根因：<1 行摘要>
+  ```
+
+#### Step 4.8：sentry-report
+- **强制使用 HTML 模板**（references/report-template.md），禁止输出 plain markdown
+- **OpenClaw 模式**：生成 HTML 后自动同步为飞书文档，返回飞书链接
+- 回执格式：
+  ```
+  ✅ sentry-report 完成 | ⏱ Xmin | 进度 [██████████] N/N
+  
+  发布决策：<PASS / CONDITIONAL PASS / FAIL>
+  精确通过率：X% | 触发率：TP X% / TN Y%
+  
+  📁 报告：<飞书文档链接>
+  本地备份：<session_dir>/report.html
+  ```
+
+### Grader 规则（内部使用）
 - 每次调用必须传入 ≥ 2 个用例的 transcript
 - 使用 `explore` subagent 类型（只读，更快）
 - 详细规范见 `agents/grader.md`
 
-**Grader 调度模式**（流水线执行）：
-
-| 工作流 | Grader 调度 | 原因 |
-|--------|------------|------|
-| smoke | 同步等待（阻塞） | 用例少（4-5个），流水线收益低 |
-| quick | **第一批同步**（快速失败检测），其余批次非阻塞；mcp_based+quick 单批次整体同步 | 第一批结果用于判断是否提前终止 |
-| regression / standard / full | **后台非阻塞启动** | 多批次执行，重叠 Grader 与下一批 Executor |
-
-**非阻塞模式执行顺序**：
+### 快速失败检测（仅 quick 模式，第一批完成后触发）
 ```
-每批 Executor 完成
-  → 并行审计（写 eval_environment.json）
-  → 启动该批 Grader（后台，不等待）
-  → 立即启动下一批 Executor          ← 不再等 Grader 完成
-
-Grader 后台完成时（task notification）
-  → 上下文压缩（该批摘要）
-  → 若处于下一批 Executor 执行中，压缩操作在下一批启动声明之后处理
-```
-
-**快速失败检测**（仅 quick 模式，第一批完成后触发；smoke 本身已同步，自然触发）：
-```
-【quick 例外】第一批 Grader 强制同步等待（覆盖后续批次的非阻塞规则），拿到结果后：
-  读取第一批所有 grading.json 的 authoritative_pass_rate
-  计算平均值 first_batch_pass_rate
-
+第一批 Grader 完成后：
   first_batch_pass_rate < 20%：
     ⚠️ 前 [N] 个用例平均通过率 [X]%，Skill 可能存在根本性问题
-    失败集中在：[列出 fail 最多的断言类型]
     选项：
       [继续执行剩余用例]
       [立即终止，查看当前结果] ← 默认，30 秒后自动选择
 
-  first_batch_pass_rate ≥ 20%：静默继续，后续 Grader 恢复非阻塞模式
+  first_batch_pass_rate ≥ 20%：静默继续
 ```
 
-**进入 sentry-report 前的强制等待点**：
-```
-所有 Executor 批次完成后：
-  检查所有 eval-N/grading.json（多次运行时为 eval-N/run-R/grading.json）是否存在且非空
-  → 全部就绪 → 立即启动 sentry-report
-  → 有未完成 → 输出「⏳ 等待 Grader 完成（已完成 N/M）」
-               每 30 秒检查一次
-               最长等待 10 分钟
-               超时则输出告警并跳过未完成的 eval
-```
+### 总计时汇总
 
-**Comparator/Analyzer**（standard/full 模式）：
-- 仅对 happy_path + e2e 类型用例运行
-- 非阻塞启动，不等待其完成再进行下一批
-- 同样在进入 sentry-report 前确认完成
+全部步骤完成后，在最终报告前输出总耗时：
+
+```
+📊 测评完成！总耗时：XXm XXs
+
+| 步骤 | 耗时 |
+|------|------|
+| sentry-lint | 30s |
+| sentry-trigger | 2min |
+| sentry-cases | 5min |
+| executor run-1 | Xmin |
+| executor run-2 | Xmin |
+| executor run-3 | Xmin |
+| grader | Xmin |
+| report | 1min |
+| **总计** | **XXm** |
+```
 
 ---
 
@@ -298,4 +457,4 @@ without_skill 禁止读取 with_skill 目录下任何文件（含 transcript、u
 
 ---
 
-*Last Updated: 2026-04-13 (v2)*
+*Last Updated: 2026-04-20 (v3) · 改造：分步透明执行 + 进度回执 + 用户检查点 + HTML 报告模板强制*
