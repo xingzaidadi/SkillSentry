@@ -18,7 +18,7 @@ description: >
 ## 输入
 
 - `workspace_dir`：本次测评工作目录
-- `inputs_dir`：`~/.openclaw/skills/SkillSentry/inputs/<skill_name>/`（sentry-trigger 结果存于此）
+- `inputs_dir`：`{SkillSentry根目录}/inputs/<skill_name>/`（sentry-trigger 结果存于此）
 - `mode`：测评模式（smoke/quick/standard/full）
 - `skill_name`：被测 Skill 名称
 
@@ -267,7 +267,7 @@ IFR：         95%          100%         +5% ↑
 
 ## Step 5：生成报告
 
-读取 `~/.openclaw/skills/SkillSentry/references/report-template.md`，填充以下章节：
+读取 `{SkillSentry根目录}/references/report-template.md`，填充以下章节：
 
 ```
 一、测评概览（Skill名/模式/日期/总用例数）
@@ -310,7 +310,7 @@ IFR：         95%          100%         +5% ↑
 报告生成完成后，将本次结果追加到 `inputs_dir/history.json`：
 
 ```bash
-python3 ~/.openclaw/skills/SkillSentry/scripts/update_history.py \
+python3 {SkillSentry根目录}/scripts/update_history.py \
   --skill <skill_name> \
   --session-dir <workspace_dir> \
   --mode <mode> \
@@ -389,16 +389,16 @@ P0 为空时输出「✅ 无必须修复项」，不输出空标题。
 
 ## 最终步骤：飞书同步（PUSH）
 
-报告生成完成后，调用 sentry-sync 操作二和操作三：
+报告生成完成后，由主编排（SkillSentry）在 report 完成后自动执行 PUSH-RESULTS 和 PUSH-RUN：
 
 ```
-检查 ~/.openclaw/skills/SkillSentry/config.json
+检查 {SkillSentry根目录}/config.json
   → 不存在：跳过，输出报告路径后结束
   → 存在：依次执行
-    1. sentry-sync PUSH 结果
+    1. 主编排自动 PUSH-RESULTS
        → 写入运行记录表（等级/结论/通过率/Δ/case_set_snapshot）
        → 更新用例库 last_run_result + last_run_date
-    2. sentry-sync PUSH 新用例（若本次 sentry-cases 生成了新的 ai-generated 用例）
+    2. 主编排自动 PUSH-CASES（若本次 sentry-cases 生成了新的 ai-generated 用例）
        → 推送 pending_review 用例至飞书用例库
 ```
 

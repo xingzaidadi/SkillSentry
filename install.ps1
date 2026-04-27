@@ -1,100 +1,86 @@
-# SkillSentry 一键安装脚本（Windows PowerShell）
-# 用法：cd SkillSentry; .\install.ps1
-# 支持：Claude Code（%USERPROFILE%\.claude\skills\）和 OpenCode（%APPDATA%\opencode\skills\）
+# SkillSentry v7.0 安装脚本 (Windows PowerShell)
+# 用法: cd SkillSentry; .\install.ps1
 
 $ErrorActionPreference = "Stop"
+$RepoDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ToolsDir = Join-Path $RepoDir "tools"
 
-$RepoDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ToolsDir  = Join-Path $RepoDir "tools"
+$ClaudeSkills  = Join-Path $env:USERPROFILE ".claude\skills"
+$OpenCodeSkills = Join-Path $env:USERPROFILE ".config\opencode\skills"
 
-$ClaudeSkills   = Join-Path $env:USERPROFILE ".claude\skills"
-$OpenCodeSkills = Join-Path $env:APPDATA "opencode\skills"
+# v7.0 活跃子工具
+$Tools = @("sentry-check","sentry-cases","sentry-executor","sentry-grader","sentry-report")
 
-$Tools = @("sentry-lint","sentry-trigger","sentry-cases","sentry-executor","sentry-report")
+# v7.0 归档 stub
+$Archived = @("sentry-openclaw","sentry-sync","sentry-lint","sentry-trigger")
 
-# 检测目标平台
-$Targets = @()
-if (Test-Path (Join-Path $env:USERPROFILE ".claude"))                  { $Targets += "claude" }
-if (Test-Path (Join-Path $env:APPDATA "opencode"))                     { $Targets += "opencode" }
-if ($Targets.Count -eq 0) {
-    Write-Host "⚠️  未检测到 Claude Code 或 OpenCode，默认安装到 Claude Code 目录" -ForegroundColor Yellow
-    $Targets += "claude"
-}
+function Install-To($SkillsDir, $Platform) {
+    Write-Host "`n📦 安装到 $Platform ($SkillsDir)"
 
-function Install-To {
-    param($SkillsDir, $Platform)
+    $dest = Join-Path $SkillsDir "SkillSentry"
+    if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest -Force | Out-Null }
 
-    Write-Host ""
-    Write-Host "📦 安装到 $Platform（$SkillsDir）" -ForegroundColor Cyan
+    # 复制主体（排除 tools/sessions/.git）
+    Get-ChildItem $RepoDir -Exclude "tools","sessions",".git" | Copy-Item -Destination $dest -Recurse -Force
+    Write-Host "  ✅ SkillSentry（主编排 v7.0）"
 
-    # SkillSentry 主体（排除 tools/ 和 sessions/）
-    $Dest = Join-Path $SkillsDir "SkillSentry"
-    New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-
-    Get-ChildItem -Path $RepoDir | Where-Object {
-        $_.Name -notin @("tools","sessions",".git")
-    } | Copy-Item -Destination $Dest -Recurse -Force
-
-    Write-Host "  ✅ SkillSentry"
-
-    # 各 sentry-* 工具
+    # 活跃子工具
     foreach ($tool in $Tools) {
-        $toolDest = Join-Path $SkillsDir $tool
-        New-Item -ItemType Directory -Force -Path $toolDest | Out-Null
         $src = Join-Path $ToolsDir "$tool\SKILL.md"
-        Copy-Item -Path $src -Destination (Join-Path $toolDest "SKILL.md") -Force
-        Write-Host "  ✅ $tool"
+        if (Test-Path $src) {
+            $toolDest = Join-Path $SkillsDir $tool
+            if (-not (Test-Path $toolDest)) { New-Item -ItemType Directory -Path $toolDest -Force | Out-Null }
+            Copy-Item $src -Destination (Join-Path $toolDest "SKILL.md") -Force
+            Write-Host "  ✅ $tool"
+        }
+    }
+
+    # 归档 stub
+    foreach ($tool in $Archived) {
+        $src = Join-Path $ToolsDir "$tool\SKILL.md"
+        if (Test-Path $src) {
+            $toolDest = Join-Path $SkillsDir $tool
+            if (-not (Test-Path $toolDest)) { New-Item -ItemType Directory -Path $toolDest -Force | Out-Null }
+            Copy-Item $src -Destination (Join-Path $toolDest "SKILL.md") -Force
+            Write-Host "  📦 $tool（归档 stub）"
+        }
     }
 }
 
-function Verify-Install {
-    Write-Host ""
-    Write-Host "🔍 验证安装..." -ForegroundColor Cyan
-    $OK = $true
-    foreach ($SkillsDir in @($ClaudeSkills, $OpenCodeSkills)) {
-        if (-not (Test-Path (Join-Path $SkillsDir "SkillSentry"))) { continue }
+Write-Host "🛡  SkillSentry v7.0 安装脚本"
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+$installed = $false
+if (Test-Path (Join-Path $env:USERPROFILE ".claude")) {
+    Install-To $ClaudeSkills "Claude Code"
+    $installed = $true
+}
+if (Test-Path (Join-Path $env:USERPROFILE ".config\opencode")) {
+    Install-To $OpenCodeSkills "OpenCode"
+    $installed = $true
+}
+if (-not $installed) {
+    Write-Host "⚠️  未检测到 Claude Code 或 OpenCode，默认安装到 Claude Code"
+    Install-To $ClaudeSkills "Claude Code"
+}
+
+# 验证
+Write-Host "`n🔍 验证安装..."
+foreach ($SkillsDir in @($ClaudeSkills, $OpenCodeSkills)) {
+    if (Test-Path (Join-Path $SkillsDir "SkillSentry")) {
         Write-Host "  📂 $SkillsDir"
         foreach ($tool in (@("SkillSentry") + $Tools)) {
             $f = Join-Path $SkillsDir "$tool\SKILL.md"
-            if (Test-Path $f) {
-                Write-Host "    ✅ $tool"
-            } else {
-                Write-Host "    ❌ $tool（缺失）" -ForegroundColor Red
-                $OK = $false
-            }
+            if (Test-Path $f) { Write-Host "    ✅ $tool" }
+            else { Write-Host "    ❌ $tool（缺失）" }
         }
     }
-    if ($OK) {
-        Write-Host ""
-        Write-Host "🎉 安装完成！" -ForegroundColor Green
-    } else {
-        Write-Host ""
-        Write-Host "⚠️  部分文件缺失，请检查上方日志" -ForegroundColor Yellow
-    }
 }
 
-# --- 主流程 ---
-Write-Host "🛡  SkillSentry 安装脚本" -ForegroundColor White
-Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━"
-
-foreach ($target in $Targets) {
-    switch ($target) {
-        "claude"   { Install-To $ClaudeSkills "Claude Code" }
-        "opencode" { Install-To $OpenCodeSkills "OpenCode" }
-    }
-}
-
-Verify-Install
-
-Write-Host ""
-Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor White
-Write-Host "快速开始（直接复制到 Claude Code / OpenCode）：" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  检查结构 <Skill名>      ← 30 秒，先做这个热个身"
-Write-Host "  测评 <Skill名>          ← 系统自动推荐工作流，不用选"
-Write-Host ""
-Write-Host "不知道 Skill 名？把 SKILL.md 放到："
-Write-Host "  Claude Code：  ~\.claude\skills\<Skill名>\SKILL.md"
-Write-Host "  OpenCode：     %APPDATA%\opencode\skills\<Skill名>\SKILL.md"
-Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor White
-Write-Host ""
+Write-Host "`n🎉 安装完成！"
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+Write-Host "快速开始："
+Write-Host "  测评 <Skill名>     ← 自动推荐工作流"
+Write-Host "  lint <Skill名>     ← 30秒静态检查"
+Write-Host "  check <Skill名>    ← 静态检查 + 触发率"
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

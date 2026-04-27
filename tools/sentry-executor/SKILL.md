@@ -31,12 +31,12 @@ description: >
 
 ## Step 0：飞书用例同步（PULL）
 
-执行前调用 sentry-sync 操作一（PULL），将飞书中 active 用例合并到本地 evals.json：
+> 飞书同步 PULL 由主编排（SkillSentry）在调用 executor 前自动完成。单独调用 executor 时跳过同步。
 
 ```
-检查 ~/.openclaw/skills/SkillSentry/config.json
+检查 {SkillSentry根目录}/config.json
   → 不存在：跳过，直接进入下一步
-  → 存在：调用 sentry-sync PULL
+  → 存在：由主编排自动完成（单独调用时跳过）
     → 拉取飞书 active 用例，写入 inputs_dir/cases.feishu.json
     → 与 evals.json 合并（飞书 human 用例 + 本地 ai-generated 用例，飞书优先）
     → 输出：「🔄 已从飞书同步 [N] 条用例」
@@ -171,7 +171,7 @@ workspace_dir/
 
 > subagent 启动时，工作目录传入 `eval-N/run-R/`；单次运行时传入 `eval-N/`（无 run-R 层）。
 
-**❗ 文件写入必须用绝对路径**：subagent prompt 中必须注入输出目录的绝对路径（如 `/root/.openclaw/skills/SkillSentry/sessions/xxx/eval-1/with_skill/outputs/`）。相对路径会导致 subagent 写到错误位置，产生「完成但没写文件」的问题。
+**❗ 文件写入必须用绝对路径**：subagent prompt 中必须注入输出目录的绝对路径（如 `{workspace_dir}/xxx/eval-1/with_skill/outputs/`）。相对路径会导致 subagent 写到错误位置，产生「完成但没写文件」的问题。
 
 ---
 
@@ -277,7 +277,7 @@ eval_id: {eval_id}
 
 ```
 读取顺序：
-1. openclaw.json 中 agents.defaults.subagents.maxConcurrent
+1. 平台配置中（如 openclaw.json agents.defaults.subagents.maxConcurrent
 2. 找不到 → agents.defaults.maxConcurrent
 3. 都找不到 → 默认 4
 
@@ -286,7 +286,7 @@ max_concurrent = min(配置值, eval总数)
 
 写入 eval_environment.json：
 ```json
-{"max_concurrent": N, "source": "openclaw.json agents.defaults.subagents.maxConcurrent"}
+{"max_concurrent": N, "source": "平台配置"}
 ```
 
 ### 按 run 分组模式（核心架构 v2.0）

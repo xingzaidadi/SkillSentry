@@ -51,6 +51,13 @@ description: >
 | `跑用例` / `用现有用例` | executor → grader → report |
 | `出报告` / `通过了吗` / `看结果` | sentry-report（需已有 grading.json）|
 
+### 素材自动存档
+
+用户发文件 + 说「存到 xxx 测评素材」「给 xxx 测评用的」时：
+1. 提取 Skill 名称
+2. 保存到 `{SkillSentry根目录}/inputs/<skill名>/`（保留原始文件名）
+3. 回执：「✅ 已存入 inputs/<skill名>/<文件名>」
+
 ---
 
 ## Step 1：找 Skill + 初始化
@@ -83,8 +90,18 @@ OpenClaw:
 **飞书同步配置检查**：
 ```
 查找 config.json：workspace_dir 父目录 → inputs_dir 父目录 → SkillSentry 根目录
-  → 不存在：纯本地模式，所有 PUSH/PULL 标记为 skipped_no_config
-  → 存在：启用飞书同步
+  → 不存在：询问「是否启用飞书同步？启用可在飞书多维表格中管理用例和查看报告」
+    - 用户说是 → 自动创建 Bitable（用例表 + 运行记录表 + 版本标签表）+ 写入 config.json
+    - 用户说否 → 纯本地模式，所有 PUSH/PULL 标记为 skipped_no_config
+  → 已存在：启用飞书同步
+
+config.json 字段映射（OpenClaw 环境）：
+  app_token         = config.bitable.app_token
+  cases_table_id    = config.bitable.tables.cases
+  run_history_table_id = config.bitable.tables.runs
+  versions_table_id = config.bitable.tables.versions
+  注：OpenClaw 环境使用 feishu_app_bitable_* 工具（内置鉴权），无需 app_id/app_secret
+  CLI 环境使用 REST API 时，需在 config.json 中额外配置 feishu.app_id + feishu.app_secret
 ```
 
 写 `session.json`（skill / mode / skill_type / skill_hash / runtime / started_at）。
@@ -150,6 +167,8 @@ OpenClaw 无上下文时：用 `feishu_ask_user_question` 发卡片选择 Skill 
 
 **⛔ 禁止**：凭记忆执行子工具；一条消息跑多个步骤（自动模式下每步仍独立展示）。
 
+**透明执行原则**：每个步骤完成后，必须立即向用户展示该步骤的完整结果（关键数据 + 发现的问题 + 下一步预告）。不允许黑盒运行——用户必须能看到每一步发生了什么。自动模式也不例外：跳过等待确认 ≠ 跳过结果展示。
+
 ---
 
 ## 飞书同步
@@ -159,9 +178,10 @@ OpenClaw 无上下文时：用 `feishu_ask_user_question` 发卡片选择 Skill 
 ### PULL（executor 执行前自动调用）
 
 ```
-POST /auth/v3/tenant_access_token/internal → tenant_access_token
-GET  /bitable/v1/apps/{app_token}/tables/{cases_table_id}/records
-     filter: skill_name="{name}" AND status="active"
+OpenClaw: feishu_app_bitable_app_table_record(action=list, app_token, table_id=cases_table_id, filter=...)
+CLI:     POST /auth/v3/tenant_access_token/internal → token
+         GET  /bitable/v1/apps/{app_token}/tables/{cases_table_id}/records
+         filter: skill_name="{name}" AND status="active"
 → 写入 inputs_dir/cases.feishu.json
 → 与 evals.json 合并（飞书 human 用例优先）
 → 输出：「🔄 已从飞书同步 [N] 条用例」
@@ -244,4 +264,4 @@ sync.push_cases ≠ null AND sync.push_results ≠ null → 继续
 
 ---
 
-*v7.0 · 单一调度器，平台适配层隔离差异 · 2026-04-27*
+*v7.1 · 补回素材存档+Bitable自动创建+透明执行，平台适配层隔离差异 · 2026-04-27*

@@ -118,7 +118,17 @@ Grader subagent 超时（180s 无响应）时：
     "run-2": { ... },
     "run-3": { ... }
   },
-  "summary": {"pass": N, "fail": N, "total": N}
+  "summary": {
+    "pass": N, "fail": N, "total": N,
+    "precision_breakdown": {"exact_match": {"pass": N, "total": N}, "semantic": {"pass": N, "total": N}},
+    "authoritative_pass_rate": 0.XX
+  },
+  "feishu_record_id": "recXXX（从 evals.json 透传，无则省略）"
+
+**字段计算规则**：
+- `precision_breakdown`：按断言类型（exact_match / semantic）分别统计通过数和总数
+- `authoritative_pass_rate`：= precision_breakdown.exact_match.pass / precision_breakdown.exact_match.total（精确断言通过率，report 用此做准入判定）
+- `feishu_record_id`：从 evals.json 中对应用例的 feishu_record_id 字段透传，用于 PUSH-RESULTS 回写飞书
 }
 ```
 
