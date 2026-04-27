@@ -27,13 +27,13 @@ description: >
 
 ---
 
-## 特殊命令
+### 特殊命令
 
 | 用户说 | 动作 |
 |--------|------|
 | 「验证安装」「验证 SkillSentry」 | 检查所有 sentry-* 工具是否存在，逐一列出 ✅/❌ |
 
-## 素材自动存档
+### 素材自动存档
 
 用户发文件 + 说「存到 xxx 测评素材」「给 xxx 测评用的」时：
 1. 提取 Skill 名称
@@ -51,9 +51,9 @@ description: >
    - 用户说否 → 跳过，纯本地模式
    - 已存在 → 跳过
 4. 创建工作目录：`sessions/<skill_name>/<YYYY-MM-DD>_<NNN>/`
-4. 写 `session.json`（workspace_dir / inputs_dir / skill_name / skill_path / skill_type / mode / created_at / last_step）
-5. 所有路径必须是绝对路径
-6. 检测运行环境：来自飞书/Telegram → runtime="openclaw"；其他 → runtime="cli"。写入 session.json。
+5. 写 `session.json`（workspace_dir / inputs_dir / skill_name / skill_path / skill_type / mode / created_at / last_step）
+6. 所有路径必须是绝对路径
+7. 检测运行环境：来自飞书/Telegram → runtime="openclaw"；其他 → runtime="cli"。写入 session.json。
 
 检测 skill_type：含 MCP 工具引用 → mcp_based；含 exec/bash → code_execution；其他 → text_generation。
 
@@ -80,9 +80,9 @@ description: >
 
 默认 quick。用户说「冒烟」→ smoke；「提测前」→ standard；「正式发布前」→ full。
 
-**自动模式**：用户说「自动」「全自动」「--ci」时，跳过所有检查点连续执行：
-- 测试数据：先自动查，没有就 mock，不问用户
-- 检查点：全部跳过，不停顿
+**自动模式**：用户说「自动」「全自动」「--ci」时：
+- 检查点：**不等确认，但每步必须输出关键数据**（不停但要说，不能只说「完成」，必须包含具体结果）
+- 测试数据：有缓存→复用（**展示复用了哪些数据**）；无缓存→自动查→查到用→没查到→**暂停自动，问用户要数据**（唯一打断自动的场景）
 - 读取证明：仍然强制校验（跳过检查点 ≠ 跳过读取验证）
 - HiL 确认：**不跳过**（发布决策必须人工确认）
 
@@ -95,6 +95,15 @@ description: >
 ---
 
 ## Step 3：执行循环（核心）
+
+### 缓存复用规则
+
+每步执行前检查是否有可复用的缓存：
+- SKILL.md hash 一致 + 产物文件存在 → **复用**，输出「⚡ 缓存命中（上次 xxx）」+ 展示复用了什么数据
+- SKILL.md hash 不一致 → **不复用**，重新执行
+- 用户说「重跑 xxx」「清缓存」 → **不复用**
+
+复用时必须明确展示：复用了哪些数据（用例数/测试单号/transcript数），并提示「如需重跑 → 说『重跑 xxx』」。
 
 **对当前模式的每个步骤，依次执行：**
 
@@ -139,10 +148,7 @@ description: >
 5. 更新 session.json 的 last_step
 ```
 
-**强制规则**：
-- 每个步骤完成后**必须停下来**输出进度并等待，不能连续执行多个步骤
-- 子工具通过 session.json 获取路径和参数，不靠 AI 记忆传递
-- 子工具的实现细节在各自 SKILL.md 里，主编排器不重复
+**强制规则**：每步必须停下来输出进度 | 子工具通过 session.json 获取参数 | 实现细节在各自 SKILL.md 里
 
 ---
 
@@ -159,33 +165,15 @@ description: >
 
 ---
 
-## 异常话术
+### 异常话术 + 单工具
 
-| 场景 | 输出 |
-|------|------|
-| SKILL.md 找不到 | ❌ 找不到 Skill：{name}。已搜索：{paths}。 |
-| evals.json 为空 | ⚠️ 无用例可执行。请先运行 sentry-cases。 |
-| subagent 超时 | ⚠️ eval-{N} 超时（{X}s），降级到主会话直跑。 |
-| Grader 超时 | ⚠️ Grader 超时，eval-{N} 评审缺失。 |
-| MCP 不可用 | ⚠️ {tool} 不可用。继续（结果不准）/ 中止？ |
-| session.json 缺失 | ❌ session.json 未找到，请从 Step 1 重新开始。 |
+**异常**：SKILL.md找不到→❌列路径 | evals为空→⚠️先跑cases | 超时→⚠️降级直跑 | MCP不可用→⚠️问继续/中止 | session.json缺失→❌重新Step1
+**单工具**：「lint xxx」→sentry-lint | 「跑用例」→sentry-executor | 「出报告」→sentry-report | 「评审」→sentry-grader
+
 
 ---
 
-## 单工具快速调用
-
-用户明确指定子工具时，跳过编排流程，直接调用：
-
-| 用户说 | 直接调用 |
-|--------|---------|
-| 帮我 lint xxx | sentry-lint |
-| 跑测试用例 | sentry-executor |
-| 出报告 | sentry-report |
-| 帮我评审 | sentry-grader |
-
----
-
-## 安全约束
+### 安全约束
 
 with_skill 和 without_skill 必须使用完全独立的工作目录，互不可读。
 
@@ -203,4 +191,4 @@ with_skill 和 without_skill 必须使用完全独立的工作目录，互不可
 
 ---
 
-*v5.0 · 极简调度器重构 · 2026-04-24*
+*v5.5 · 极简调度器 · 2026-04-24*

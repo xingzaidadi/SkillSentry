@@ -19,7 +19,7 @@ description: >
 
 优先级：
 1. 用户提供了具体路径 → 读取该路径的 SKILL.md
-2. 用户只说了名字 → 查找 `~/.claude/skills/<名字>/SKILL.md`
+2. 用户只说了名字 → 查找 `~/.openclaw/skills/<名字>/SKILL.md`
 3. 用户说「检查这个」→ 当前工作目录下的 SKILL.md
 
 ---

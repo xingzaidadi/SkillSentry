@@ -26,7 +26,7 @@ description: >
 ## 工作目录约定
 
 ```
-inputs_dir   = ~/.claude/skills/SkillSentry/inputs/<被测Skill名>/
+inputs_dir   = ~/.openclaw/skills/SkillSentry/inputs/<被测Skill名>/
 workspace 中的产物：
   inputs_dir/rules.cache.json    ← 规则缓存（此工具读取）
   inputs_dir/cases.cache.json    ← 用例缓存（此工具写入）
@@ -34,7 +34,7 @@ workspace 中的产物：
 ```
 
 `workspace_dir` 由调用方（SkillSentry 或用户）通过 prompt 上下文传入；单独调用时，
-自动创建 `~/.claude/skills/SkillSentry/sessions/<Skill名>/<YYYY-MM-DD>_<NNN>/`。
+自动创建 `~/.openclaw/skills/SkillSentry/sessions/<Skill名>/<YYYY-MM-DD>_<NNN>/`。
 
 ---
 

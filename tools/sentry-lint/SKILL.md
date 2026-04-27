@@ -19,7 +19,7 @@ description: >
 
 优先级：
 1. 用户提供了具体路径 → 直接使用
-2. 用户只说了名字 → 按顺序查找：`~/.claude/skills/<名字>/` → `~/.config/opencode/skills/<名字>/`
+2. 用户只说了名字 → 按顺序查找：`~/.openclaw/skills/<名字>/` → `~/.config/opencode/skills/<名字>/`
 3. 用户说「检查这个 skill」→ 查找当前工作目录下的 SKILL.md
 
 ---

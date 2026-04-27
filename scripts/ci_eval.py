@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument(
         "--session-dir",
         default=None,
-        help="指定 SkillSentry session 目录（默认从 ~/.claude/skills/SkillSentry/sessions/ 查找最新）",
+        help="指定 SkillSentry session 目录（默认从 ~/.openclaw/skills/SkillSentry/sessions/ 查找最新）",
     )
     parser.add_argument(
         "--fail-on-negative-delta",

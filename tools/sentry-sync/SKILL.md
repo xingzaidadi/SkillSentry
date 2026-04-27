@@ -11,14 +11,14 @@ description: >
 
 SkillSentry 与飞书多维表格之间的双向同步桥接。负责执行前拉取用例、执行后推送结果、新用例推送待 Review、规则变更时标记失效用例。
 
-**关键前提**：`~/.claude/skills/SkillSentry/config.json` 必须存在且包含有效配置，否则所有操作静默跳过，SkillSentry 退化为纯本地模式。
+**关键前提**：config.json 必须存在且包含有效配置。查找顺序：`~/.openclaw/workspace/skills/SkillSentry/config.json` → `~/.openclaw/skills/SkillSentry/config.json` → `~/.claude/skills/SkillSentry/config.json`。否则所有操作静默跳过，SkillSentry 退化为纯本地模式。
 
 ---
 
 ## 配置检查（所有操作的前置步骤）
 
 ```
-读取 ~/.claude/skills/SkillSentry/config.json
+按查找顺序读取 config.json（~/.openclaw/workspace/skills/SkillSentry/ → ~/.openclaw/skills/SkillSentry/ → ~/.claude/skills/SkillSentry/）
   → 不存在：输出「ℹ️ 飞书同步未配置（config.json 不存在），跳过」，立即返回
   → 存在但字段缺失：输出「⚠️ config.json 缺少必要字段：[字段名]，跳过同步」，立即返回
   → 配置完整：继续执行

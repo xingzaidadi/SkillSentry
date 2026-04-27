@@ -725,6 +725,13 @@ def build_report(ws_dir, skill_name, risk_level, user, output_path):
     other_iterations = collect_other_iterations(ws_dir)
     current_iter_name = os.path.basename(ws_dir)
 
+    # 读取 session.json（如果存在）
+    session_data = load_json(os.path.join(ws_dir, "session.json")) or {}
+    if session_data:
+        print(f"  ✅ session.json loaded: {list(session_data.keys())}")
+    else:
+        print(f"  ⚠️ session.json not found, using grading-only mode")
+
     if not evals:
         print("WARNING: No eval directories found. Report will be empty.")
 
@@ -1560,7 +1567,16 @@ def build_report(ws_dir, skill_name, risk_level, user, output_path):
 
 <div class="decision-banner">
   <div class="verdict">{decision_icon} {esc(decision)}</div>
+  <div class="grade-badge" style="font-size:24px;font-weight:800;margin:8px 0">等级：{grade} · {GRADE_LABEL.get(grade, '')}</div>
   <div class="reason">{esc(decision_reason)}</div>
+</div>
+
+<div style="background:#1a1a2e;border-radius:12px;padding:20px;margin:16px 0;font-family:monospace;font-size:14px;line-height:2">
+  <div style="color:#94a3b8;margin-bottom:8px;font-weight:700">12 项指标面板</div>
+  <div>可用性 {'\u2705' if v3_metrics.get('A1',0)>=0.95 and v3_metrics.get('A2',1)==0 else '\u26a0\ufe0f'}  A1 触发 {v3_metrics.get('A1',0):.0%} | A2 崩溃 {v3_metrics.get('A2',0):.0%} | A3 响应 {v3_metrics.get('A3',0):.0%}</div>
+  <div>正确性 {'\u2705' if v3_metrics.get('C3',0)>=0.9 else '\u26a0\ufe0f'}  C3 准确 {v3_metrics.get('C3',0):.0%} | C6 IFR {v3_metrics.get('C6',0):.0%} | C1/C2/C4/C5 {'N/A' if v3_metrics.get('C1') is None else f"{v3_metrics.get('C1',0):.0%}"}</div>
+  <div>体验性 {'\u2705' if v3_metrics.get('E3',0)>=0.8 else '\u26a0\ufe0f'}  E3 效率 {v3_metrics.get('E3',0):.0%} | E1/E2 {'N/A' if v3_metrics.get('E1') is None else f"{v3_metrics.get('E1',0):.0%}"}</div>
+  {f'<div style="color:#fca5a5;margin-top:8px">⛔ 否决项：{", ".join(veto_items)}</div>' if veto_items else '<div style="color:#6ee7b7;margin-top:8px">✅ 无否决项触发</div>'}
 </div>
 
 <div class="summary-grid">

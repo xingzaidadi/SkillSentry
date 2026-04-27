@@ -34,7 +34,7 @@ description: >
 执行前调用 sentry-sync 操作一（PULL），将飞书中 active 用例合并到本地 evals.json：
 
 ```
-检查 ~/.claude/skills/SkillSentry/config.json
+检查 ~/.openclaw/skills/SkillSentry/config.json
   → 不存在：跳过，直接进入下一步
   → 存在：调用 sentry-sync PULL
     → 拉取飞书 active 用例，写入 inputs_dir/cases.feishu.json
@@ -271,41 +271,112 @@ eval_id: {eval_id}
 
 ---
 
-## 并发适配（动态探测）
+## 并发策略（配置驱动，不探测）
 
-### Step 0.8：网关并发探测（首次执行时自动运行）
-
-```
-1. 同时 spawn 2 个轻量 subagent：
-   sessions_spawn(mode: "run", lightContext: true,
-     task: "exec: echo ok > /tmp/probe_1.txt，然后回复 done",
-     runTimeoutSeconds: 30)
-
-2. 记录完成时间：
-   - 两个都在 15s 内完成 → gateway_concurrency >= 2
-   - 一个完成后另一个才开始 → gateway_concurrency = 1
-   - 两个都超时 → gateway_concurrency = 0（网关异常，退回串行）
-
-3. 写入 eval_environment.json：
-   {"gateway_concurrency": N, "probe_time": "ISO时间"}
-
-4. 整个测评期间只探测一次，结果缓存
-```
-
-### 批次大小（由探测结果决定）
+**不再做并发探测**。直接读取 OpenClaw 配置确定并发数：
 
 ```
-gateway_concurrency = N
+读取顺序：
+1. openclaw.json 中 agents.defaults.subagents.maxConcurrent
+2. 找不到 → agents.defaults.maxConcurrent
+3. 都找不到 → 默认 4
 
-smoke/regression：每批 N 个 eval
-quick：每批 N 个 eval，每 eval 的 run1+run2 同批（mega-batch 保留）
-standard/full：每批 N 个 eval，run 分批
-
-探测失败或未探测 → 默认 N=1（串行）
+max_concurrent = min(配置值, eval总数)
 ```
 
-- 利用断点续跑加速（已完成的跳过）
-- direct 降级天然串行，不受影响
+写入 eval_environment.json：
+```json
+{"max_concurrent": N, "source": "openclaw.json agents.defaults.subagents.maxConcurrent"}
+```
+
+### 按 run 分组模式（核心架构 v2.0）
+
+**按 run 编号分组**，而不是按 eval 分组。每个 subagent 处理所有 eval 的同一个 run，确保同一 eval 的不同 run 在不同 subagent 中执行（run 独立性）。
+
+```
+架构：
+  Subagent-A：所有 eval 的 run-1（N 个 eval × 1 run）
+  Subagent-B：所有 eval 的 run-2
+  Subagent-C：所有 eval 的 run-3（仅 standard/full）
+
+subagent 总数：
+  smoke/regression：1 个（只有 run-1）
+  quick：2 个（run-1 + run-2）
+  standard/full：3 个（run-1 + run-2 + run-3）
+
+spawn 策略：
+  第 1 轮：同时 spawn A + B（2 并发，gateway 安全值）
+  第 2 轮：A 或 B 完成后 spawn C
+  → 总共 2 轮，3 次 spawn
+
+runTimeoutSeconds = 600（10min，足够 30 eval × 1 run）
+```
+
+**为什么按 run 分组而不是按 eval 分组：**
+- 稳定性测试要求同一 eval 的 3 次 run 相互独立
+- 按 run 分组 → eval-1 的 run-1/run-2/run-3 在不同 subagent → 完全独立 ✅
+- 按 eval 分组 → eval-1 的 3 次 run 在同一 subagent → 上下文污染 ❌
+
+**检查点机制（progress.json）**：
+
+subagent 每完成 1 个 eval 后立即写入检查点文件：
+
+```json
+// {session_dir}/progress-run-{R}.json
+{
+  "run": 1,
+  "completed": ["eval-1", "eval-2", "eval-3"],
+  "current": "eval-4",
+  "failed": [],
+  "updated_at": "ISO时间"
+}
+```
+
+**subagent task 构造（按 run 分组）**：
+
+```
+你是 SkillSentry Executor subagent。你负责所有 eval 的 run-{R}。
+每个 eval 处理完后：
+  1. 写入 transcript.md + response.md
+  2. 更新 progress-run-{R}.json（添加到 completed 列表）
+  3. 继续下一个 eval
+
+## 被测 SKILL.md
+{skill_content}
+
+## eval 列表（共 N 个 eval，每个执行 1 次）
+
+### eval-1
+用户输入：{prompt}
+transcript → {path}/eval-1/run-{R}/with_skill/outputs/transcript.md
+response → {path}/eval-1/run-{R}/with_skill/outputs/response.md
+
+### eval-2
+...
+
+## 执行规则
+1. 严格按顺序处理每个 eval
+2. 每个 eval 独立处理，不复用上一个 eval 的结果
+3. 处理完立即写文件 + 更新 progress
+4. 单个 eval 写入失败→记录到 failed 列表，继续下一个
+5. 全部完成后回复汇总
+```
+
+**完成后验证（主会话执行）**：
+```
+subagent 完成 → 主会话检查：
+  1. 读取 progress-run-{R}.json
+  2. 统计实际文件数：find eval-*/run-{R} -name transcript.md -size +0c | wc -l
+  3. 完成数 == eval 总数 → ✅ 该 run 完成
+  4. 完成数 < eval 总数 → 读取 failed 列表 → re-spawn 只跑缺失的 eval
+  5. 重试 1 次后仍失败 → 标记为 failed，不阻塞流程
+```
+
+**spawn 失败处理**：
+```
+spawn 失败 → 等 5s 重试 1 次
+仍失败 → 标记该 run 为 pending，先跑其他 run，最后再补
+```
 
 ---
 
@@ -504,6 +575,26 @@ batch_parallel_rate = parallel_count / total_count
 下一步：
   评分 → 使用 SkillSentry 内置 Grader，或说「帮我评审这批结果」
   报告 → 先运行 Grader，再使用 sentry-report
+```
+
+---
+
+## session.json 更新
+
+executor 完成后更新 `{session_dir}/session.json` 的 `executor` 字段：
+
+```json
+"executor": {
+  "total_runs": 90,
+  "success": 90,
+  "failed": 0,
+  "timeout": 0,
+  "spawn_count": 3,
+  "architecture": "run-stratified",
+  "time_minutes": 11,
+  "routing_correct": 30,
+  "routing_total": 30
+}
 ```
 
 ---

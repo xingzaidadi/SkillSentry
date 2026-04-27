@@ -101,9 +101,30 @@ Grader subagent 超时（180s 无响应）时：
 
 ## 输出
 
-每个 eval 目录下写入 `grading.json`，格式见 `agents/grader.md`。
+每个 eval 目录下写入 `grading.json`。
 
-更新 `session.json` 的 `last_step` 为 `"step5_grader_done"`。
+**❗ 格式必须统一**（无论哪个 grader subagent）：
+
+```json
+{
+  "eval_id": "eval-N",
+  "runs": {
+    "run-1": {
+      "pass": true,
+      "assertions": [
+        {"id": "E1", "type": "exact_match", "expect": "断言文本", "pass": true, "evidence": "引用原文"}
+      ]
+    },
+    "run-2": { ... },
+    "run-3": { ... }
+  },
+  "summary": {"pass": N, "fail": N, "total": N}
+}
+```
+
+**禁止的格式**：`runs` 为数组、`expectations` 嵌套 `runs`、`verdict` 替代 `pass` 等变体。必须严格按上述结构。
+
+更新 `session.json` 的 `last_step` 为 `"step6_grader_done"`。
 
 ---
 
