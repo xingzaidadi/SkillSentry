@@ -8,187 +8,240 @@ description: >
 
 # SkillSentry · AI Skill 质量守门人
 
-极简调度器：找 Skill → 选模式 → 按顺序调子工具 → 每步等用户确认。
-
-## 子工具
-
-| 工具 | 职责 |
-|------|------|
-| `sentry-lint` | 静态结构检查 |
-| `sentry-trigger` | 触发率模拟评估 |
-| `sentry-cases` | 测试用例设计 |
-| `sentry-executor` | 用例执行 |
-| `sentry-grader` | 断言评审 |
-| `sentry-report` | 报告 + 发布决策 + HiL 确认 |
-
-**触发优先级**：主编排器 > 子工具。用户说「测评 xxx」→ 主编排器响应。说「帮我 lint xxx」→ 直接调子工具。
-**追问规则**：能推断的不问，最多追问 1 轮。默认 quick 模式。
-**飞书同步**：用例和结果自动同步到飞书多维表格（通过 sentry-sync）。executor 执行前 PULL，report 完成后 PUSH。
+极简调度器：找 Skill → 选模式 → 按顺序调子工具 → 每步等确认。
 
 ---
 
-### 特殊命令
+## 平台适配层
+
+检测方式：消息来自飞书/Telegram → `runtime="openclaw"`；其他 → `runtime="cli"`。
+
+| 能力 | CLI / OpenCode | OpenClaw（飞书）|
+|------|---------------|----------------|
+| 子任务调用 | `Agent(task=...)` | `sessions_spawn(task=..., runTimeoutSeconds=600)` |
+| 步骤输出 | 打印到终端 | `message(msg_type="interactive", ...)` |
+| 步骤校验 | `[sentry-proof]` + `verify_proof.py` | `validate_step.py` + milestone audit |
+| 步骤等待 | 60s 无响应自动继续 | 等用户说「继续」（无超时）|
+| 自动模式 | `--ci` 跳过所有等待 | `自动` 跳过所有等待 |
+
+**OpenClaw 额外要求**：每步完成后将 `{msg_type, message_id, sent_at}` 写入 `session.json.milestones.step-N`。`validate_step.py` 会校验此字段。
+
+---
+
+## 子工具
+
+| 工具 | 职责 | 独立可用 |
+|------|------|---------|
+| `sentry-check` | 静态结构检查（L1-L5）+ 触发率模拟（TP/TN）| ✅ |
+| `sentry-cases` | 测试用例设计，输出 evals.json | ✅ |
+| `sentry-executor` | 用例并行执行，输出 transcript | ✅ |
+| `sentry-grader` | 断言评审，输出 grading.json | ✅ |
+| `sentry-report` | 报告 + 发布决策 + HiL 确认 | ✅ |
+
+---
+
+## 特殊命令
 
 | 用户说 | 动作 |
 |--------|------|
-| 「验证安装」「验证 SkillSentry」 | 检查所有 sentry-* 工具是否存在，逐一列出 ✅/❌ |
-
-### 素材自动存档
-
-用户发文件 + 说「存到 xxx 测评素材」「给 xxx 测评用的」时：
-1. 提取 Skill 名称
-2. 保存到 `inputs/<skill名>/`（保留原始文件名）
-3. 回执：「✅ 已存入 inputs/<skill名>/<文件名>」
+| `验证安装` / `验证 SkillSentry` | 检查所有子工具是否存在，逐一列出 ✅/❌ |
+| `lint xxx` / `检查结构` / `有没有HiL问题` | 只跑 sentry-check（lint 模式）|
+| `测触发率` / `description 准不准` | 只跑 sentry-check（trigger 模式）|
+| `设计用例 xxx` / `只出 cases` | 只跑 sentry-cases |
+| `跑用例` / `用现有用例` | executor → grader → report |
+| `出报告` / `通过了吗` / `看结果` | sentry-report（需已有 grading.json）|
 
 ---
 
 ## Step 1：找 Skill + 初始化
 
-1. 找 SKILL.md：用户给路径 → 直接用；给名字 → `~/.openclaw/skills/<名字>/` 或 `~/.config/opencode/skills/<名字>/`
-2. 找不到 → 「❌ 找不到 Skill：{name}。已搜索：{paths}。请确认拼写或提供完整路径。」
-3. 检查 config.json：不存在时询问「是否要启用飞书同步？启用可在飞书多维表格中管理用例和查看报告」
-   - 用户说是 → 自动创建 Bitable + 写入 config.json
-   - 用户说否 → 跳过，纯本地模式
-   - 已存在 → 跳过
-4. 创建工作目录：`sessions/<skill_name>/<YYYY-MM-DD>_<NNN>/`
-5. 写 `session.json`（workspace_dir / inputs_dir / skill_name / skill_path / skill_type / mode / created_at / last_step）
-6. 所有路径必须是绝对路径
-7. 检测运行环境：来自飞书/Telegram → runtime="openclaw"；其他 → runtime="cli"。写入 session.json。
+**查找优先级**：
+1. 用户提供路径 → 直接使用
+2. 用户只说名字 →
+   - CLI: `~/.claude/skills/<名字>/` → `~/.config/opencode/skills/<名字>/`
+   - OpenClaw: `~/.openclaw/workspace/skills/<名字>/` → `~/.openclaw/skills/<名字>/`
+3. 「测评这个 skill」→ 当前目录下的 SKILL.md
 
-检测 skill_type：含 MCP 工具引用 → mcp_based；含 exec/bash → code_execution；其他 → text_generation。
+找不到 → `❌ 找不到 Skill：{name}。已搜索：{paths}。请确认拼写或提供完整路径。`
 
-**MCP 预检（仅 mcp_based）**：
-1. 从 SKILL.md 提取引用的 MCP Server 名称
-2. 运行 `mcporter list` 检查哪些已配置且健康
-3. 对比结果：
-   - 全部可用 → 「✅ MCP 预检通过：{N} 个 Server 全部健康」
-   - 部分缺失 → 「⚠️ {name} 未配置。继续（结果不完整）/ 中止？」
-   - 全部不可用 → 「❌ 所有 MCP Server 不可用，无法测评。请先配置 MCP。」
+**工作路径**：
+```
+CLI:
+  workspace_dir = ~/.claude/skills/SkillSentry/sessions/<Skill名>/<YYYY-MM-DD>_NNN/
+  inputs_dir    = ~/.claude/skills/SkillSentry/inputs/<Skill名>/
+OpenClaw:
+  workspace_dir = ~/.openclaw/workspace/skills/SkillSentry/sessions/<Skill名>/<YYYY-MM-DD>_NNN/
+  inputs_dir    = ~/.openclaw/workspace/skills/SkillSentry/inputs/<Skill名>/
+```
 
-输出：「✅ Step 1 完成 | {skill_name} | {skill_type} | MCP {N}/{M} 可用 | 工作目录已创建」
+目录不存在 → 自动创建。
+
+**skill_type 检测**：含业务 MCP 工具名（camelCase）→ `mcp_based`；含 bash/python/exec → `code_execution`；其他 → `text_generation`。详见 `references/execution-phases.md`。
+
+**MCP 预检（仅 mcp_based）**：列出引用工具 → 检查可用性 → 全不可用则终止。
+
+**飞书同步配置检查**：
+```
+查找 config.json：workspace_dir 父目录 → inputs_dir 父目录 → SkillSentry 根目录
+  → 不存在：纯本地模式，所有 PUSH/PULL 标记为 skipped_no_config
+  → 存在：启用飞书同步
+```
+
+写 `session.json`（skill / mode / skill_type / skill_hash / runtime / started_at）。
+输出：`✅ Step 1 完成 | {skill_name} | {skill_type} | {runtime} | 工作目录已创建`
 
 ---
 
-## Step 2：选模式
+## Step 2：智能工作流推断
 
-| 模式 | 步骤 | 预计时间 |
-|------|------|---------|
-| smoke | lint → cases(5个) → executor(1次) → grader → report | ~5min |
-| quick | lint → cases → executor(2次) → grader → report | ~10min |
-| standard | lint → trigger → cases → executor(3次) → grader → comparator → report | ~30min |
-| full | lint → trigger → cases → executor(3次) → grader → comparator → analyzer → report | ~45min |
+### 单工具快速调用（见「特殊命令」表，跳过推断）
 
-默认 quick。用户说「冒烟」→ smoke；「提测前」→ standard；「正式发布前」→ full。
+### 工作流推断（用户只说「测评 xxx」）
 
-**自动模式**：用户说「自动」「全自动」「--ci」时：
-- 检查点：**不等确认，但每步必须输出关键数据**（不停但要说，不能只说「完成」，必须包含具体结果）
-- 测试数据：有缓存→复用（**展示复用了哪些数据**）；无缓存→自动查→查到用→没查到→**暂停自动，问用户要数据**（唯一打断自动的场景）
-- 读取证明：仍然强制校验（跳过检查点 ≠ 跳过读取验证）
-- HiL 确认：**不跳过**（发布决策必须人工确认）
+```
+计算 SKILL.md MD5 → 读取 inputs_dir/rules.cache.json
+  不存在               → quick（首次测评）
+  hash 不匹配          → smoke（Skill 有变更）+ MARK_STALE
+  hash 匹配 + cases 存在    → regression
+  hash 匹配 + cases 不存在  → quick
+```
 
-示例：「测评 em-reimbursement-v3 standard 自动」→ standard 模式 + 自动执行
+**工作流模式**：
 
-输出：「📋 模式：{mode} | 步骤：{步骤列表} | 预计 {时间} | 自动模式：{是/否}」
-非自动模式：等用户确认（60s 无回复自动继续）。
-自动模式：直接开始，不等确认。
+| 模式 | 工具链 | 预计时间 |
+|------|--------|---------|
+| smoke | cases(4-5个) → executor(1次) → grader → report | ~5-7min |
+| quick | check → cases → executor(2次) → grader → report | ~10-15min |
+| regression | executor(golden only) → grader → report | ~5-10min |
+| standard | check → cases → executor(3次) → grader → comparator → report | ~30-45min |
+| full | check → cases → executor(3次) → grader → comparator → analyzer → report | 45min+ |
+
+输出确认（自动模式直接开始）：
+```
+✅ 被测 Skill：{name} | 类型：{type} | 推荐：{mode}（{原因}）
+预计时间：{time} | Token 预估：{range}
+回复「开始」或 30 秒后自动开始。
+```
+
+OpenClaw 无上下文时：用 `feishu_ask_user_question` 发卡片选择 Skill + 模式。
 
 ---
 
-## Step 3：执行循环（核心）
+## Step 3：执行循环
 
-### 缓存复用规则
-
-每步执行前检查是否有可复用的缓存：
-- SKILL.md hash 一致 + 产物文件存在 → **复用**，输出「⚡ 缓存命中（上次 xxx）」+ 展示复用了什么数据
-- SKILL.md hash 不一致 → **不复用**，重新执行
-- 用户说「重跑 xxx」「清缓存」 → **不复用**
-
-复用时必须明确展示：复用了哪些数据（用例数/测试单号/transcript数），并提示「如需重跑 → 说『重跑 xxx』」。
-
-**对当前模式的每个步骤，依次执行：**
+对当前模式的每个步骤，依次执行：
 
 ```
-1. **强制读取**该子工具的 SKILL.md（用 read 工具，不能凭记忆）
-2. 按子工具 SKILL.md 的指令执行（子工具自己决定怎么做）
-   ⛔ 禁止凭记忆执行子工具逻辑。必须先 read 再执行。上下文再长也不能跳过读取。
-   
-   **读取证明校验**（所有模式强制，含全自动）：子工具执行完后，检查输出是否包含 `[sentry-proof]` 标记。
-   - 有 → 继续下一步
-   - 没有 → 判定为「未按 SKILL.md 执行」，重新读取并执行该子工具
-   ⛔ 全自动模式也不能跳过此校验。跳过检查点 ≠ 跳过读取验证。
-   
-   **代码级验证**（不靠 AI 自律）：子工具输出后，用 exec 调 `scripts/verify_proof.py` 检查：
-   ```
-   echo "<子工具输出>" | python3 scripts/verify_proof.py
-   返回码 0 → 继续
-   返回码 1 → 强制重新读取并执行
-   ```
-3. 输出进度回执（包含全局进度列表）：
-   ✅ {子工具名} 完成 | ⏱ {耗时}
-   {1-2 行关键数据}
-   
-   全局进度：
-   sentry-lint（静态检查）      ✅ 完成
-   sentry-trigger（触发率）    ✅ 完成
-   sentry-cases（用例设计）     🔄 执行中
-   sentry-executor（用例执行）  ⏳ 待执行
-   sentry-grader（断言评审）    ⏳ 待执行
-   comparator（盲测对比）       ⏳ 待执行
-   analyzer（根因分析）         ⏳ 待执行
-   sentry-report（报告生成）    ⏳ 待执行
-   
-   格式：英文工具名 + 中文说明 + 状态。跳过的步骤标注「— 跳过」。
-   
-   注意：用子工具名（如 sentry-lint）作为步骤标题，不用 Step N
-4. 【检查点】输出三段式回执：
-   ① 结果小结：刚才发现了什么，有什么问题，是否影响继续
-   ② 下一步预告：接下来要做什么，大约要多久
-   ③ 用户选项：继续 / 跳过 / 中止 / 重跑 / 切换模式
-   （60s 无回复 → 自动继续）
-5. 更新 session.json 的 last_step
+1. 强制读取该子工具的 SKILL.md（必须 read，不能凭记忆）
+2. 按子工具 SKILL.md 指令执行
+3. 步骤校验：
+     CLI      → 检查 [sentry-proof] 标记，缺失则重跑
+     OpenClaw → 执行 validate_step.py，FAIL 则停下修复
+4. 输出进度回执：
+     ✅ {子工具名} 完成 | ⏱ {耗时} | {1-2 行关键数据}
+     全局进度：sentry-check ✅ | sentry-cases ✅ | sentry-executor 🔄 | ...
+5. 等待确认（CLI 60s 自动，OpenClaw 等用户，自动模式跳过）
+6. 更新 session.json 的 last_step
 ```
 
-**强制规则**：每步必须停下来输出进度 | 子工具通过 session.json 获取参数 | 实现细节在各自 SKILL.md 里
+**缓存复用**：SKILL.md hash 一致 + 产物存在 → 复用，标注「⚡ 缓存命中（上次 {date}）」。
+
+**快速失败检测**（quick 模式，第一批 grader 完成后）：通过率 < 20% → 询问是否继续。
+
+**⛔ 禁止**：凭记忆执行子工具；一条消息跑多个步骤（自动模式下每步仍独立展示）。
+
+---
+
+## 飞书同步
+
+> config.json 不存在时，所有操作静默跳过并记录 `skipped_no_config`，不中断主流程。
+
+### PULL（executor 执行前自动调用）
+
+```
+POST /auth/v3/tenant_access_token/internal → tenant_access_token
+GET  /bitable/v1/apps/{app_token}/tables/{cases_table_id}/records
+     filter: skill_name="{name}" AND status="active"
+→ 写入 inputs_dir/cases.feishu.json
+→ 与 evals.json 合并（飞书 human 用例优先）
+→ 输出：「🔄 已从飞书同步 [N] 条用例」
+```
+
+**MARK_STALE（PULL 附带，hash 不匹配时）**：rule_ref 已删除 → status="stale"；仍存在 → status="needs_review"。
+
+### PUSH-CASES（sentry-cases 完成后，Step 4.5，不可跳过）
+
+```
+1. 对 evals.json 中无 feishu_record_id 的用例：
+   case_id = MD5(skill_name + rule_ref + prompt 前50字)
+2. 查询飞书去重（case_id 已存在则跳过）
+3. POST /bitable/.../records/batch_create → 推送新用例（status=pending_review）
+4. 解析返回的 records 列表，提取每条 record_id
+   按 case_id 匹配 evals.json 中对应用例，追加 feishu_record_id 字段
+   覆盖写 evals.json（保留所有原有字段）
+5. 更新 session.json sync.push_cases = "done"
+→ 输出：「📤 PUSH-CASES：[N] 条新用例已推送飞书（pending_review）」
+```
+
+### PUSH-RESULTS（grader 完成后，Step 6.5，不可跳过）
+
+```
+1. 读取 evals.json，找出有 feishu_record_id 的用例
+2. POST /bitable/.../records/batch_update → 更新 last_run_result + last_run_date
+3. 更新 session.json sync.push_results = "done"
+→ 输出：「✅ PUSH-RESULTS：更新 [N] 条用例结果」
+```
+
+**Step 7 前置校验**（报告前强制检查）：
+```
+sync.push_cases ≠ null AND sync.push_results ≠ null → 继续
+任一为 null → ⛔ 阻断，输出缺失项，要求补执行
+```
+
+### PUSH-RUN（report 完成后，Step 7.5，不可跳过）
+
+```
+1. POST /bitable/.../tables/{run_history_table_id}/records
+   fields: run_id, skill_name, skill_hash, mode, grade, verdict, pass_rate_overall, ran_at
+2. 更新 session.json sync.push_run = "done"
+→ 输出：「✅ PUSH-RUN：运行记录已写入飞书」
+```
 
 ---
 
 ## Pipeline 准出标准
 
-| 步骤 | 准出条件 | 未通过处理 |
-|------|---------|----------|
-| lint | 无 P0 红线 | 暂停，提示先修复 |
-| trigger | TP ≥ 70% | 警告 + 建议优化 description |
-| cases | 用例数 ≥ 3 | 警告「覆盖不足」 |
-| executor | ≥ 1 个有 transcript | 全失败 → 终止，报告环境问题 |
-| grader | ≥ 1 个有 grading | 全超时 → 标注「评审缺失」 |
-| report | HTML 生成成功 | 失败 → 纯文本摘要替代 |
+| 步骤 | 准出条件 | 未通过 |
+|------|---------|--------|
+| sentry-check | 无 P0（lint）/ TP ≥ 70%（trigger）| P0 → 暂停；TP 低 → 警告继续 |
+| sentry-cases | 用例数 ≥ 3 | 警告「覆盖不足」|
+| sentry-executor | ≥ 1 个有 transcript | 全失败 → 终止，报告环境问题 |
+| sentry-grader | ≥ 1 个有 grading | 全超时 → 标注「评审缺失」|
+| sentry-report | HTML 生成成功 | 失败 → 纯文本摘要替代 |
 
 ---
 
-### 异常话术 + 单工具
+## session.json 结构
 
-**异常**：SKILL.md找不到→❌列路径 | evals为空→⚠️先跑cases | 超时→⚠️降级直跑 | MCP不可用→⚠️问继续/中止 | session.json缺失→❌重新Step1
-**单工具**：「lint xxx」→sentry-lint | 「跑用例」→sentry-executor | 「出报告」→sentry-report | 「评审」→sentry-grader
+```json
+{
+  "skill": "", "mode": "", "skill_type": "", "skill_hash": "", "runtime": "",
+  "started_at": "", "last_step": "",
+  "requirements": {"rules_total": 0, "explicit": 0, "process": 0, "implicit": 0, "high_risk": 0},
+  "lint": {"L1": "", "L2": "", "L3": 0, "P0": 0, "P1": 0, "P2": 0, "issues": []},
+  "trigger": {"tp": 0, "tn": 0, "confidence": "", "issues": []},
+  "cases": {"total": 0, "coverage": "", "types": {}, "assertions_total": 0},
+  "executor": {"total_runs": 0, "success": 0, "failed": 0, "spawn_count": 0, "time_minutes": 0},
+  "grader": {"pass": 0, "fail": 0, "total": 0, "pass_rate": 0, "failed_evals": [], "vetoes": []},
+  "verdict": {"grade": "", "decision": "", "pass_rate": 0},
+  "recommendations": {"P0": [], "P1": [], "P2": []},
+  "sync": {"pull": null, "push_cases": null, "push_results": null, "push_run": null},
+  "milestones": {}
+}
+```
 
-
----
-
-### 安全约束
-
-with_skill 和 without_skill 必须使用完全独立的工作目录，互不可读。
-
----
-
-## 飞书同步（sentry-sync）
-
-| 时机 | 操作 | 说明 |
-|------|------|------|
-| executor 执行前 | PULL | 从飞书拉取 active 用例合并到 evals.json |
-| report 完成后 | PUSH 结果 | 写入运行记录（等级/通过率/Δ） |
-| report 完成后 | PUSH 新用例 | 推送 AI 生成的用例到飞书待 Review |
-
-前提：`~/.openclaw/skills/SkillSentry/config.json` 存在。不存在则跳过同步。
+写入时机：Step 1 写基础字段 → 各步完成后写对应字段 → grader 完成写 verdict/recommendations。
 
 ---
 
-*v5.5 · 极简调度器 · 2026-04-24*
+*v7.0 · 单一调度器，平台适配层隔离差异 · 2026-04-27*
