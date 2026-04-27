@@ -11,7 +11,7 @@ def load_json(path):
 def find_session_dir(skill_name, sessions_base=None):
     """找最新的 session 目录"""
     if sessions_base is None:
-        sessions_base = os.path.expanduser("~/.openclaw/workspace/skills/SkillSentry/sessions")
+        sessions_base = os.path.expanduser("~/.openclaw/workspace/skills/skill-eval-测评/sessions")
     skill_dir = os.path.join(sessions_base, skill_name)
     if not os.path.isdir(skill_dir):
         print(f"❌ 未找到测评记录: {skill_dir}")

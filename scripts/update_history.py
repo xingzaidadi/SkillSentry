@@ -6,7 +6,7 @@ SkillSentry 历史趋势更新器
 用法：
   python update_history.py \
     --skill em-reimbursement-v3 \
-    --session-dir ~/.openclaw/skills/SkillSentry/sessions/em-reimbursement-v3/2026-04-10_001 \
+    --session-dir ~/.openclaw/skills/skill-eval-测评/sessions/em-reimbursement-v3/2026-04-10_001 \
     [--mode quick] \
     [--git-sha abc123]
 """

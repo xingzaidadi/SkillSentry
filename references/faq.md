@@ -44,7 +44,7 @@
 ---
 
 **被测 Skill 需要物理素材但扫描到 0 个文件**
-→ 提示用户将文件放入 `SkillSentry/inputs/<被测Skill名称>/`，并给出具体路径。
+→ 提示用户将文件放入 `skill-eval-测评/inputs/<被测Skill名称>/`，并给出具体路径。
 
 ---
 
@@ -89,7 +89,7 @@
 ---
 
 **修改 sentry-* 工具时应该改哪个文件？**
-→ 权威源在 `SkillSentry/tools/sentry-*/SKILL.md`，`~/.claude/skills/sentry-*/SKILL.md` 是部署副本。
+→ 权威源在 `skill-eval-测评/tools/sentry-*/SKILL.md`，`~/.claude/skills/sentry-*/SKILL.md` 是部署副本。
   正确流程：先改 `tools/sentry-*/SKILL.md`，再运行 `install.sh`（Linux/Mac）或 `install.ps1`（Windows）同步部署。
   直接改部署副本会在下次 install 时被覆盖回旧版本。
 

@@ -2,7 +2,7 @@
 
 > 让每一个上线的 Skill 都经过可追溯、可信赖的真实验证——而不是凭感觉说「应该没问题」。
 
-支持平台：**Claude Code** · **OpenCode**
+支持平台：**Claude Code** · **OpenCode** · **OpenClaw（飞书）**
 
 ---
 
@@ -13,25 +13,31 @@
 测评 <Skill名>
 
 # 姿势 2：只做某一步
-检查结构 <Skill名>      →  30 秒静态检查
-测触发率 <Skill名>      →  2 分钟验证 description
-设计用例 <Skill名>      →  5-10 分钟出 evals.json，不执行
-出报告                  →  1 分钟，基于已有结果
+check <Skill名>         →  静态检查 + 触发率（~3 分钟）
+lint <Skill名>           →  30 秒静态检查
+测触发率 <Skill名>       →  2 分钟验证 description
+设计用例 <Skill名>       →  5-10 分钟出 evals.json，不执行
+出报告                   →  1 分钟，基于已有结果
 
 # 姿势 3：指定深度
-smoke 测评 <Skill名>    →  5-7 分钟，改了规则先跑这个
-quick 测评 <Skill名>    →  15-20 分钟，提测前用
-full 测评 <Skill名>     →  45 分钟+，正式发布前用
+smoke 测评 <Skill名>     →  5-7 分钟，改了规则先跑这个
+quick 测评 <Skill名>     →  15-20 分钟，提测前用
+full 测评 <Skill名>      →  45 分钟+，正式发布前用
 ```
 
 ---
 
 ## 安装（2 步）
 
-**第一步：克隆仓库**
+**第一步：获取代码**
 
 ```bash
+# 方式一：克隆仓库
 git clone https://github.com/xingzaidadi/SkillSentry.git
+cd SkillSentry
+
+# 方式二：下载 tar.gz 并解压
+tar xzf SkillSentry-v7.0.tar.gz
 cd SkillSentry
 ```
 
@@ -47,27 +53,30 @@ bash install.sh
 .\install.ps1
 ```
 
-脚本会自动检测你安装了 Claude Code 还是 OpenCode（或两者都有），并把所有文件部署到正确位置。安装完成后输出验证结果：
+脚本自动检测平台（Claude Code / OpenCode / OpenClaw），部署到正确位置：
 
 ```
-📦 安装到 Claude Code（~/.claude/skills）
-  ✅ SkillSentry
-  ✅ sentry-lint
-  ✅ sentry-trigger
+📦 安装到 OpenClaw（~/.openclaw/skills）
+  ✅ SkillSentry（主编排 v7.0）
+  ✅ sentry-check
   ✅ sentry-cases
   ✅ sentry-executor
+  ✅ sentry-grader
   ✅ sentry-report
+  📦 sentry-openclaw（归档 stub）
+  📦 sentry-sync（归档 stub）
+  📦 sentry-lint（归档 stub）
+  📦 sentry-trigger（归档 stub）
+  ✅ workspace 运行时目录已创建
 
 🎉 安装完成！
 ```
 
-**验证安装是否生效**（安装后可随时运行）：
+**验证安装**：
 
 ```
 验证 SkillSentry 安装
 ```
-
-在 Claude Code / OpenCode 中说这句话，系统会列出找到的所有工具。
 
 ---
 
@@ -79,6 +88,7 @@ bash install.sh
 |------|------|
 | Claude Code | `~/.claude/skills/<Skill名>/SKILL.md` |
 | OpenCode | `~/.config/opencode/skills/<Skill名>/SKILL.md` |
+| OpenClaw | `~/.openclaw/skills/<Skill名>/SKILL.md` |
 
 然后直接说：
 
@@ -94,39 +104,22 @@ bash install.sh
 | 改了规则，验证没崩 | smoke（快速冒烟） | ~5-7 分钟 |
 | 规则没变，复跑基准 | regression（直接跑） | ~5-10 分钟 |
 
-收到推荐后，回「开始」确认，或直接说「full」「quick」「smoke」换一个。
-
-> **Token 消耗参考**：quick 模式约 5-10 万 token；smoke 约 1-2 万 token；regression 约 3-5 万 token。
+> **Token 消耗参考**：quick 约 5-10 万 token；smoke 约 1-2 万 token；regression 约 3-5 万 token。
 
 ---
 
-## 常用快捷调用
+## 工具组成（v7.0）
 
-不想跑完整流程？直接说单工具：
+| 工具 | 职责 | 独立可用 |
+|------|------|---------|
+| **SkillSentry** | 主编排 + 平台适配 + 飞书同步 | — |
+| **sentry-check** | 静态检查（L1-L5）+ 触发率（TP/TN） | ✅ |
+| **sentry-cases** | 测试用例设计，输出 evals.json | ✅ |
+| **sentry-executor** | 用例并行执行，输出 transcript | ✅ |
+| **sentry-grader** | 断言评审，输出 grading.json | ✅ |
+| **sentry-report** | 报告生成 + 发布决策 + HiL 确认 | ✅ |
 
-| 说这个 | 做这个 | 时间 |
-|--------|--------|------|
-| `检查结构 <Skill名>` | 静态检查 HiL、复杂度、冗余规则 | ~30 秒 |
-| `测触发率 <Skill名>` | 验证 description 触发是否准确 | ~2 分钟 |
-| `设计用例 <Skill名>` | 只出 evals.json，不执行 | ~5-10 分钟 |
-| `出报告` | 基于已有结果生成报告 | ~1 分钟 |
-
----
-
-## 放入自己的测试素材（可选）
-
-测评启动后，系统会自动创建并告知路径：
-
-```
-~/.claude/skills/SkillSentry/inputs/<Skill名>/
-```
-
-把以下文件放进去，系统自动识别纳入测评：
-
-| 文件类型 | 用途 |
-|---------|------|
-| `*.cases.md` | 自定义测试用例（格式见 `references/custom-cases-template.md`） |
-| `*.pdf` / `*.png` | 测试素材（发票、截图等），供测试用例引用 |
+> v7.0 变更：sentry-lint + sentry-trigger 合并为 **sentry-check**；sentry-openclaw + sentry-sync 内联进主编排。旧工具保留归档 stub 保证向后兼容。
 
 ---
 
@@ -135,22 +128,27 @@ bash install.sh
 | 工作流 | 工具链 | 时间 | 适用场景 |
 |--------|--------|------|---------|
 | smoke | cases(4-5个) → executor(1次) → grader → report | 5-7 分钟 | 改了规则，快速确认没崩 |
-| quick | cases → executor(2次) → grader → report | 15-20 分钟 | 迭代完成，准备提测 |
+| quick | check → cases → executor(2次) → grader → report | 15-20 分钟 | 迭代完成，准备提测 |
 | regression | executor(已有用例) → grader → report | 5-10 分钟 | 规则没变，复跑基准 |
-| standard | cases → executor(3次) → grader → comparator → report | 30-45 分钟 | 重要迭代正式提测 |
-| full | lint → trigger → cases → executor(3次) → grader → comparator → analyzer → report | 45 分钟+ | 正式发布前全量验证 |
+| standard | check → cases → executor(3次) → grader → comparator → report | 30-45 分钟 | 重要迭代正式提测 |
+| full | check → cases → executor(3次) → grader → comparator → analyzer → report | 45 分钟+ | 正式发布前全量验证 |
+
+---
+
+## 飞书同步（OpenClaw 专属）
+
+配置 `config.json`（参考 `config.example.json`）后自动启用：
+
+- **PULL**：执行前从飞书拉取 active 用例
+- **PUSH-CASES**：新用例推送到飞书（pending_review）
+- **PUSH-RESULTS**：评审结果回写到用例记录
+- **PUSH-RUN**：运行记录写入飞书
+
+不配置 = 纯本地模式，不影响核心测评流程。
 
 ---
 
 ## 报告怎么看
-
-```
-发布决策：PASS S级 / CONDITIONAL PASS / FAIL
-
-精确通过率：92%（准入依据）
-语义通过率：88%（参考）
-P95 响应时间：8.2s
-```
 
 | 等级 | 精确通过率 | 含义 |
 |------|----------|------|
@@ -160,39 +158,41 @@ P95 响应时间：8.2s
 | C | ≥ 70% | 需修复 |
 | FAIL | < 70% | 不可发布 |
 
-完整报告保存为 HTML：
-- **macOS / Linux**：`~/.claude/skills/SkillSentry/sessions/<Skill名>/<日期>/report.html`
-- **Windows**：`C:\Users\<你的用户名>\.claude\skills\SkillSentry\sessions\<Skill名>\<日期>\report.html`
-
 ---
 
-## 目录结构
+## 目录结构（打包格式）
 
 ```
-SkillSentry/                   ← 克隆这一个仓库即可
-├── SKILL.md                   # 主编排器
+SkillSentry/
+├── SKILL.md                   # 主编排（v7.0）
 ├── README.md
-├── install.sh                 # macOS/Linux 安装脚本
-├── install.ps1                # Windows 安装脚本
-├── tools/                     # 各 sentry-* 工具源文件（安装脚本从这里部署）
-│   ├── sentry-lint/SKILL.md
-│   ├── sentry-trigger/SKILL.md
+├── config.example.json        # 飞书同步配置模板
+├── install.sh / install.ps1   # 安装脚本
+├── tools/                     # 子工具（install.sh 展开到 skills/ 并列目录）
+│   ├── sentry-check/SKILL.md      ← v7.0 新增（lint + trigger 合并）
 │   ├── sentry-cases/SKILL.md
 │   ├── sentry-executor/SKILL.md
-│   └── sentry-report/SKILL.md
+│   ├── sentry-grader/SKILL.md
+│   ├── sentry-report/SKILL.md
+│   ├── sentry-openclaw/SKILL.md   ← 归档 stub
+│   ├── sentry-sync/SKILL.md       ← 归档 stub
+│   ├── sentry-lint/SKILL.md       ← 归档 stub
+│   └── sentry-trigger/SKILL.md    ← 归档 stub
 ├── agents/
 │   ├── grader.md
 │   ├── comparator.md
 │   └── analyzer.md
-├── references/
-│   ├── eval-dimensions.md
-│   ├── admission-criteria.md
-│   ├── case-matrix-templates.md
+├── scripts/                   # Python 脚本
+│   ├── validate_step.py       # OpenClaw 步骤校验
+│   ├── verify_proof.py        # CLI 读取证明校验
+│   ├── generate_html_report.py
+│   └── ...
+├── references/                # 参考文档
+│   ├── feishu-templates.md
 │   ├── report-template.md
-│   ├── custom-cases-template.md
-│   └── execution-phases.md
-├── inputs/                    # 测评素材（测评启动时自动创建子目录）
-└── sessions/                  # 测评结果（自动生成，永不覆盖）
+│   ├── execution-phases.md
+│   └── ...
+└── inputs/                    # 测评素材（按 Skill 名隔离）
 ```
 
 ---
@@ -200,23 +200,20 @@ SkillSentry/                   ← 克隆这一个仓库即可
 ## 常见问题
 
 **Q：测评的 Skill 必须有 MCP 工具吗？**
-A：不是。`sentry-lint` 和 `sentry-trigger` 纯静态分析，不需要任何工具连接。执行测试时，如果被测 Skill 依赖 MCP 工具，系统会在执行前检查工具是否可用；不可用时提示你而不是静默跑出假结果。
+A：不是。`sentry-check` 纯静态分析，不需要工具连接。执行测试时，如果被测 Skill 依赖 MCP 工具，系统会在执行前检查可用性。
 
 **Q：第一次跑要多久？**
-A：quick 模式约 15-20 分钟。之后规则和用例有缓存，regression 模式只需 5-10 分钟。
+A：quick 模式约 15-20 分钟。之后有缓存，regression 只需 5-10 分钟。
 
 **Q：能测自己写的任何 Skill 吗？**
-A：能，只要有 `SKILL.md` 文件。SkillSentry 会自动识别 Skill 类型（mcp_based / text_generation / code_execution）并切换对应执行模式。
+A：能，只要有 `SKILL.md`。自动识别类型（mcp_based / text_generation / code_execution）。
 
-**Q：测评过程中断了怎么办？**
-A：已完成的用例 transcript 保存在 sessions/ 目录中。重新说「测评 xxx」，系统会检测已有结果，提示你「已有 N 个用例完成，是否跳过直接进入评分」。
+**Q：测评中断了怎么办？**
+A：已完成的 transcript 保存在 sessions/。重新说「测评 xxx」，系统检测已有结果，提示跳过。
 
-**Q：测评结果存在哪里？**
-A：`SkillSentry/sessions/<Skill名>/<日期>_<序号>/`，永不覆盖，可以对比不同版本。
-
-**Q：Claude Code 和 OpenCode 可以共用同一份测评结果吗？**
-A：不能直接共用，两个平台的 sessions/ 目录是独立的。但 inputs/<Skill名>/ 里的自定义用例两者都会读取（如果 inputs 目录在同一路径下）。
+**Q：sentry-lint / sentry-trigger 还能用吗？**
+A：说 `lint xxx` 或 `测触发率 xxx` 会自动路由到 `sentry-check`。旧工具保留归档 stub 保证兼容。
 
 ---
 
-*Last Updated: 2026-04-09*
+*v7.0 · 2026-04-27*

@@ -4,7 +4,7 @@ import http.server
 import os, sys, signal
 
 PORT = 18080
-BASE_DIR = os.path.expanduser("~/.openclaw/workspace/skills/SkillSentry/sessions")
+BASE_DIR = os.path.expanduser("~/.openclaw/workspace/skills/skill-eval-测评/sessions")
 
 class ReportHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):

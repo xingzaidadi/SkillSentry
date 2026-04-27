@@ -34,7 +34,7 @@ description: >
 > 飞书同步 PULL 由主编排（SkillSentry）在调用 executor 前自动完成。单独调用 executor 时跳过同步。
 
 ```
-检查 {SkillSentry根目录}/config.json
+检查 {skill-eval-测评根目录}/config.json
   → 不存在：跳过，直接进入下一步
   → 存在：由主编排自动完成（单独调用时跳过）
     → 拉取飞书 active 用例，写入 inputs_dir/cases.feishu.json
@@ -210,6 +210,29 @@ mcp_based + 任何模式：skip_without_skill = true
 - `true`：只启动 with_skill，在声明中注明「eval-[N] without_skill 已跳过」
 - `false` 或不存在：正常启动双侧
 - **手动覆盖**：用户明确要求出 Δ 时，可设 skip_without_skill: false 强制双侧执行
+
+---
+
+## MCP 执行后端适配
+
+读取 session.json 的 `mcp_backend` 字段，自动选择工具调用方式：
+
+| mcp_backend | 执行方式 | 说明 |
+|-------------|---------|------|
+| `native` | subagent 直接调用原生 MCP 工具 | openclaw.json 已配置，子 agent 可直接访问 |
+| `mcporter` | 主会话通过 `exec` 调用 `HOME=/root/.openclaw mcporter call <server>.<tool>(params)` | mcporter 已配置，自带 OAuth 认证 |
+| 未设置/空 | 降级为纯对话模式（不调用工具，仅验证路由逻辑） | MCP 不可用时的兑底 |
+
+**mcporter 模式执行流程**：
+```
+1. subagent 负责「思考」：读 SKILL.md → 解析用户输入 → 决定调哪个 MCP/工具/参数
+2. subagent 写出工具调用意图到 transcript（server + tool + params）
+3. 主会话拦截，用 mcporter call 实际执行
+4. 把返回结果注入 subagent 继续处理
+5. 循环直到 subagent 完成最终回复
+```
+
+对 sentry-executor 其余逻辑透明，transcript 格式不变。
 
 ---
 

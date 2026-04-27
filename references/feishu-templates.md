@@ -79,6 +79,46 @@ Skill：[Skill名称]
 
 ---
 
+## 【前置】Skill 选择卡片（用户未指定 Skill 时）
+
+使用 `feishu_ask_user_question` 工具发送交互卡片，禁止纯文本罗列。
+
+**构造流程**：
+1. 扫描 `~/.openclaw/skills/` + `~/.openclaw/workspace/skills/` 下含 SKILL.md 的目录
+2. 排除：sentry-* / SkillSentry* / .bak 目录 / 平台工具（healthcheck/taskflow 等）
+3. 读取每个 SKILL.md 的 frontmatter description，截取前 30 字作为 option.description
+4. 调用：
+
+```json
+feishu_ask_user_question(questions=[
+  {
+    "question": "选择要测评的 Skill",
+    "header": "被测 Skill",
+    "options": [
+      {"label": "skill-name-1", "description": "description 截取前 30 字"},
+      {"label": "skill-name-2", "description": "description 截取前 30 字"}
+    ],
+    "multiSelect": false
+  },
+  {
+    "question": "选择测评模式（不选默认自动推断）",
+    "header": "测评模式",
+    "options": [
+      {"label": "smoke", "description": "冒烟测试，4-5 个用例，~5 分钟"},
+      {"label": "quick", "description": "快速测评，2 轮执行，~10-15 分钟"},
+      {"label": "standard", "description": "标准测评，3 轮+对比，~30-45 分钟"},
+      {"label": "full", "description": "完整测评，全流程+根因分析，45 分钟+"},
+      {"label": "自动推断", "description": "根据缓存状态自动选择最合适的模式"}
+    ],
+    "multiSelect": false
+  }
+])
+```
+
+5. 等待用户选择后再继续流程
+
+---
+
 ## 启动确认推送（Step 1 解析完成后）
 
 ```

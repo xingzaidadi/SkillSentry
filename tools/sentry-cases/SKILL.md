@@ -27,9 +27,9 @@ description: >
 
 ```
 
-**路径约定**：`{SkillSentry根目录}` 由调用方（主编排或用户）传入。OpenClaw = `~/.openclaw/skills/SkillSentry` 或 `~/.openclaw/workspace/skills/SkillSentry`；CLI = `~/.claude/skills/SkillSentry`。单独调用时从 session.json 的 inputs_dir 字段读取。
+**路径约定**：`{skill-eval-测评根目录}` 由调用方（主编排或用户）传入。OpenClaw = `~/.openclaw/skills/skill-eval-测评` 或 `~/.openclaw/workspace/skills/skill-eval-测评`；CLI = `~/.claude/skills/skill-eval-测评`。单独调用时从 session.json 的 inputs_dir 字段读取。
 
-inputs_dir   = {SkillSentry根目录}/inputs/<被测Skill名>/
+inputs_dir   = {skill-eval-测评根目录}/inputs/<被测Skill名>/
 workspace 中的产物：
   inputs_dir/rules.cache.json    ← 规则缓存（此工具读取）
   inputs_dir/cases.cache.json    ← 用例缓存（此工具写入）
@@ -37,7 +37,7 @@ workspace 中的产物：
 ```
 
 `workspace_dir` 由调用方（SkillSentry 或用户）通过 prompt 上下文传入；单独调用时，
-自动创建 `{SkillSentry根目录}/sessions/<Skill名>/<YYYY-MM-DD>_<NNN>/`。
+自动创建 `{skill-eval-测评根目录}/sessions/<Skill名>/<YYYY-MM-DD>_<NNN>/`。
 
 ---
 
@@ -84,7 +84,10 @@ workspace 中的产物：
 }
 ```
 
-### 0.2 展示需求分析结果（必须等用户确认）
+### 0.2 展示需求分析结果（⛔ auto-exempt，必须等用户确认）
+
+> **此步骤即使 auto 模式也不可跳过。** 必须向用户完整展示需求分析结果和用例设计，等待用户确认或补充后才能继续。
+> 原因：用例覆盖度直接影响测评有效性，用户可能有未写入 SKILL.md 的业务场景。
 
 ```
 📋 需求分析 · <Skill名>
@@ -113,7 +116,10 @@ workspace 中的产物：
 → 补充：________
 ```
 
-### 0.3 测试数据采集（mcp_based 必须执行）
+### 0.3 测试数据采集（⛔ auto-exempt，mcp_based 必须执行）
+
+> **此步骤即使 auto 模式也不可跳过。** real_data 用例的测试数据必须由用户提供或确认，禁止 AI 自行标记 mock 或编造数据。
+> 原因：编造的 ID 在真实系统中不存在，导致所有查询类用例返回「无权限/不存在」，无法验证正常路径。
 
 当 skill_type == mcp_based 时，先对用例进行**数据需求分类**，然后只对 real_data 类向用户索取：
 
@@ -299,9 +305,19 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 
 ---
 
-## 输出
+## 输出（⛔ auto-exempt，必须展示并等待用户确认）
 
-完成后告知用户：
+> **此步骤即使 auto 模式也不可跳过。** 必须向用户详细展示所有用例内容（而非仅统计摘要），等待用户确认或补充后才能进入 executor。
+
+完成后向用户展示：
+
+### 必须展示的内容
+1. **按类型分组的完整用例表格**：每条用例包含 ID、用例名、Prompt、断言摘要、数据需求类型
+2. **统计摘要**：用例数、类型分布、断言构成、skip_without_skill 数量
+3. **明确询问用户**：
+   - 用例设计是否合理？有没有遗漏的业务场景需要补充？
+   - 是否需要增加用例？
+
 ```
 ✅ 用例设计完成
 📋 共设计 [N] 个用例：[类型分布]
@@ -309,9 +325,12 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 ⏭️ skip_without_skill: [N] 个用例（节省 ~[X]% 执行时间）
 📁 已保存到：<workspace_dir>/evals.json
 
+❓ 用例覆盖是否充分？需要补充场景吗？
+
 下一步：
-  继续 → 开始执行用例
-  去飞书调整用例 → <飞书多维表格链接>，改完说「继续」，会自动 PULL 最新用例
+  用例 OK → 继续执行
+  补充用例 → 告诉我要加什么
+  去飞书调整 → <飞书多维表格链接>，改完说「继续」
   跳过 / 中止
 ```
 
