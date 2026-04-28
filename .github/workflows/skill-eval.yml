@@ -87,7 +87,7 @@ jobs:
         run: |
           mkdir -p ~/.claude/skills
           # 部署主编排器
-          cp -r . ~/.claude/skills/SkillSentry
+          cp -r . ~/.claude/skills/skill-eval-测评
           # 部署各原子工具
           for tool_dir in tools/sentry-*/; do
             tool_name=$(basename "$tool_dir")
@@ -124,7 +124,7 @@ jobs:
       - name: 汇总评估结果
         id: summarize
         run: |
-          python3 ~/.claude/skills/SkillSentry/scripts/ci_eval.py \
+          python3 ~/.claude/skills/skill-eval-测评/scripts/ci_eval.py \
             --skill ${{ matrix.skill }} \
             --mode ${{ github.event.inputs.mode || 'smoke' }} \
             --threshold 0.80 \
@@ -135,16 +135,16 @@ jobs:
       - name: 更新历史记录
         if: always()
         run: |
-          SESSION=$(find ~/.claude/skills/SkillSentry/sessions/${{ matrix.skill }} -maxdepth 1 -mindepth 1 -type d | sort | tail -1)
+          SESSION=$(find ~/.claude/skills/skill-eval-测评/sessions/${{ matrix.skill }} -maxdepth 1 -mindepth 1 -type d | sort | tail -1)
           if [ -n "$SESSION" ]; then
-            python3 ~/.claude/skills/SkillSentry/scripts/update_history.py \
+            python3 ~/.claude/skills/skill-eval-测评/scripts/update_history.py \
               --skill ${{ matrix.skill }} \
               --session-dir "$SESSION" \
               --mode ${{ github.event.inputs.mode || 'smoke' }} \
               --git-sha ${{ github.sha }} \
               --note "CI: ${{ github.event.head_commit.message || 'workflow_dispatch' }}" || true
             # 将 history.json 复制到工作目录，便于提交
-            cp ~/.claude/skills/SkillSentry/inputs/${{ matrix.skill }}/history.json \
+            cp ~/.claude/skills/skill-eval-测评/inputs/${{ matrix.skill }}/history.json \
                ./ci-eval-results/${{ matrix.skill }}/history.json 2>/dev/null || true
           fi
 
@@ -171,7 +171,7 @@ jobs:
         run: |
           RESULT_FILE="./ci-eval-results/${{ matrix.skill }}/eval_result.json"
           if [ -f "$RESULT_FILE" ]; then
-            python3 ~/.claude/skills/SkillSentry/scripts/report_to_checks.py \
+            python3 ~/.claude/skills/skill-eval-测评/scripts/report_to_checks.py \
               --result "$RESULT_FILE" \
               --check-name "SkillSentry / ${{ matrix.skill }}"
           else

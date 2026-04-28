@@ -53,7 +53,7 @@ text_generation（默认兜底）：
 | `cases.cache.json` | sentry-cases | sentry-executor | `rules_hash`, `mode`, `evals[]` |
 | `evals.json` | sentry-cases | sentry-executor | `id`, `type`, `source`, `prompt`, `skip_without_skill`, `skip_reason`, `expectations[]{text, precision, rule_ref}` |
 | `timing_with.json` / `timing_without.json` | sentry-executor | sentry-report | `executor_start_ms`, `executor_end_ms`, `duration_ms`, `total_tokens`, `input_tokens`, `output_tokens` |
-| `grading.json` | agents/grader | sentry-report | `skill_type`, `expectations[]`, `summary{passed,failed,total,precision_breakdown,authoritative_pass_rate}`, `timing`, `eval_feedback` |
+| `grading.json` | agents/grader | sentry-report | `runs: {run-1: {pass, assertions[], summary{pass,fail,total,precision_breakdown,authoritative_pass_rate}}, run-2: {...}, run-3: {...}}, feishu_record_id` |
 | `eval_environment.json` | sentry-executor | 审计用 | `parallelism_audit[]{batch,parallel_rate,violations[]}`, `overall_parallel_rate` |
 
 ---

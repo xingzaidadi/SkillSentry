@@ -1,16 +1,10 @@
 {
-  "_comment": "复制此文件为 config.json，填入真实值。config.json 已加入 .gitignore，不会提交到代码库。",
-  "feishu": {
-    "_comment_app": "飞书开放平台创建企业自建应用后获取，路径：开放平台 → 我的应用 → 凭证与基础信息",
-    "app_id": "cli_xxxxxxxxxxxxxxxx",
-    "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-
-    "_comment_table": "多维表格的 app_token 在表格 URL 中：https://xxx.feishu.cn/base/<app_token>",
-    "app_token": "BascXXXXXXXXXXXXXXXX",
-
-    "_comment_table_ids": "各表的 table_id 在表格 URL 中点击对应表后获取，或通过 API list_tables 查询",
-    "cases_table_id": "tblXXXXXXXXXXXXXX",
-    "version_labels_table_id": "tblXXXXXXXXXXXXXX",
-    "run_history_table_id": "tblXXXXXXXXXXXXXX"
+  "bitable": {
+    "app_token": "YOUR_BITABLE_APP_TOKEN",
+    "tables": {
+      "cases": "YOUR_CASES_TABLE_ID",
+      "runs": "YOUR_RUNS_TABLE_ID",
+      "versions": "YOUR_VERSIONS_TABLE_ID"
+    }
   }
 }

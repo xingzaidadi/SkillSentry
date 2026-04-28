@@ -7,7 +7,10 @@ description: >
   不触发场景：要执行测试用例（用 sentry-executor）、要做完整流程（用 SkillSentry）。
 ---
 
-# sentry-report · 测评报告生成与发布决策
+# sentry-report · 测评报告生成与发布决策（独立模式）
+
+> **注意**：v7.5 起，sentry-grader 已内置报告生成。本工具仅用于**独立调用**场景（grading 已完成，只需生成报告）。
+> 主编排流程中不再单独调用本工具。
 
 读取 session 目录下所有 grading.json，汇总指标，生成 HTML 报告和 PASS/FAIL 发布决策。
 
@@ -21,6 +24,8 @@ description: >
 - `inputs_dir`：`{skill-eval-测评根目录}/inputs/<skill_name>/`（sentry-trigger 结果存于此）
 - `mode`：测评模式（smoke/quick/standard/full）
 - `skill_name`：被测 Skill 名称
+
+grading.json 格式为 runs 嵌套结构（runs.run-1/run-2/run-3 各含 assertions 和 summary），报告需按 run 分别读取后汇总。
 
 单独调用时，从用户指定路径或最近一次 session 目录读取。
 
@@ -174,7 +179,7 @@ E-3：复杂度（从 execution-phases 数据中读取，若有）
 
 ---
 
-## Step 4.2：基线快照生成与跨版本退化检测
+## Step 4.3：基线快照生成与跨版本退化检测
 
 读取 `inputs_dir/baseline.snapshot.json`（若存在），执行以下逻辑：
 
@@ -236,7 +241,7 @@ IFR：         95%          100%         +5% ↑
 
 ---
 
-## Step 4.5：历史趋势对比
+## Step 4.6：历史趋势对比
 
 读取 `inputs_dir/history.json`（若存在），对比本次结果与历史：
 
@@ -265,7 +270,7 @@ IFR：         95%          100%         +5% ↑
 
 ---
 
-## Step 5：生成报告
+## Step 6：生成报告
 
 读取 `{skill-eval-测评根目录}/references/report-template.md`，填充以下章节：
 
@@ -282,16 +287,16 @@ IFR：         95%          100%         +5% ↑
 （各层状态：✅ = 全达标，⚠️ = 有未达标，❌ = 严重问题，N/A = 未采集）
 四、基线对比（与首次 PASS 基线的指标变化，来自 baseline.snapshot.json）
 五、历史趋势（折线图：最近 10 次精确通过率，来自 history.json）
-五、用例覆盖（类型分布饼图文字描述）
-六、失败用例分析（grading.json 中 passed=false 的断言列表）
-七、增益分析（with vs without Δ，若有 Comparator 结果则附上）
-八、HiL 合规检查（来自 grading.json 中的 HiL 断言）
-九、效率指标（P50/P95 响应时间，Token 消耗）
-十、改进建议（来自 Grader eval_feedback + Analyzer analysis.json）
-十一、发布决策（PASS/CONDITIONAL PASS/FAIL + 等级）
-十二、下一步行动（具体可执行的改进项）
-十三、触发率预评估（若有 `inputs_dir/trigger_eval.json`，由 sentry-trigger 写入）
-十四、效率诊断（E-1/E-2/E-3 结果）
+六、用例覆盖（类型分布饼图文字描述）
+七、失败用例分析（grading.json 中 passed=false 的断言列表）
+八、增益分析（with vs without Δ，若有 Comparator 结果则附上）
+九、HiL 合规检查（来自 grading.json 中的 HiL 断言）
+十、效率指标（P50/P95 响应时间，Token 消耗）
+十一、改进建议（来自 Grader eval_feedback + Analyzer analysis.json）
+十二、发布决策（PASS/CONDITIONAL PASS/FAIL + 等级）
+十三、下一步行动（具体可执行的改进项）
+十四、触发率预评估（若有 `inputs_dir/trigger_eval.json`，由 sentry-trigger 写入）
+十五、效率诊断（E-1/E-2/E-3 结果）
 ```
 
 保存为 `workspace_dir/report.html`（使用 report-template.md 中的 HTML 模板）。
@@ -305,7 +310,7 @@ IFR：         95%          100%         +5% ↑
 
 ---
 
-## Step 6：更新历史记录
+## Step 7：更新历史记录
 
 报告生成完成后，将本次结果追加到 `inputs_dir/history.json`：
 
