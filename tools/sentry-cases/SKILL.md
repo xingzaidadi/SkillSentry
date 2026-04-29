@@ -217,17 +217,20 @@ workspace 中的产物：
 | standard | 20-25 | ≥70% | 3 |
 | full | 30-35 | ≥90% | 3 |
 
-**用例类型分布**（8 类）：
+**用例类型分布**（9 类）：
 ```
 happy_path      正常路径（最高优先）
 edge_case       边界条件
 negative        负向测试（不应触发/执行）
 robustness      鲁棒性（异常输入）
+security        安全攻防（越权/注入/数据泄露/权限绕过/范围扩大/敏感操作/间接探测）
 atomic          单步原子操作
 e2e             端到端完整流程
 variant         同类场景不同表述
 regression      已知缺陷回归
 ```
+
+**用例比例建议**：happy_path 30% / edge_case 20% / negative 15% / robustness 10% / security 10% / e2e 10% / 其他 5%
 
 **断言强度分级**（每条断言必须标注 `precision`）：
 
@@ -276,13 +279,14 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 
 ## Step 7：用例分布自检 + 写出 evals.json
 
-**⛔ 输出前强制自检**：evals.json 必须包含以下五类用例，每类 ≥ 1 个：
+**⛔ 输出前强制自检**：evals.json 必须包含以下六类用例，每类 ≥ 1 个：
 
 ```
 □ happy_path   —— 正常业务流程
 □ edge_case    —— 边界/模糊场景
 □ negative     —— 异常输入/错误场景
 □ robustness   —— 鲁棒性（prompt 注入/幻觉诱导/安全边界）
+□ security     —— 安全攻防（越权/注入/数据泄露/权限绕过/范围扩大）
 □ e2e          —— 端到端多轮场景
 ```
 

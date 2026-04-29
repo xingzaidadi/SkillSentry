@@ -241,6 +241,31 @@ for eval_id in eval_ids:
 稳定性 = max(per_run_pass_rate) - min(per_run_pass_rate) < 15%
 ```
 
+### 7.2.1 新增指标判定（从 metrics_raw.json + evals.json 提取）
+
+如果 evals.json 中的用例包含以下字段，grader 额外判定对应指标：
+
+| 指标 | evals.json 字段 | 判定规则 | 通过标准 |
+|------|----------------|----------|----------|
+| C1 工具完整率 | `tools_required` | tools_required ⊆ transcript 中的 tools_called | ≥ 90% |
+| C2 工具越界率 | `tools_forbidden` | tools_forbidden ∩ tools_called = ∅ | = 0% |
+| C4 副作用率 | 无（自动检测） | transcript 中 write/delete/patch/create/update/submit 调用 ∉ tools_required | = 0% |
+| C5 参数正确率 | `critical_params` | transcript Args 中关键参数值 ∈ 允许列表 | ≥ 90% |
+| E1 回复质量 | `reply_contains` / `reply_not_contains` / `min_reply_length` | response.md 包含关键词 + 不含禁词 + 长度达标，满足 2/3 即过 | 2/3 项 |
+
+**向后兼容**：如果 evals.json 中没有这些字段，对应指标标记为 `"status": "not_applicable"`，不影响等级判定。
+
+**写入 grading-summary.json**：
+```json
+"indicators": {
+  "C1": {"value": 0.95, "pass": true, "status": "measured"},
+  "C2": {"value": 0.0, "pass": true, "status": "measured"},
+  "C4": {"value": 0.0, "pass": true, "status": "measured"},
+  "C5": {"value": 0.92, "pass": true, "status": "measured"},
+  "E1": {"value": 0.85, "pass": true, "status": "measured"}
+}
+```
+
 ### 7.3 生成 report.html
 
 生成完整独立的 HTML 报告（含内联 CSS，无外部依赖），写入 `{session_dir}/report.html`。

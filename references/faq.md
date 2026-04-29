@@ -30,6 +30,13 @@
 - [OpenClaw/飞书场景：报告 HTML 文件怎么让用户看到](#openclaw飞书场景报告-html-文件怎么让用户看到)
 - [OpenClaw/飞书场景：如何判断是否在 OpenClaw 环境中运行](#openclaw飞书场景如何判断是否在-openclaw-环境中运行)
 
+**部署 / 版本升级类**
+- [部署新版 SkillSentry 后，交互卡片不出现](#部署新版-skillsentry-后交互卡片不出现agent-用纯文本列表代替)
+- [手动覆盖 skill 文件后，agent 仍使用旧版 skill description](#手动覆盖-skill-文件后agent-仍使用旧版-skill-description)
+- [测评完 Skill A 后测评 Skill B，agent 沿用 Skill A 的执行模式](#测评完-skill-a-后测评-skill-bagent-沿用-skill-a-的执行模式)
+- [旧记忆清理 vs 保留的平衡](#旧记忆清理-vs-保留的平衡)
+- [纯 prompt 层方案的天花板](#纯-prompt-层方案的天花板agent-理论上仍可忽略-skillmd)
+
 ---
 
 **session 目录命名冲突**
@@ -124,4 +131,54 @@
 
 ---
 
-*Last Updated: 2026-04-10*
+**部署新版 SkillSentry 后，交互卡片不出现（agent 用纯文本列表代替）**
+→ 三层根因叠加：
+  1. **memory 覆写**：旧版 SkillSentry 的 memory 记录包含「用文本列表列 skill」的行为模式，agent 直接照搬，跳过读 SKILL.md
+  2. **manifest 缓存**：手动覆盖文件时 gateway 未重启，`skill_manifest.json` 中的 contentHash 仍是旧的，agent 看到的 description 是旧版
+  3. **嵌套指令**：SKILL.md 内部的 Step 0 也依赖 agent 先读 SKILL.md 才能生效
+  解决方案：
+  - SKILL.md 顶部加「行为优先级」规则（SKILL.md > memory）
+  - description 中加「旧记忆警告」（始终可见，不需要读 SKILL.md）
+  - 部署后运行 `install.sh --restart` 更新 manifest
+  详见 `TROUBLESHOOTING.md`
+
+---
+
+**手动覆盖 skill 文件后，agent 仍使用旧版 skill description**
+→ `skill_manifest.json` 缓存了每个 skill 的 `contentHash`。gateway 运行时手动覆盖文件，gateway 不会自动重新扫描。
+  解决方案：拷完文件后重启 gateway
+  ```bash
+  openclaw gateway restart
+  ```
+  或使用 `install.sh --restart` 自动检测并重启。
+
+---
+
+**测评完 Skill A 后测评 Skill B，agent 沿用 Skill A 的执行模式**
+→ memory 中 Skill A 的执行记录影响了 Skill B 的执行。
+  解决方案：
+  - 行为优先级规则：每次触发都是独立执行
+  - session.json 自动重置：检测到 skill 变更时清空 session 状态
+  - description 明确声明：「每次触发都是独立执行，不因之前测评过其他 Skill 就跳过读 SKILL.md」
+
+---
+
+**旧记忆清理 vs 保留的平衡**
+→ memory 中的 session 历史、执行结果、用例数据都是有价值的资产，不应删除。
+  正确做法：不删除任何 memory 文件，通过「SKILL.md > memory」的优先级规则解决行为冲突。
+  memory 保留作为历史记录，但不影响当前执行行为。
+
+---
+
+**纯 prompt 层方案的天花板：agent 理论上仍可忽略 SKILL.md**
+→ LLM 的 compliance 是概率性的，不是确定性的。当前方案把概率拉到最高，但不是 100%。
+  防线层级：
+  - L0: description 旧记忆警告（始终可见，不需要读 SKILL.md）→ 最有效
+  - L1: description 强制执行规则（始终可见）
+  - L2: SKILL.md 行为优先级规则（需要读文件）
+  - L3: Step 0.1 环境对齐检查（需要读文件）
+  唯一 100% 方案：改 OpenClaw 源码（skill 加载时代码层面强制注入规则）。
+
+---
+
+*Last Updated: 2026-04-29*

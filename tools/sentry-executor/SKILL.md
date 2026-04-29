@@ -234,6 +234,59 @@ mcp_based + 任何模式：skip_without_skill = true
 
 对 sentry-executor 其余逻辑透明，transcript 格式不变。
 
+### mcporter 已知问题与全局规避策略
+
+**问题 1：mcporter 返回的不是标准 JSON**
+
+mcporter 返回的是 JavaScript 对象字面量（无引号 key、单引号字符串），不是标准 JSON。
+`json.loads()` 直接解析必然失败。
+
+**规避策略**：
+subagent 调用 mcporter 时，必须用以下方式之一解析返回值：
+- 方案 A：用正则提取 `text:` 字段中的内容（跳过外层包装）
+- 方案 B：用 `python3 -c "import ast; ..."` 解析 JS 对象字面量
+- **禁止**：直接用 `json.loads()` 解析 mcporter 原始输出
+
+**问题 2：MCP 返回大响应（>10KB，含 base64 PDF/文件）**
+
+部分 MCP 工具会把文件内容（PDF、图片）的 base64 编码直接塞进 JSON 返回值，
+导致响应超过 100KB。subagent 解析崩溃，并浪费 token。
+
+**规避策略**：
+subagent task 中注入以下规则：
+```
+mcporter 返回值处理规则：
+1. 如果返回值 > 10KB，只提取 code、msg、核心业务字段，丢弃 base64/filePath/二进制数据
+2. 禁止把完整的大响应写入 transcript.md（截断到前 2000 字符）
+3. transcript 中标注：[truncated: original response {N}KB, showing first 2000 chars]
+```
+
+**问题 3：参数截断（编号提取不完整）**
+
+subagent 用正则提取用户输入中的单号时，可能截断字母+数字混合编号（如 25BY27IN00016273 → 00016273）。
+
+**规避策略**：
+subagent task 中注入：
+```
+参数提取规则：
+- 用户输入中的编号必须完整保留，不可截断前缀
+- 单号可能包含字母+数字混合（如 BR202603170001、25BY27IN00016273）
+- 禁止用纯数字正则提取，必须保留完整字符串
+```
+
+**问题 4：未按 SKILL.md 输出模板格式化响应**
+
+查询失败时 subagent 直接输出 MCP 原始错误消息，没按 SKILL.md 的输出模板格式化。
+
+**规避策略**：
+subagent task 中注入：
+```
+输出规则：
+- 即使查询失败，也必须按 SKILL.md 的输出模板格式化 response.md
+- 禁止直接输出 MCP 原始错误消息
+- response.md 最少 100 字符，包含结构化提示
+```
+
 ---
 
 ## 执行策略选择
@@ -382,7 +435,20 @@ response → {path}/eval-1/run-{R}/with_skill/outputs/response.md
 2. 每个 eval 独立处理，不复用上一个 eval 的结果
 3. 处理完立即写文件 + 更新 progress
 4. 单个 eval 写入失败→记录到 failed 列表，继续下一个
-5. 全部完成后回复汇总
+5. 全部完成后回复汇总（格式见下方）
+```
+
+**completion message 格式（所有模式统一，subagent 必须按此格式返回）**：
+
+```
+## Run-{R} 执行完成
+
+| Eval | 输入摘要 | MCP Server | 结果摘要 |
+|------|---------|-----------|----------|
+| eval-1 | {prompt前20字} | {server} | {结果：成功/失败/超时 + 关键信息} |
+| eval-2 | ... | ... | ... |
+
+共 {N} 个 eval，{X} 个成功，{Y} 个失败。
 ```
 
 **完成后验证（主会话执行）**：
