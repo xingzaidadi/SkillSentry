@@ -44,11 +44,11 @@ workspace 中的产物：
 ## Step 0：需求分析（用户确认测什么）
 
 > **模式分级控制**：
-> - **smoke**：跳过整个 Step 0，直接进入 Step 4 快速生成 4-5 个用例
+> - **smoke**：跳过 Step 0.1（三步扫描）和 Step 0.2（用例确认），但 **Step 0.3（测试数据采集）对 mcp_based 仍必须执行且必须等待用户确认**——自动通过 MCP 查询用户名下数据，展示给用户确认后再使用，查不到则询问用户提供或标 mock
 > - **quick**：Step 0.1 用缓存（requirements.cache.json 命中则跳过三步扫描），Step 0.3 尝试查 MCP，Step 0.2 跳过用户确认
 > - **standard/full**：完整执行所有子步骤
 
-> **跳过条件**：prompt 中含 `--skip-analysis` 或 mode == "smoke" 时，直接进入 Step 4。
+> **跳过条件**：prompt 中含 `--skip-analysis` 时，跳过 Step 0.1/0.2 直接进入 Step 4（但 Step 0.3 对 mcp_based 仍不可跳过）。
 
 ### 0.1 加载或生成需求分析
 
@@ -344,6 +344,40 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 ```
 
 **飞书链接获取方式**：从 `config.json` 的 `bitable.app_token` 拼接 `https://mi.feishu.cn/base/{app_token}`。config.json 不存在时不展示飞书链接。
+
+---
+
+## completion message 格式（按模式分级，subagent 必须按此返回）
+
+**smoke 模式**：
+```
+📋 sentry-cases 完成
+| # | 类型 | 用例名 | 断言数 |
+|---|------|-------|--------|
+共 N 个用例，M 条断言。
+```
+
+**quick 模式**：
+```
+📋 sentry-cases 完成
+| # | 类型 | 用例名 | 断言摘要 |
+|---|------|-------|----------|
+| 1 | happy_path | xxx | E1: 调用 budget MCP (exact) / E2: 含单号 (exact) |
+共 N 个用例，M 条断言（exact_match: X / semantic: Y）。
+```
+
+**standard/full 模式**：
+```
+📋 sentry-cases 完成
+| # | 类型 | 用例名 | 断言详情 |
+|---|------|-------|----------|
+| 1 | happy_path | xxx | E1: 调用 budget MCP (exact_match, R-03) |
+|   |   |   | E2: 返回含单号 (exact_match, R-05) |
+|   |   |   | E3: 含审批状态 (semantic, R-07) |
+共 N 个用例，M 条断言。
+断言构成：exact_match X 条 / semantic Y 条 / existence Z 条
+规则覆盖率：N/M = X%
+```
 
 ---
 

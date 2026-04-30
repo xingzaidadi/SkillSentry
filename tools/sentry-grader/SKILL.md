@@ -169,7 +169,19 @@ Grader subagent 超时（600s 无响应）时：
 总断言：N 条 | 通过：X | 失败：Y | 不确定：Z
 精确通过率：X% | 综合通过率：Y%
 脚本验证：N 条 exact_match（method: script）
+
+断言详情：
+| Eval | 断言 | 类型 | 结果 | Evidence |
+|------|------|------|------|----------|
+| eval-1 | E1: xxx | semantic | ✅ | transcript 中调用了 xxx 工具 |
+| eval-1 | E2: xxx | existence | ❌ | response 中未包含 xxx |
+| ... | ... | ... | ... | ... |
 ```
+
+**断言详情展示规则**：
+- smoke/quick（用例数 ≤ 10）：展示所有断言的详情
+- standard/full（用例数 > 10）：仅展示 failed 断言详情，passed 断言只显示汇总
+- evidence 字段必须引用 transcript/response 中的具体文本，禁止空泡判断
 
 ---
 
