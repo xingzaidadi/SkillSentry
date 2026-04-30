@@ -138,11 +138,23 @@ if $need_restart; then
     echo ""
     echo "⚠️ 检测到 manifest 需要更新。"
     if $RESTART; then
-        echo "正在重启 gateway..."
-        openclaw gateway restart 2>/dev/null && echo "✅ gateway 已重启" || echo "❌ 重启失败，请手动执行: openclaw gateway restart"
+        echo "正在更新 manifest..."
+        current_hash=$(sha256sum "$SKILL_DIR/SKILL.md" | cut -d' ' -f1)
+        python3 -c "
+import json
+path='$MANIFEST'
+d=json.load(open(path))
+if 'skill-eval-测评' in d.get('skills',{}):
+    d['skills']['skill-eval-测评']['contentHash']='$current_hash'
+    d['skills']['skill-eval-测评']['localModified']=True
+    json.dump(d,open(path,'w'),indent=2,ensure_ascii=False)
+    print('OK')
+else:
+    print('NOT_FOUND')
+" 2>/dev/null && echo "✅ manifest hash 已更新（gateway 下次触发时自动加载）" || echo "❌ manifest 更新失败"
     else
-        echo "请执行: openclaw gateway restart"
-        echo "或重新运行: bash install.sh --restart"
+        echo "请执行: bash install.sh --restart"
+        echo "或手动更新 manifest: python3 -c \"...\""
     fi
 fi
 
