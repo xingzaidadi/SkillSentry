@@ -1,6 +1,6 @@
 ---
 name: skill-eval-测评
-version: "7.8.1"
+version: "7.8.2"
 description: >
   SkillSentry — AI Skill 质量测评系统。
   触发场景：说"测评/测试/验证/评估某个Skill"、"这个skill好不好用"、"能不能上线"、"帮我跑eval"、"Skill质量怎么样"、"上线前先测一下"、"发布前检查"。
@@ -360,10 +360,12 @@ feishu_ask_user_question(questions=[
 4. 等待用户选择后继续 Step 2 剩余流程
 5. 如果用户指定了 Skill 名但未指定模式,只发模式选择卡片(单问题)
 6. 如果用户同时指定了 Skill 和模式,跳过卡片直接进入推断
-7. **卡片提交后必须按顺序输出 Step 1 和 Step 2 两条独立消息**：
-   - Step 1（初始化）：含被测 Skill 名称 + skill_type + MCP 预检结果 + 工作目录
-   - Step 2（工作流推断）：含 pipeline + 预计时间 + 模式理由
-   - 禁止合并为一条消息，禁止跳过任一步
+7. **每个步骤必须输出一条独立消息**：
+   - 执行的步骤：输出结果
+   - 跳过的步骤：输出「⏭️ Step X {名称}：跳过（原因）」
+   - 禁止合并为一条消息，禁止静默跳过任何步骤
+   - 示例：`⏭️ Step sentry-check：跳过（hash 匹配缓存，规则未变更）`
+   - 示例：`⏭️ Step sentry-cases：跳过（复用上次 5 个用例，hash 匹配）`
 
 ---
 
@@ -524,6 +526,7 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数，子工具根据 m
 
 ---
 
+*v7.8.2 · 跳过步骤必须通知用户 · 2026-04-30*
 *v7.8.1 · 修复卡片格式(text替代interactive)+稳定性改进 · 2026-04-30*
 *v7.8.0 · 卡片格式强制+references外移+SKILL.md瘦身 · 2026-04-30*
 *v7.7.4 · 模式分级+断言分级+multi_turn+空字段+多编号分隔 · 2026-04-29*
