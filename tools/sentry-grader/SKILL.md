@@ -266,11 +266,14 @@ for eval_id in eval_ids:
 }
 ```
 
-### 7.3 生成 report.html
+### 7.3 生成报告（按模式分级）
 
-生成完整独立的 HTML 报告（含内联 CSS，无外部依赖），写入 `{session_dir}/report.html`。
+**模式分级控制**：
+- **smoke**：只生成 grading-summary.json，不生成 HTML，不上传飞书
+- **quick**：生成 grading-summary.json，不生成 HTML，主会话通过飞书卡片推送结果（含评级 + per-eval 表格 + 建议）
+- **standard/full**：完整独立 HTML 报告（含内联 CSS）+ grading-summary.json + history.json，HTML 上传飞书并发下载链接
 
-报告必须包含：
+**standard/full 模式 HTML 报告必须包含**：
 1. **概要卡片**：Skill 名、模式、日期、评级（S/A/B/C）、通过率
 2. **各轮对比**：run-1/run-2/run-3 的通过率和趋势
 3. **失败分析**：按失败模式分组（如 MCP 错误、多轮缺失、路由错误）

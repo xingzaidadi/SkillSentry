@@ -43,7 +43,12 @@ workspace 中的产物：
 
 ## Step 0：需求分析（用户确认测什么）
 
-> **跳过条件**：prompt 中含 `--skip-analysis` 时，直接进入 Step 1。
+> **模式分级控制**：
+> - **smoke**：跳过整个 Step 0，直接进入 Step 4 快速生成 4-5 个用例
+> - **quick**：Step 0.1 用缓存（requirements.cache.json 命中则跳过三步扫描），Step 0.3 尝试查 MCP，Step 0.2 跳过用户确认
+> - **standard/full**：完整执行所有子步骤
+
+> **跳过条件**：prompt 中含 `--skip-analysis` 或 mode == "smoke" 时，直接进入 Step 4。
 
 ### 0.1 加载或生成需求分析
 
