@@ -108,28 +108,23 @@ jobs:
             exit 0  # 跳过，不 fail
           fi
 
-      - name: 运行 SkillSentry 测评（${{ github.event.inputs.mode || 'smoke' }} 模式）
+      - name: 安装 Python 依赖
+        run: pip install anthropic
+
+      - name: 运行 SkillSentry CI 测评
+        id: summarize
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_CODE_MAX_OUTPUT_TOKENS: 8192
         run: |
           MODE="${{ github.event.inputs.mode || 'smoke' }}"
-          # 非交互模式：自动确认（利用 --yes 标志和 stdin 重定向）
-          echo "开始" | claude --dangerously-skip-permissions \
-            "测评 ${{ matrix.skill }} 模式=$MODE 自动" \
-            --output-format text \
-            2>&1 | tee eval-output.log
-          echo "测评输出已写入 eval-output.log"
-
-      - name: 汇总评估结果
-        id: summarize
-        run: |
-          python3 ~/.claude/skills/skill-eval-测评/scripts/ci_eval.py \
+          python3 ~/.claude/skills/skill-eval-测评/scripts/sentry_ci.py \
             --skill ${{ matrix.skill }} \
-            --mode ${{ github.event.inputs.mode || 'smoke' }} \
+            --mode "$MODE" \
             --threshold 0.80 \
             --output-dir ./ci-eval-results/${{ matrix.skill }} \
-            --github-output
+            --github-output \
+            --verbose \
+            2>&1 | tee eval-output.log
         continue-on-error: true  # 允许 FAIL 时继续（以便推送 Check）
 
       - name: 更新历史记录

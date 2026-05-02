@@ -51,13 +51,13 @@ metadata:
 
 检测方式:消息来自飞书/Telegram → `runtime="openclaw"`;其他 → `runtime="cli"`。
 
-| 能力 | CLI / OpenCode | OpenClaw(飞书)|
-|------|---------------|----------------|
-| 子任务调用 | `Agent(task=...)` | `sessions_spawn(task=..., runTimeoutSeconds=600)` |
-| 步骤输出 | 打印到终端 | `message(msg_type="interactive", ...)` |
-| 步骤校验 | `[sentry-proof]` + `verify_proof.py` | `validate_step.py` + milestone audit |
-| 步骤等待 | 60s 无响应自动继续 | 等用户说「继续」(无超时)|
-| 自动模式 | `--ci` 跳过步骤间等待 | `自动` 跳过步骤间等待 |
+| 能力 | CLI / OpenCode | OpenClaw(飞书)| CI（sentry_ci.py） |
+|------|---------------|----------------|-------------------|
+| 子任务调用 | `Agent(task=...)` | `sessions_spawn(task=..., runTimeoutSeconds=600)` | `subprocess.run(["claude", "-p", ...])` + Anthropic SDK |
+| 步骤输出 | 打印到终端 | `message(msg_type="interactive", ...)` | stdout/stderr + 文件产物 |
+| 步骤校验 | `[sentry-proof]` + `verify_proof.py` | `validate_step.py` + milestone audit | 文件存在性检查 |
+| 步骤等待 | 60s 无响应自动继续 | 等用户说「继续」(无超时)| 无等待，全自动 |
+| 自动模式 | `--ci` 跳过步骤间等待 | `自动` 跳过步骤间等待 | 强制 auto，跳过所有确认 |
 
 ### ⛔ auto 模式不可跳过清单(auto-exempt)
 
