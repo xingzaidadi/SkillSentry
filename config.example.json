@@ -1,0 +1,10 @@
+{
+  "bitable": {
+    "app_token": "YOUR_BITABLE_APP_TOKEN",
+    "tables": {
+      "cases": "YOUR_CASES_TABLE_ID",
+      "runs": "YOUR_RUNS_TABLE_ID",
+      "versions": "YOUR_VERSIONS_TABLE_ID"
+    }
+  }
+}

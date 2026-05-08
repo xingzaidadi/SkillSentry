@@ -1,0 +1,4 @@
+sessions/
+inputs/*
+!inputs/manifest.json
+__pycache__/

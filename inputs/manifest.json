@@ -1,0 +1,13 @@
+{
+  "description": "测评输入素材清单。采用「Skill 隔离」设计，所有测试素材均存放于对应 Skill 名称的子目录下。",
+  "structure": {
+    "inputs/[skill-name]/": "该 Skill 测评所需的全部原始素材（PDF、图片、数据文件等）",
+    "inputs/common/": "跨 Skill 通用的共享素材库"
+  },
+  "metadata_fields": {
+    "path": "素材相对路径",
+    "type": "素材技术类型（如 unstructured_text, structured_data, image）",
+    "role": "素材在测评中的角色（如 source, reference, ground_truth）"
+  },
+  "note": "测评引擎会根据 inputs 目录下对应 Skill 文件夹的存在性自动判断是否涉及文件处理链路。"
+}
