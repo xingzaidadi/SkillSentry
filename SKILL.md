@@ -327,12 +327,10 @@ message(action=send, message="
 ```
 feishu_ask_user_question(questions=[
   {
-    "question": "选择要测评的 Skill",
+    "question": "输入要测评的 Skill 名称（从下方列表中复制）。\n可选 Skill："
+                + "\n".join([name for name in scanned_skills]),
     "header": "被测 Skill",
-    "options": [
-      // 动态生成,每个 option:
-      {"label": "<skill-name>", "description": "<从 SKILL.md frontmatter description 截取前 30 字>"}
-    ],
+    "options": [],  // 空数组 = 渲染为自由文本输入框（解决 maxItems:10 硬限制）
     "multiSelect": false
   },
   {
