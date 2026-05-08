@@ -45,13 +45,13 @@ metadata:
 
 检测方式:消息来自飞书/Telegram → `runtime="openclaw"`;其他 → `runtime="cli"`。
 
-| 能力 | CLI / OpenCode | OpenClaw(飞书)| CI（sentry_ci.py） |
+| 能力 | CLI / OpenCode | OpenClaw(飞书)| CI(sentry_ci.py) |
 |------|---------------|----------------|-------------------|
 | 子任务调用 | `Agent(task=...)` | `sessions_spawn(task=..., runTimeoutSeconds=900)` | `subprocess.run(["claude", "-p", ...])` + Anthropic SDK |
 | 步骤输出 | 打印到终端 | `message(msg_type="text", ...)` | stdout/stderr + 文件产物 |
 | 步骤校验 | `[sentry-proof]` + `verify_proof.py` | `validate_step.py` + milestone audit | 文件存在性检查 |
-| 步骤等待 | 60s 无响应自动继续 | 等用户说「继续」(无超时)| 无等待，全自动 |
-| 自动模式 | `--ci` 跳过步骤间等待 | `自动` 跳过步骤间等待 | 强制 auto，跳过所有确认 |
+| 步骤等待 | 60s 无响应自动继续 | 等用户说「继续」(无超时)| 无等待,全自动 |
+| 自动模式 | `--ci` 跳过步骤间等待 | `自动` 跳过步骤间等待 | 强制 auto,跳过所有确认 |
 
 ### ⛔ auto 模式不可跳过清单(auto-exempt)
 
@@ -327,10 +327,10 @@ message(action=send, message="
 ```
 feishu_ask_user_question(questions=[
   {
-    "question": "输入要测评的 Skill 名称（从下方列表中复制）。\n可选 Skill："
+    "question": "输入要测评的 Skill 名称(从下方列表中复制)。\n可选 Skill:"
                 + "\n".join([name for name in scanned_skills]),
     "header": "被测 Skill",
-    "options": [],  // 空数组 = 渲染为自由文本输入框（解决 maxItems:10 硬限制）
+    "options": [],  // 空数组 = 渲染为自由文本输入框(解决 maxItems:10 硬限制)
     "multiSelect": false
   },
   {
@@ -369,11 +369,31 @@ feishu_ask_user_question(questions=[
 如果 last_step != null 且 last_step != "publish" 且 pipeline 存在:
   → 提示用户:
     "检测到上次未完成的测评({skill} {mode},停在 {last_step}),是否从断点继续?"
-  用户确认 → 从 pipeline[indexOf(last_step)+1] 开始,跳过 Step 0/1/2
+  用户确认 → 从 pipeline[indexOf(last_step)+1] 开始,跳过 Step 0/1/2 的执行
   用户拒绝 → 正常从头开始新测评
 ```
 
 当用户输入 `继续` / `resume` / `从断点继续` 时,直接触发 resume 逻辑,无需重新跑 Step 0/1/2。
+
+**⛔ Resume 展示铁律(跳过执行 ≠ 跳过展示)**:
+
+Resume 时必须按顺序逐步输出已完成步骤的摘要,每步一条独立消息:
+
+```
+message: "⏭️ static (1/12) [Resume]:L1=4.5 L2=PASS L3=23 L4=轻微 L5=良好 | TP=95% TN=100%"
+message: "⏭️ cases (2/12) [Resume]:32 用例 (HP:10 EC:6 NEG:5 ROB:3 SEC:3 E2E:3 AL:2)"
+message: "⏭️ sync-pull (3/12) [Resume]:skipped_no_config"
+message: "⏭️ sync-push-cases (4/12) [Resume]:skipped_no_config"
+message: "✅ executor-with (5/12) [Resume]:Run-1 32/32 | Run-2 31/32 | Run-3 32/32"
+message: "→ 当前步骤:grader (6/12)..."
+```
+
+禁止:
+- 直接跳到当前步骤而不展示前置步骤
+- 合并多个步骤为一条消息
+- 用‌"5/12"这样的数字而不解释前 4 步发生了什么
+
+原因:用户看到 "5/12" 但不知道前 4 步是什么结果 = 黑箱感 = 不信任。Resume 的目的是节省执行时间,不是节省展示时间。
 5. 如果用户指定了 Skill 名但未指定模式,只发模式选择卡片(单问题)
 6. 如果用户同时指定了 Skill 和模式,跳过卡片直接进入推断
 7. **每个步骤必须输出一条独立消息**:
@@ -463,11 +483,11 @@ Step 2 推断完成后写入 session.json.pipeline,Step 3 调度循环严格按�
 
 ### Pipeline 持久化与自动恢复
 
-**设计目标**：即使主 session 意外终止（LLM 忘记 yield、超时、崩溃），pipeline 也能在下次心跳时自动恢复，不会静默断裂。
+**设计目标**:即使主 session 意外终止(LLM 忘记 yield、超时、崩溃),pipeline 也能在下次心跳时自动恢复,不会静默断裂。
 
 #### Checkpoint 文件
 
-路径：`~/.openclaw/data/skill-eval/active-pipeline.json`
+路径:`~/.openclaw/data/skill-eval/active-pipeline.json`
 
 ```json
 {
@@ -483,46 +503,46 @@ Step 2 推断完成后写入 session.json.pipeline,Step 3 调度循环严格按�
 }
 ```
 
-#### 写入时机（⛔ 必须在 spawn 之后、yield 之前）
+#### 写入时机(⛔ 必须在 spawn 之后、yield 之前)
 
-每次 spawn 长时间 subagent（executor、grader、comparator、analyzer）后，**立即**写入 checkpoint：
+每次 spawn 长时间 subagent(executor、grader、comparator、analyzer)后,**立即**写入 checkpoint:
 
 ```
 spawn subagent → write active-pipeline.json → sessions_yield
 ```
 
-⛔ **铁律**：spawn 后不写 checkpoint 就 yield = 违规。spawn 后不 yield 直接 stop = 严重违规（pipeline 必断）。
+⛔ **铁律**:spawn 后不写 checkpoint 就 yield = 违规。spawn 后不 yield 直接 stop = 严重违规(pipeline 必断)。
 
 #### 清理时机
 
-以下任一条件满足时删除 `active-pipeline.json`：
+以下任一条件满足时删除 `active-pipeline.json`:
 - subagent 完成 + 验收通过 + session.json.last_step 已更新
-- pipeline 最终步骤（publish）完成
+- pipeline 最终步骤(publish)完成
 - 用户手动取消测评
 
-#### 自动恢复（心跳触发）
+#### 自动恢复(心跳触发)
 
-系统 cron 每 10 分钟发送 `PIPELINE_CHECK` systemEvent 到主 session。收到后执行：
+系统 cron 每 10 分钟发送 `PIPELINE_CHECK` systemEvent 到主 session。收到后执行:
 
 ```
 1. exec: cat ~/.openclaw/data/skill-eval/active-pipeline.json 2>/dev/null
-2. 文件不存在 → HEARTBEAT_OK（无活跃 pipeline）
+2. 文件不存在 → HEARTBEAT_OK(无活跃 pipeline)
 3. 文件存在 →
    a. sessions_list 查 pending_subagents 的状态
-   b. 全部 done → 读本 SKILL.md → 从 next_step 继续执行（验收产物 → 展示结果 → 推进 pipeline）
-   c. 仍在运行 + 未超时 → HEARTBEAT_OK（正常等待）
-   d. 超时（started_at + timeout_minutes 已过）→ 通知用户 "⚠️ Pipeline 超时: {skill} 的 {current_step} 已运行超过 {timeout_minutes}min"
+   b. 全部 done → 读本 SKILL.md → 从 next_step 继续执行(验收产物 → 展示结果 → 推进 pipeline)
+   c. 仍在运行 + 未超时 → HEARTBEAT_OK(正常等待)
+   d. 超时(started_at + timeout_minutes 已过)→ 通知用户 "⚠️ Pipeline 超时: {skill} 的 {current_step} 已运行超过 {timeout_minutes}min"
 ```
 
 #### 恢复后的行为
 
-恢复执行时，主调度器从 checkpoint 的 `next_step` 开始，按正常流程：
+恢复执行时,主调度器从 checkpoint 的 `next_step` 开始,按正常流程:
 - 读 session.json 确认上下文
 - 验收上一步产物
 - 推进到 next_step
 - 继续正常调度循环
 
-**不需要重跑 Step 0/1/2**，直接从 pipeline 断点续接。
+**不需要重跑 Step 0/1/2**,直接从 pipeline 断点续接。
 
 ### pipeline 定义(每步的子工具 + 产物清单)
 
@@ -556,8 +576,10 @@ spawn subagent → write active-pipeline.json → sessions_yield
 ☐ 本次是否 read 了 SKILL.md 或相关 references?(凭记忆 = 违规)
 ☐ 缓存命中时,是否展示了完整摘要(不是一行带过)?
 ☐ Step 0/1/2 是否各自独立发送(不合并)?
-☐ 消息内容是否含具体数据(不是"完成"两字)?
+☐ 消息内容是否含具体数据(不是“完成”两字)?
 ☐ session.json 是否记录了 evidence(files_read + artifacts_created)?
+☐ Resume 时是否逐步展示了已完成步骤的摘要?(跳过执行 ≠ 跳过展示)
+☐ 进度条(N/M)出现前,前面每一步是否都有对应消息?
 ```
 
 **任何一项未通过 = 不发送,先补做。**
@@ -622,36 +644,36 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
 - 每个 step 完成后发一条独立 message,不是最后一起发
 - Step 0、Step 1、Step 2 必须各自独立发送,禁止合并
 - grader 结果卡片必须包含 per-assertion 详情(smoke/quick 全量,standard/full 只展示 failed)
-- 缓存命中时必须展示内容摘要，禁止只写“缓存命中，跳过”
-- **进度摘要**：每完成一个 pipeline 步骤后，在消息末尾附加进度条：`[██████░░░░] 3/5 steps`（用 █ 和 ░ 字符模拟）
+- 缓存命中时必须展示内容摘要,禁止只写"缓存命中,跳过"
+- **进度摘要**:每完成一个 pipeline 步骤后,在消息末尾附加进度条:`[██████░░░░] 3/5 steps`(用 █ 和 ░ 字符模拟)
 
 ---
 
-## 飞书同步（已纳入 pipeline 状态机）
+## 飞书同步(已纳入 pipeline 状态机)
 
 > config.json 不存在时,所有操作静默跳过并记录 `skipped_no_config`,不中断主流程。
 > 详细执行流程见:`./references/feishu-sync.md`
 
-**❗ v8.4.0 重要变更**：sync 步骤已从“步骤间隙的附加动作”升级为 pipeline 正式步骤。
-状态机强制执行，不再依赖主调度器“记得”执行。
+**❗ v8.4.0 重要变更**:sync 步骤已从"步骤间隙的附加动作"升级为 pipeline 正式步骤。
+状态机强制执行,不再依赖主调度器"记得"执行。
 
 | pipeline 步骤 | 执行内容 | 准出条件 |
 |--------------|----------|----------|
 | sync-pull | 从飞书 Bitable 拉取 human 用例合并到 evals.json | session.json.sync.pull != null |
 | sync-push-cases | 将 evals.json 推送到飞书 Bitable 用例表 | session.json.sync.push_cases != null |
 | sync-push-results | 将 grading.json 推送到飞书 Bitable 运行记录表 | session.json.sync.push_results != null |
-| gate | Completion Gate 校验（7项），确定 COMPLETE/PARTIAL/BLOCKED | session.json.verdict.completion_status != null |
+| gate | Completion Gate 校验(7项),确定 COMPLETE/PARTIAL/BLOCKED | session.json.verdict.completion_status != null |
 
-**降级规则**：
-- config.json 不存在 → sync 步骤执行结果为 `skipped_no_config`，不阻断流程
-- config.json 存在但同步失败 → 记录 error，不阻断，但 report 中标注“同步异常”
+**降级规则**:
+- config.json 不存在 → sync 步骤执行结果为 `skipped_no_config`,不阻断流程
+- config.json 存在但同步失败 → 记录 error,不阻断,但 report 中标注"同步异常"
 
-**PUSH-RUN 保留在 publish 内部**（依赖 gate 结果，拆出来反而需要两步）
+**PUSH-RUN 保留在 publish 内部**(依赖 gate 结果,拆出来反而需要两步)
 
 关键规则(所有模式):
-- ⛔ sync 步骤在 pipeline 中不可跳过（可降级为 skipped_no_config，但必须被状态机走过）
+- ⛔ sync 步骤在 pipeline 中不可跳过(可降级为 skipped_no_config,但必须被状态机走过)
 - ⛔ 报告前置校验:sync.push_cases 和 sync.push_results 必须非 null
-- gate 步骤仅 standard/full 模式启用（smoke/quick 的简单校验内嵌在 publish 中）
+- gate 步骤仅 standard/full 模式启用(smoke/quick 的简单校验内嵌在 publish 中)
 
 ## Pipeline 准出标准
 
