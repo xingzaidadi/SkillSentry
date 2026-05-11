@@ -561,12 +561,25 @@ spawn subagent → write active-pipeline.json → sessions_yield
 **executor-without 跳过条件**:mcp_based + smoke/quick → 跳过(N/A),Delta 标注"N/A(跳过 without_skill)"
 
 **publish 步骤内容**(主调度器直接执行,不 spawn):
-4.5. 执行 Completion Gate 检查(见 references/output-format.md)→ 确定状态为 COMPLETE/PARTIAL/BLOCKED
-4.6. 消息中必须显示 completion_status
-1. `feishu_drive_file(action=upload, file_path=report.html)` → 获取 file_token
-2. `feishu_drive_permission(action=transfer_owner, token=file_token, member_id=用户ou_id)` → 转让所有权
-3. 发送最终结果卡片(含 HTML 链接 + 五部分完整格式)
-4. 更新 session.json.last_step = "publish"
+
+**首选方式：调用 `scripts/publish.py` 一步完成三件套**:
+```bash
+python3 scripts/publish.py \
+  --workspace-dir {iteration_dir} \
+  --skill-name "{skill_name}" \
+  --user-open-id "{user_ou_id}" \
+  --mode {mode} \
+  --risk-level {risk_level} \
+  [--avg-delta {delta}] \
+  [--user-name "{user_name}"]
+```
+脚本输出 JSON 到 stdout，包含 html_path + feishu_upload_instructions + message。
+主调度器根据输出：
+1. 执行 `feishu_drive_file(action=upload, file_path=html_path)` → 获取 file_token
+2. 执行 `feishu_drive_permission(action=transfer_owner, token=file_token, member_id=user_ou_id)` → 转让
+3. 执行 Completion Gate 检查(见 references/output-format.md)→ 确定状态为 COMPLETE/PARTIAL/BLOCKED
+4. 发送最终结果卡片(含 HTML 链接 + 五部分完整格式 + completion_status)
+5. 更新 session.json.last_step = "publish"
 
 ### 主调度器自约束检查清单(每次发消息前必须过)
 
