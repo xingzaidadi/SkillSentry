@@ -5,7 +5,7 @@ description: >
   SkillSentry - AI Skill 质量测评系统。Each run is a fresh execution. Current SKILL.md and session state override memory.
   触发场景:说"测评/测试/验证/评估某个Skill"、"这个skill好不好用"、"能不能上线"、"帮我跑eval"、"Skill质量怎么样"、"上线前先测一下"、"发布前检查"。
   ⚠️ 强制执行规则:当用户消息匹配上述触发词时,你必须先读取本 skill 的 SKILL.md 并按其流程执行,禁止跳过 skill 直接编排 subagent 或自行执行测评流程。即使你觉得自己知道怎么做,也必须先读 SKILL.md。
-  ⚠️ 旧记忆警告:如果你的 memory 中有 SkillSentry 的旧版执行记录(如用纯文本列表选择 skill、跳过交互卡片),这些是过时的行为模式。当前版本要求用飞书 V2 卡片(form + select_static)选择 Skill 和模式。必须读 SKILL.md 确认当前版本的行为,不要照搬 memory 中的旧做法。
+  ⚠️ 旧记忆警告:如果你的 memory 中有 SkillSentry 的旧版执行记录(如用纯文本列表选择 skill、跳过交互卡片),这些是过时的行为模式。当前版本要求用飞书 V2 卡片(独立 select_static 下拉框)选择 Skill 和模式。必须读 SKILL.md 确认当前版本的行为,不要照搬 memory 中的旧做法。
   不触发场景:讨论Skill设计思路、修改Skill内容、优化SKILL.md的description、写新的SKILL.md、讨论测评方法论、问「触发场景写得好不好」、泛泛聊AI话题。
 metadata:
   author: 刘四星
@@ -27,7 +27,7 @@ metadata:
 每次用户说「测评」都是一次全新的执行,不因之前测评过其他 Skill 就跳过读本文件、不因上次用了某种做法就照搬。memory 中关于其他 Skill 的测评记录(如「上次我用文本列表列了 23 个 skill」)不代表本次也该这么做。
 
 **规则 3:交互方式以本文件为准**
-- 选择 Skill/模式 → 必须用飞书 V2 卡片(`form` + `select_static` + `button`),通过 `message(action=send, kind=interactive)` 发送
+- 选择 Skill/模式 → 必须用飞书 V2 卡片(独立 `select_static` + `markdown`)，通过 `message(action=send, kind=interactive)` 发送
 - 禁止用纯文本 Markdown 表格罗列选项
 - 即使 memory 中有「上次用文本列表」的记录,本次也必须用卡片
 - ⚠️ 飞书卡片必须用 V2 schema 原生组件,禁止使用已废弃的 V1 `action` 容器标签
@@ -323,7 +323,7 @@ message(action=send, message="
 构造方式:
 1. 扫描 `~/.openclaw/skills/` 和 `~/.openclaw/workspace/skills/` 下所有含 SKILL.md 的目录
 2. 排除 sentry-* / skill-eval-测评 自身 / SkillSentry / .bak 目录
-3. 用 `message(action=send, kind=interactive)` 发送飞书 V2 卡片（form + select_static + button）:
+3. 用 `message(action=send, kind=interactive)` 发送飞书 V2 卡片(独立 select_static + markdown):
 
 ```json
 {
@@ -331,37 +331,61 @@ message(action=send, message="
   "config": {"update_multi": true},
   "header": {
     "title": {"tag": "plain_text", "content": "🧠 SkillSentry v8.5.1 · 测评启动"},
-    "subtitle": {"tag": "plain_text", "content": "AI Skill 质量守门人 · 选择配置后点击开始"},
+    "subtitle": {"tag": "plain_text", "content": "AI Skill 质量守门人 · 选完后回复「开始」"},
     "template": "blue"
   },
   "body": {
     "elements": [
-      {"tag": "markdown", "content": "依次选择 **被测 Skill** → **测评模式** → **执行方式**，回复开始："},
+      {"tag": "markdown", "content": "依次选择 **被测 Skill** → **测评模式** → **执行方式**:"},
       {
-        "tag": "column_set",
-        "columns": [
-          {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-            {"tag": "markdown", "content": "**1️⃣ 被测 Skill**\n{skill_name_1} · {描述}\n{skill_name_2} · {描述}\n..."}
-          ]}
+        "tag": "select_static",
+        "name": "skill_name",
+        "placeholder": {"tag": "plain_text", "content": "1️⃣ 选择被测 Skill"},
+        "options": [
+          {"text": {"tag": "plain_text", "content": "{skill_name} · {描述}"}, "value": "{skill_name}"},
+          "// 动态生成:扫描每个 Skill 的 description,截取精练中文描述"
         ]
       },
-      {"tag": "hr"},
-      {"tag": "markdown", "content": "**2️⃣ 测评模式**\n🔥 smoke(~5min) · ⚡ quick(~15min) · 📊 standard(~40min) · 🔬 full(~50min) · 🔄 regression(~5min) · 🤖 自动\n\n**3️⃣ 执行方式**\n🚀 自动(全程无需干预) · 👀 逐步确认"},
-      {"tag": "hr"},
-      {"tag": "markdown", "content": "💡 回复格式：`Skill名 [模式] [自动/逐步]`\n示例：`finance-doc-query-prod quick 自动`\n或直接说 Skill 名，其余默认自动推断"}
+      {
+        "tag": "select_static",
+        "name": "eval_mode",
+        "placeholder": {"tag": "plain_text", "content": "2️⃣ 选择测评模式(默认自动推断)"},
+        "options": [
+          {"text": {"tag": "plain_text", "content": "🔥 smoke · 冒烟测试 ~5min"}, "value": "smoke"},
+          {"text": {"tag": "plain_text", "content": "⚡ quick · 快速测评 ~15min"}, "value": "quick"},
+          {"text": {"tag": "plain_text", "content": "📊 standard · 标准测评 ~40min"}, "value": "standard"},
+          {"text": {"tag": "plain_text", "content": "🔬 full · 完整测评 ~50min"}, "value": "full"},
+          {"text": {"tag": "plain_text", "content": "🔄 regression · 回归测试 ~5min"}, "value": "regression"},
+          {"text": {"tag": "plain_text", "content": "🤖 自动推断 · 根据缓存状态选择"}, "value": "auto"}
+        ]
+      },
+      {
+        "tag": "select_static",
+        "name": "exec_mode",
+        "placeholder": {"tag": "plain_text", "content": "3️⃣ 选择执行方式"},
+        "options": [
+          {"text": {"tag": "plain_text", "content": "🚀 自动(全程无需干预)"}, "value": "auto"},
+          {"text": {"tag": "plain_text", "content": "👀 逐步确认(每步等确认)"}, "value": "manual"}
+        ]
+      },
+      {"tag": "markdown", "content": "💡 选完后回复「**开始**」启动测评 · 未在列表中的 Skill 可直接回复名称"}
     ]
   }
 }
 ```
 
-**Skill 选项生成规则**：
-- 扫描每个 Skill 的 SKILL.md，读取 frontmatter `description` 字段
-- 截取前 20 字作为中文描述，格式：`"{skill_name} · {描述}"`
+**Skill 选项生成规则**:
+- 扫描每个 Skill 的 SKILL.md,读取 frontmatter `description` 字段
+- 截取精练中文描述,格式:`"{skill_name} · {描述}"`
 - 无 description 的 Skill 只显示名称
 
-ℹ️ **重要：飞书 V2 卡片不支持已废弃的 `action` 容器标签**。必须用 `form` 包裹 `select_static` 和 `button`，或者将它们直接作为独立 element 放在 `body.elements` 中。
+⚠️ **飞书卡片限制**:
+- 禁止使用已废弃的 V1 `action` 容器标签
+- 禁止使用 `form` + `button(form_action_type=submit)`:message tool 发的卡片不走 CardKit,submit 回调会触发飞书 200530 错误
+- `select_static` 作为独立 element 放在 `body.elements` 中(不包 form)
+- 用户通过下拉框浏览选项,回复文字确认
 
-备选方案（当卡片发送失败时）：用纯 markdown 卡片展示 Skill 列表 + 纯文本引导用户回复选择。
+备选方案(卡片发送失败时):用纯 markdown 卡片展示 Skill 列表 + 纯文本引导用户回复选择。
 
 4. 等待用户选择或回复后继续 Step 2 剩余流程
 
@@ -567,7 +591,7 @@ spawn subagent → write active-pipeline.json → sessions_yield
 
 **publish 步骤内容**(主调度器直接执行,不 spawn):
 
-**首选方式：调用 `scripts/publish.py` 一步完成三件套**:
+**首选方式:调用 `scripts/publish.py` 一步完成三件套**:
 ```bash
 python3 scripts/publish.py \
   --workspace-dir {iteration_dir} \
@@ -578,8 +602,8 @@ python3 scripts/publish.py \
   [--avg-delta {delta}] \
   [--user-name "{user_name}"]
 ```
-脚本输出 JSON 到 stdout，包含 html_path + feishu_upload_instructions + message。
-主调度器根据输出：
+脚本输出 JSON 到 stdout,包含 html_path + feishu_upload_instructions + message。
+主调度器根据输出:
 1. 执行 `feishu_drive_file(action=upload, file_path=html_path)` → 获取 file_token
 2. 执行 `feishu_drive_permission(action=transfer_owner, token=file_token, member_id=user_ou_id)` → 转让
 3. 执行 Completion Gate 检查(见 references/output-format.md)→ 确定状态为 COMPLETE/PARTIAL/BLOCKED
@@ -594,7 +618,7 @@ python3 scripts/publish.py \
 ☐ 本次是否 read 了 SKILL.md 或相关 references?(凭记忆 = 违规)
 ☐ 缓存命中时,是否展示了完整摘要(不是一行带过)?
 ☐ Step 0/1/2 是否各自独立发送(不合并)?
-☐ 消息内容是否含具体数据(不是“完成”两字)?
+☐ 消息内容是否含具体数据(不是"完成"两字)?
 ☐ session.json 是否记录了 evidence(files_read + artifacts_created)?
 ☐ Resume 时是否逐步展示了已完成步骤的摘要?(跳过执行 ≠ 跳过展示)
 ☐ 进度条(N/M)出现前,前面每一步是否都有对应消息?
