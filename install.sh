@@ -70,8 +70,8 @@ echo ""
 
 # ─── Step 4: 验证交互卡片指令 ───
 echo "📋 Step 4: 验证交互卡片指令"
-if grep -q "feishu_ask_user_question" "$SKILL_DIR/SKILL.md" 2>/dev/null; then
-    echo "  ✅ SKILL.md 包含 feishu_ask_user_question 调用规范"
+if grep -qE "form.*sentry_eval_form|select_static.*skill_name|kind=interactive" "$SKILL_DIR/SKILL.md" 2>/dev/null; then
+    echo "  ✅ SKILL.md 包含 V2 交互卡片模板（form + select_static）"
 else
     echo "  ⚠️ SKILL.md 缺少交互卡片指令"
 fi
