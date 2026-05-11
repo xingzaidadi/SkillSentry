@@ -38,7 +38,7 @@ cp -r skill-eval-测评/ ~/.openclaw/skills/
 
 如果仍然出现纯文本列表：
 1. 检查 SKILL.md 是否包含 `⛔ 版本锁定 & 行为优先级` 段落
-2. 检查 `feishu_ask_user_question` 工具是否可用
+2. 检查飞书 V2 卡片发送能力是否可用（`message(action=send, kind=interactive)`）
 
 ## 行为优先级规则
 

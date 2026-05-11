@@ -81,41 +81,67 @@ Skill：[Skill名称]
 
 ## 【前置】Skill 选择卡片（用户未指定 Skill 时）
 
-使用 `feishu_ask_user_question` 工具发送交互卡片，禁止纯文本罗列。
+使用飞书 V2 卡片（`form` + `select_static` + `button`）发送交互表单，通过 `message(action=send, kind=interactive)` 发送。禁止纯文本罗列。
+
+⚠️ **V2 卡片规则**：禁止使用已废弃的 V1 `action` 容器标签。交互组件（select_static/button）必须放在 `form` element 内部，或直接作为独立 element 放在 `body.elements` 中。
 
 **构造流程**：
 1. 扫描 `~/.openclaw/skills/` + `~/.openclaw/workspace/skills/` 下含 SKILL.md 的目录
-2. 排除：sentry-* / SkillSentry* / .bak 目录 / 平台工具（healthcheck/taskflow 等）
-3. 读取每个 SKILL.md 的 frontmatter description，截取前 30 字作为 option.description
-4. 调用：
+2. 排除：sentry-* / SkillSentry* / .bak 目录 / 平台工具
+3. 动态生成 options 列表
+4. 发送 V2 卡片：
 
 ```json
-feishu_ask_user_question(questions=[
-  {
-    "question": "选择要测评的 Skill",
-    "header": "被测 Skill",
-    "options": [
-      {"label": "skill-name-1", "description": "description 截取前 30 字"},
-      {"label": "skill-name-2", "description": "description 截取前 30 字"}
-    ],
-    "multiSelect": false
+{
+  "schema": "2.0",
+  "config": {"update_multi": true},
+  "header": {
+    "title": {"tag": "plain_text", "content": "🧠 SkillSentry · 测评配置"},
+    "template": "blue"
   },
-  {
-    "question": "选择测评模式（不选默认自动推断）",
-    "header": "测评模式",
-    "options": [
-      {"label": "smoke", "description": "冒烟测试，4-5 个用例，~5 分钟"},
-      {"label": "quick", "description": "快速测评，2 轮执行，~10-15 分钟"},
-      {"label": "standard", "description": "标准测评，3 轮+对比，~30-45 分钟"},
-      {"label": "full", "description": "完整测评，全流程+根因分析，45 分钟+"},
-      {"label": "自动推断", "description": "根据缓存状态自动选择最合适的模式"}
-    ],
-    "multiSelect": false
+  "body": {
+    "elements": [
+      {"tag": "markdown", "content": "请选择要测评的 Skill、模式和执行方式："},
+      {
+        "tag": "form",
+        "name": "sentry_eval_form",
+        "elements": [
+          {
+            "tag": "select_static",
+            "name": "skill_name",
+            "placeholder": {"tag": "plain_text", "content": "选择被测 Skill"},
+            "options": [
+              {"text": {"tag": "plain_text", "content": "{skill_1}"}, "value": "{skill_1}"},
+              {"text": {"tag": "plain_text", "content": "{skill_2}"}, "value": "{skill_2}"}
+            ]
+          },
+          {
+            "tag": "select_static",
+            "name": "eval_mode",
+            "placeholder": {"tag": "plain_text", "content": "选择测评模式"},
+            "options": [
+              {"text": {"tag": "plain_text", "content": "🔥 smoke (~5min)"}, "value": "smoke"},
+              {"text": {"tag": "plain_text", "content": "⚡ quick (~15min)"}, "value": "quick"},
+              {"text": {"tag": "plain_text", "content": "📊 standard (~40min)"}, "value": "standard"},
+              {"text": {"tag": "plain_text", "content": "🔬 full (~50min)"}, "value": "full"},
+              {"text": {"tag": "plain_text", "content": "🤖 自动推断"}, "value": "auto"}
+            ]
+          },
+          {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "开始测评"},
+            "type": "primary",
+            "form_action_type": "submit"
+          }
+        ]
+      },
+      {"tag": "markdown", "content": "**可用 Skill 完整列表**：`{skill_1}` · `{skill_2}` · ..."}
+    ]
   }
-])
+}
 ```
 
-5. 等待用户选择后再继续流程
+5. 等待用户选择或回复后再继续流程
 
 ---
 

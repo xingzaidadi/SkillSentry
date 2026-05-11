@@ -1,11 +1,11 @@
 ---
 name: skill-eval-测评
-version: "8.5.0"
+version: "8.5.1"
 description: >
   SkillSentry - AI Skill 质量测评系统。Each run is a fresh execution. Current SKILL.md and session state override memory.
   触发场景:说"测评/测试/验证/评估某个Skill"、"这个skill好不好用"、"能不能上线"、"帮我跑eval"、"Skill质量怎么样"、"上线前先测一下"、"发布前检查"。
   ⚠️ 强制执行规则:当用户消息匹配上述触发词时,你必须先读取本 skill 的 SKILL.md 并按其流程执行,禁止跳过 skill 直接编排 subagent 或自行执行测评流程。即使你觉得自己知道怎么做,也必须先读 SKILL.md。
-  ⚠️ 旧记忆警告:如果你的 memory 中有 SkillSentry 的旧版执行记录(如用纯文本列表选择 skill、跳过交互卡片),这些是过时的行为模式。当前版本要求用 feishu_ask_user_question 交互卡片选择 Skill 和模式。必须读 SKILL.md 确认当前版本的行为,不要照搬 memory 中的旧做法。
+  ⚠️ 旧记忆警告:如果你的 memory 中有 SkillSentry 的旧版执行记录(如用纯文本列表选择 skill、跳过交互卡片),这些是过时的行为模式。当前版本要求用飞书 V2 卡片(form + select_static)选择 Skill 和模式。必须读 SKILL.md 确认当前版本的行为,不要照搬 memory 中的旧做法。
   不触发场景:讨论Skill设计思路、修改Skill内容、优化SKILL.md的description、写新的SKILL.md、讨论测评方法论、问「触发场景写得好不好」、泛泛聊AI话题。
 metadata:
   author: 刘四星
@@ -14,7 +14,7 @@ metadata:
 
 ## ⛔ 版本锁定 & 行为优先级(本节不可删除)
 
-**本文件是 SkillSentry v8.5.0,是唯一权威的行为定义。**
+**本文件是 SkillSentry v8.5.1,是唯一权威的行为定义。**
 
 **行为优先级(一行版)**:当前用户请求 > 当前 SKILL.md > 本次读取的 references/文件 > 本次工具输出 > 对话历史 > memory
 
@@ -27,9 +27,10 @@ metadata:
 每次用户说「测评」都是一次全新的执行,不因之前测评过其他 Skill 就跳过读本文件、不因上次用了某种做法就照搬。memory 中关于其他 Skill 的测评记录(如「上次我用文本列表列了 23 个 skill」)不代表本次也该这么做。
 
 **规则 3:交互方式以本文件为准**
-- 选择 Skill/模式 → 必须用 `feishu_ask_user_question` 交互卡片
+- 选择 Skill/模式 → 必须用飞书 V2 卡片(`form` + `select_static` + `button`),通过 `message(action=send, kind=interactive)` 发送
 - 禁止用纯文本 Markdown 表格罗列选项
 - 即使 memory 中有「上次用文本列表」的记录,本次也必须用卡片
+- ⚠️ 飞书卡片必须用 V2 schema 原生组件,禁止使用已废弃的 V1 `action` 容器标签
 
 **为什么**:本 Skill 经历过多次重构(v3→v5→v7.x→v8.x),memory 中可能残留旧版行为模式。本文件 > memory。
 
@@ -317,48 +318,79 @@ message(action=send, message="
 ")
 ```
 
-**OpenClaw 无上下文时(用户只说「测评」未指定 Skill)**:必须用 `feishu_ask_user_question` 发交互卡片,禁止纯文本罗列。
+**OpenClaw 无上下文时(用户只说「测评」未指定 Skill)**:必须用飞书 V2 卡片发交互表单,禁止纯文本罗列。
 
 构造方式:
 1. 扫描 `~/.openclaw/skills/` 和 `~/.openclaw/workspace/skills/` 下所有含 SKILL.md 的目录
 2. 排除 sentry-* / skill-eval-测评 自身 / SkillSentry / .bak 目录
-3. 生成三个问题的卡片:
+3. 用 `message(action=send, kind=interactive)` 发送飞书 V2 卡片（form + select_static + button）:
 
-```
-feishu_ask_user_question(questions=[
-  {
-    "question": "输入要测评的 Skill 名称(从下方列表中复制)。\n可选 Skill:"
-                + "\n".join([name for name in scanned_skills]),
-    "header": "被测 Skill",
-    "options": [],  // 空数组 = 渲染为自由文本输入框(解决 maxItems:10 硬限制)
-    "multiSelect": false
+```json
+{
+  "schema": "2.0",
+  "config": {"update_multi": true},
+  "header": {
+    "title": {"tag": "plain_text", "content": "🧠 SkillSentry · 测评配置"},
+    "template": "blue"
   },
-  {
-    "question": "选择测评模式(不选默认自动推断)",
-    "header": "测评模式",
-    "options": [
-      {"label": "smoke", "description": "冒烟测试,4-5 个用例,~5 分钟"},
-      {"label": "quick", "description": "快速测评,2 轮执行,~10-15 分钟"},
-      {"label": "standard", "description": "标准测评,3 轮+对比,~30-45 分钟"},
-      {"label": "full", "description": "完整测评,全流程+根因分析,45 分钟+"},
-      {"label": "regression", "description": "回归测试,复用已有用例,~5 分钟"},
-      {"label": "自动推断", "description": "根据缓存状态自动选择最合适的模式"}
-    ],
-    "multiSelect": false
-  },
-  {
-    "question": "每个步骤完成后是否需要你确认才继续?选「自动」则全程无需干预",
-    "header": "执行方式",
-    "options": [
-      {"label": "自动", "description": "全程自动执行,每步展示结果但不等确认"},
-      {"label": "逐步确认", "description": "每步完成后等你说「继续」再跑下一步"}
-    ],
-    "multiSelect": false
+  "body": {
+    "elements": [
+      {"tag": "markdown", "content": "请选择要测评的 Skill、模式和执行方式："},
+      {
+        "tag": "form",
+        "name": "sentry_eval_form",
+        "elements": [
+          {
+            "tag": "select_static",
+            "name": "skill_name",
+            "placeholder": {"tag": "plain_text", "content": "选择被测 Skill"},
+            "options": [
+              {"text": {"tag": "plain_text", "content": "{skill_1}"}, "value": "{skill_1}"},
+              {"text": {"tag": "plain_text", "content": "{skill_2}"}, "value": "{skill_2}"},
+              "// ... 动态生成，每个扫描到的 Skill 一个 option"
+            ]
+          },
+          {
+            "tag": "select_static",
+            "name": "eval_mode",
+            "placeholder": {"tag": "plain_text", "content": "选择测评模式"},
+            "options": [
+              {"text": {"tag": "plain_text", "content": "🔥 smoke (~5min)"}, "value": "smoke"},
+              {"text": {"tag": "plain_text", "content": "⚡ quick (~15min)"}, "value": "quick"},
+              {"text": {"tag": "plain_text", "content": "📊 standard (~40min)"}, "value": "standard"},
+              {"text": {"tag": "plain_text", "content": "🔬 full (~50min)"}, "value": "full"},
+              {"text": {"tag": "plain_text", "content": "🔄 regression (~5min)"}, "value": "regression"},
+              {"text": {"tag": "plain_text", "content": "🤖 自动推断"}, "value": "auto"}
+            ]
+          },
+          {
+            "tag": "select_static",
+            "name": "exec_mode",
+            "placeholder": {"tag": "plain_text", "content": "执行方式"},
+            "options": [
+              {"text": {"tag": "plain_text", "content": "🚀 自动（全程无需干预）"}, "value": "auto"},
+              {"text": {"tag": "plain_text", "content": "👀 逐步确认"}, "value": "manual"}
+            ]
+          },
+          {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "开始测评"},
+            "type": "primary",
+            "form_action_type": "submit"
+          }
+        ]
+      },
+      {"tag": "markdown", "content": "**可用 Skill 完整列表**：\n`{skill_1}` · `{skill_2}` · ..."}
+    ]
   }
-])
+}
 ```
 
-4. 等待用户选择后继续 Step 2 剩余流程
+ℹ️ **重要：飞书 V2 卡片不支持已废弃的 `action` 容器标签**。必须用 `form` 包裹 `select_static` 和 `button`，或者将它们直接作为独立 element 放在 `body.elements` 中。
+
+备选方案（当卡片发送失败时）：用纯 markdown 卡片展示 Skill 列表 + 纯文本引导用户回复选择。
+
+4. 等待用户选择或回复后继续 Step 2 剩余流程
 
 ### Checkpoint Resume 检测(Step 2 工作流推断完成后执行)
 
@@ -724,6 +756,7 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
 3. 差值写入:`cost[step_name] = after_usage - before_usage`
 4. 最后 publish 时汇总 `cost.total = sum(cost.values())`
 
+*v8.5.1 · 飞书卡片从 V1 action 语法迁移到 V2 form+select_static原生组件 + publish.py 三件套脚本 · 2026-05-11*
 *v8.5.0 · Pipeline持久化+自动恢复(active-pipeline.json + 10min watchdog cron) + spawn后必须yield铁律 · 2026-05-08*
 *v8.4.0 · sync步骤纳入pipeline状态机(结构性修复⛔标记≠执行保障) + 坂26 · 2026-05-07*
 *v8.3.0 · 合入数据污染四层模型(坂23-28) + CI能力对齐 · 2026-05-03*
