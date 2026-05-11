@@ -336,27 +336,24 @@ message(action=send, message="
   },
   "body": {
     "elements": [
-      {"tag": "markdown", "content": "请依次选择 **被测 Skill**、**测评模式** 和 **执行方式**，然后点击「开始测评」："},
+      {"tag": "markdown", "content": "依次选择 **被测 Skill** → **测评模式** → **执行方式**，点击开始："},
       {
         "tag": "form",
         "name": "sentry_eval_form",
         "elements": [
-          {"tag": "markdown", "content": "**1️⃣ 被测 Skill**"},
           {
             "tag": "select_static",
             "name": "skill_name",
-            "placeholder": {"tag": "plain_text", "content": "选择要测评的 Skill"},
+            "placeholder": {"tag": "plain_text", "content": "1️⃣ 选择被测 Skill"},
             "options": [
-              {"text": {"tag": "plain_text", "content": "{skill_1}"}, "value": "{skill_1}"},
-              {"text": {"tag": "plain_text", "content": "{skill_2}"}, "value": "{skill_2}"},
-              "// ... 动态生成，每个扫描到的 Skill 一个 option"
+              {"text": {"tag": "plain_text", "content": "{skill_name} · {中文描述截取前20字}"}, "value": "{skill_name}"},
+              "// 动态生成：扫描每个 Skill 的 SKILL.md frontmatter description，截取前20字作为中文描述"
             ]
           },
-          {"tag": "markdown", "content": "**2️⃣ 测评模式**\nsmoke=冒烟(~5min) · quick=快速(~15min) · standard=标准(~40min) · full=完整(~50min)"},
           {
             "tag": "select_static",
             "name": "eval_mode",
-            "placeholder": {"tag": "plain_text", "content": "选择测评模式（默认自动推断）"},
+            "placeholder": {"tag": "plain_text", "content": "2️⃣ 选择测评模式（默认自动推断）"},
             "options": [
               {"text": {"tag": "plain_text", "content": "🔥 smoke · 冒烟测试 ~5min"}, "value": "smoke"},
               {"text": {"tag": "plain_text", "content": "⚡ quick · 快速测评 ~15min"}, "value": "quick"},
@@ -366,11 +363,10 @@ message(action=send, message="
               {"text": {"tag": "plain_text", "content": "🤖 自动推断 · 根据缓存状态选择"}, "value": "auto"}
             ]
           },
-          {"tag": "markdown", "content": "**3️⃣ 执行方式**\n自动=全程无需干预 · 逐步确认=每步等你说「继续」"},
           {
             "tag": "select_static",
             "name": "exec_mode",
-            "placeholder": {"tag": "plain_text", "content": "选择执行方式"},
+            "placeholder": {"tag": "plain_text", "content": "3️⃣ 选择执行方式"},
             "options": [
               {"text": {"tag": "plain_text", "content": "🚀 自动（全程无需干预）"}, "value": "auto"},
               {"text": {"tag": "plain_text", "content": "👀 逐步确认（每步等确认）"}, "value": "manual"}
@@ -384,12 +380,16 @@ message(action=send, message="
           }
         ]
       },
-      {"tag": "hr"},
-      {"tag": "markdown", "content": "**可用 Skill 完整列表（{N}个）**：\n`{skill_1}` · `{skill_2}` · ...\n\n💡 下拉框未列出的 Skill 可直接回复名称"}
+      {"tag": "markdown", "content": "💡 未在列表中的 Skill 可直接回复名称"}
     ]
   }
 }
 ```
+
+**Skill 选项生成规则**：
+- 扫描每个 Skill 的 SKILL.md，读取 frontmatter `description` 字段
+- 截取前 20 字作为中文描述，格式：`"{skill_name} · {描述}"`
+- 无 description 的 Skill 只显示名称
 
 ℹ️ **重要：飞书 V2 卡片不支持已废弃的 `action` 容器标签**。必须用 `form` 包裹 `select_static` 和 `button`，或者将它们直接作为独立 element 放在 `body.elements` 中。
 
