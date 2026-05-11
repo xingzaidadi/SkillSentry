@@ -689,6 +689,38 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
 - 缓存命中时必须展示内容摘要,禁止只写"缓存命中,跳过"
 - **进度摘要**:每完成一个 pipeline 步骤后,在消息末尾附加进度条:`[██████░░░░] 3/5 steps`(用 █ 和 ░ 字符模拟)
 
+**步骤启动通知（强制）**:每个 pipeline 步骤 spawn subagent 后，必须立即发一条「正在执行」通知，包含该步骤的具体检查项说明。格式：
+
+```
+🔍 Step {N}/{total}: {step_name} {step_zh_name} · 执行中
+
+正在做的事情：
+• **{check_item_1}** — {description_1}
+• **{check_item_2}** — {description_2}
+• ...
+
+完成后自动进入下一步 → {next_step_name}
+[██░░░░░░░░] {N}/{total} steps
+```
+
+各步骤内容说明（复制到启动通知）：
+
+| 步骤 | 内容说明 |
+|------|----------|
+| static | L1 结构完整性 · L2 描述质量 · L3 HiL 安全检查 · L4 MCP 工具一致性 · L5 边界处理 · 触发率 TP/TN |
+| cases | 需求分析 · 规则提取 · 用例矩阵设计 · 断言定义 · evals.json 生成 |
+| sync-pull | 从飞书 Bitable 拉取 human 用例合并到 evals.json |
+| sync-push-cases | 新用例推送到飞书 Bitable 用例表 |
+| executor-with | 加载 Skill 执行每个用例 · 记录 transcript · 采集 MCP 调用链 |
+| executor-without | 不加载 Skill 执行同样用例 · 作为基线对比 |
+| grader | 每个用例的断言评审 · exact_match/semantic/existence · 输出 grading.json |
+| sync-push-results | 将 grading 结果推送到飞书 Bitable 运行记录表 |
+| report | HTML 报告生成 · 发布决策 · history.json 更新 |
+| comparator | with_skill vs without_skill 盲测对比 · 计算 Delta 增益 |
+| analyzer | 解盲分析 · 根因定位 · 改进建议 |
+| gate | Completion Gate 7 项检查 · 确定 COMPLETE/PARTIAL/BLOCKED |
+| publish | HTML 上传飞书 · 所有权转让 · 最终结果卡片 · session.json 完结 |
+
 ---
 
 ## 飞书同步(已纳入 pipeline 状态机)
