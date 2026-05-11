@@ -96,46 +96,61 @@ Skill：[Skill名称]
   "schema": "2.0",
   "config": {"update_multi": true},
   "header": {
-    "title": {"tag": "plain_text", "content": "🧠 SkillSentry · 测评配置"},
+    "title": {"tag": "plain_text", "content": "🧠 SkillSentry v8.5.1 · 测评启动"},
+    "subtitle": {"tag": "plain_text", "content": "AI Skill 质量守门人 · 选择配置后点击开始"},
     "template": "blue"
   },
   "body": {
     "elements": [
-      {"tag": "markdown", "content": "请选择要测评的 Skill、模式和执行方式："},
+      {"tag": "markdown", "content": "请依次选择 **被测 Skill**、**测评模式** 和 **执行方式**，然后点击「开始测评」："},
       {
         "tag": "form",
         "name": "sentry_eval_form",
         "elements": [
+          {"tag": "markdown", "content": "**1️⃣ 被测 Skill**"},
           {
             "tag": "select_static",
             "name": "skill_name",
-            "placeholder": {"tag": "plain_text", "content": "选择被测 Skill"},
+            "placeholder": {"tag": "plain_text", "content": "选择要测评的 Skill"},
             "options": [
               {"text": {"tag": "plain_text", "content": "{skill_1}"}, "value": "{skill_1}"},
               {"text": {"tag": "plain_text", "content": "{skill_2}"}, "value": "{skill_2}"}
             ]
           },
+          {"tag": "markdown", "content": "**2️⃣ 测评模式**\nsmoke=冒烟(~5min) · quick=快速(~15min) · standard=标准(~40min) · full=完整(~50min)"},
           {
             "tag": "select_static",
             "name": "eval_mode",
-            "placeholder": {"tag": "plain_text", "content": "选择测评模式"},
+            "placeholder": {"tag": "plain_text", "content": "选择测评模式（默认自动推断）"},
             "options": [
-              {"text": {"tag": "plain_text", "content": "🔥 smoke (~5min)"}, "value": "smoke"},
-              {"text": {"tag": "plain_text", "content": "⚡ quick (~15min)"}, "value": "quick"},
-              {"text": {"tag": "plain_text", "content": "📊 standard (~40min)"}, "value": "standard"},
-              {"text": {"tag": "plain_text", "content": "🔬 full (~50min)"}, "value": "full"},
-              {"text": {"tag": "plain_text", "content": "🤖 自动推断"}, "value": "auto"}
+              {"text": {"tag": "plain_text", "content": "🔥 smoke · 冒烟测试 ~5min"}, "value": "smoke"},
+              {"text": {"tag": "plain_text", "content": "⚡ quick · 快速测评 ~15min"}, "value": "quick"},
+              {"text": {"tag": "plain_text", "content": "📊 standard · 标准测评 ~40min"}, "value": "standard"},
+              {"text": {"tag": "plain_text", "content": "🔬 full · 完整测评 ~50min"}, "value": "full"},
+              {"text": {"tag": "plain_text", "content": "🔄 regression · 回归测试 ~5min"}, "value": "regression"},
+              {"text": {"tag": "plain_text", "content": "🤖 自动推断 · 根据缓存状态选择"}, "value": "auto"}
+            ]
+          },
+          {"tag": "markdown", "content": "**3️⃣ 执行方式**\n自动=全程无需干预 · 逐步确认=每步等你说「继续」"},
+          {
+            "tag": "select_static",
+            "name": "exec_mode",
+            "placeholder": {"tag": "plain_text", "content": "选择执行方式"},
+            "options": [
+              {"text": {"tag": "plain_text", "content": "🚀 自动（全程无需干预）"}, "value": "auto"},
+              {"text": {"tag": "plain_text", "content": "👀 逐步确认（每步等确认）"}, "value": "manual"}
             ]
           },
           {
             "tag": "button",
-            "text": {"tag": "plain_text", "content": "开始测评"},
+            "text": {"tag": "plain_text", "content": "🦞 开始测评"},
             "type": "primary",
             "form_action_type": "submit"
           }
         ]
       },
-      {"tag": "markdown", "content": "**可用 Skill 完整列表**：`{skill_1}` · `{skill_2}` · ..."}
+      {"tag": "hr"},
+      {"tag": "markdown", "content": "**可用 Skill 完整列表（{N}个）**：\n`{skill_1}` · `{skill_2}` · ...\n\n💡 下拉框未列出的 Skill 可直接回复名称"}
     ]
   }
 }
