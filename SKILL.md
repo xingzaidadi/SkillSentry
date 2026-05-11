@@ -336,51 +336,19 @@ message(action=send, message="
   },
   "body": {
     "elements": [
-      {"tag": "markdown", "content": "依次选择 **被测 Skill** → **测评模式** → **执行方式**，点击开始："},
+      {"tag": "markdown", "content": "依次选择 **被测 Skill** → **测评模式** → **执行方式**，回复开始："},
       {
-        "tag": "form",
-        "name": "sentry_eval_form",
-        "elements": [
-          {
-            "tag": "select_static",
-            "name": "skill_name",
-            "placeholder": {"tag": "plain_text", "content": "1️⃣ 选择被测 Skill"},
-            "options": [
-              {"text": {"tag": "plain_text", "content": "{skill_name} · {中文描述截取前20字}"}, "value": "{skill_name}"},
-              "// 动态生成：扫描每个 Skill 的 SKILL.md frontmatter description，截取前20字作为中文描述"
-            ]
-          },
-          {
-            "tag": "select_static",
-            "name": "eval_mode",
-            "placeholder": {"tag": "plain_text", "content": "2️⃣ 选择测评模式（默认自动推断）"},
-            "options": [
-              {"text": {"tag": "plain_text", "content": "🔥 smoke · 冒烟测试 ~5min"}, "value": "smoke"},
-              {"text": {"tag": "plain_text", "content": "⚡ quick · 快速测评 ~15min"}, "value": "quick"},
-              {"text": {"tag": "plain_text", "content": "📊 standard · 标准测评 ~40min"}, "value": "standard"},
-              {"text": {"tag": "plain_text", "content": "🔬 full · 完整测评 ~50min"}, "value": "full"},
-              {"text": {"tag": "plain_text", "content": "🔄 regression · 回归测试 ~5min"}, "value": "regression"},
-              {"text": {"tag": "plain_text", "content": "🤖 自动推断 · 根据缓存状态选择"}, "value": "auto"}
-            ]
-          },
-          {
-            "tag": "select_static",
-            "name": "exec_mode",
-            "placeholder": {"tag": "plain_text", "content": "3️⃣ 选择执行方式"},
-            "options": [
-              {"text": {"tag": "plain_text", "content": "🚀 自动（全程无需干预）"}, "value": "auto"},
-              {"text": {"tag": "plain_text", "content": "👀 逐步确认（每步等确认）"}, "value": "manual"}
-            ]
-          },
-          {
-            "tag": "button",
-            "text": {"tag": "plain_text", "content": "🦞 开始测评"},
-            "type": "primary",
-            "form_action_type": "submit"
-          }
+        "tag": "column_set",
+        "columns": [
+          {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+            {"tag": "markdown", "content": "**1️⃣ 被测 Skill**\n{skill_name_1} · {描述}\n{skill_name_2} · {描述}\n..."}
+          ]}
         ]
       },
-      {"tag": "markdown", "content": "💡 未在列表中的 Skill 可直接回复名称"}
+      {"tag": "hr"},
+      {"tag": "markdown", "content": "**2️⃣ 测评模式**\n🔥 smoke(~5min) · ⚡ quick(~15min) · 📊 standard(~40min) · 🔬 full(~50min) · 🔄 regression(~5min) · 🤖 自动\n\n**3️⃣ 执行方式**\n🚀 自动(全程无需干预) · 👀 逐步确认"},
+      {"tag": "hr"},
+      {"tag": "markdown", "content": "💡 回复格式：`Skill名 [模式] [自动/逐步]`\n示例：`finance-doc-query-prod quick 自动`\n或直接说 Skill 名，其余默认自动推断"}
     ]
   }
 }
