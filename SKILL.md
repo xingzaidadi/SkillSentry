@@ -24,6 +24,7 @@ metadata:
 - 正式静态工具叫 `sentry-static`;`sentry-lint` / `sentry-trigger` / `sentry-check` 仅作为兼容命令。
 - 正式发布结论为 `PASS / CONDITIONAL PASS / FAIL`;正式等级为 `S/A/B/C/D/F`;`Pass³` 和 `L0-L5` 仅作为历史/方法论资料。
 - `mcp_based + smoke/quick` 默认跳过 without_skill;`mcp_based + standard/full` 默认保留可比较的 without_skill 侧,无法裸跑的单个 eval 才逐条跳过。
+- 下一阶段确定性内核已提供脚本入口:`scripts/sentry_preflight.py`、`scripts/sentry_state.py`、`scripts/sentry_gate.py`。优先用这些脚本处理环境预检、session 状态读写和发布门禁计算,不要让 LLM 手写 JSON 或临场心算评分。
 
 更多冲突消解规则见 `references/current-contract.md`。本文件与旧 references 或旧文章冲突时,以本文件和 `references/current-contract.md` 为准。
 
@@ -101,7 +102,7 @@ message(action=send, msg_type="text", message="✅ Step 1 初始化 (Initializat
 
 | 工具 | 路径 | 职责 |
 |------|------|------|
-| `sentry-static` | `./tools/sentry-static/SKILL.md` | 静态检查(L1-L5)+ 触发率(TP/TN),三合一(原 check/lint/trigger),支持 --lint-only / --trigger-only |
+| `sentry-static` | `./tools/sentry-static/SKILL.md` | 静态规则检查 + 触发率(TP/TN),三合一(原 check/lint/trigger),支持 --lint-only / --trigger-only |
 | `sentry-cases` | `./tools/sentry-cases/SKILL.md` | 测试用例设计,输出 evals.json |
 | `sentry-executor` | `./tools/sentry-executor/SKILL.md` | 用例并行执行,输出 transcript |
 | `sentry-grader` | `./tools/sentry-grader/SKILL.md` | 主流程 `grader-report`:断言评审 + 汇总 + 生成 report.html |
@@ -110,6 +111,23 @@ message(action=send, msg_type="text", message="✅ Step 1 初始化 (Initializat
 | `sentry-analyzer` | `./tools/sentry-analyzer/SKILL.md` | 解盲分析 + 改进建议,仅 full |
 | `sentry-sync` | `./tools/sentry-sync/SKILL.md` | 飞书 Bitable 同步(PULL/PUSH) |
 | `sentry-openclaw` | `./tools/sentry-openclaw/SKILL.md` | OpenClaw 环境适配层 |
+
+---
+
+## 确定性内核脚本
+
+这些脚本是 Tool-as-Code 改造的第一阶段,用于把机械流程从 Prompt 中抽出来。当前主流程仍按上方子工具执行,但涉及环境预检、状态读写和门禁计算时,优先调用脚本,不要手写等价逻辑。
+
+| 脚本 | 用途 | 典型命令 |
+|------|------|----------|
+| `scripts/sentry_preflight.py` | 定位被测 Skill、读取 frontmatter、计算 hash、识别 skill_type、检查 config 和 cases 缓存 | `python scripts/sentry_preflight.py --skill <Skill名> --mode quick` |
+| `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence | `python scripts/sentry_state.py transition <session_dir> grader-report` |
+| `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | `python scripts/sentry_gate.py <session_dir>` |
+
+执行规则:
+- 可由脚本完成的状态流转和评分计算,禁止改为 LLM 手写 JSON 或口算。
+- 脚本输出 JSON 是主流程和报告的事实来源;LLM 可以解释原因,但不能改写核心数值。
+- 如果脚本返回 `ERROR` 或 `FAIL`,必须把原始错误展示给用户,不能静默降级。
 
 ---
 
@@ -639,7 +657,7 @@ python3 scripts/publish.py \
 **任何一项未通过 = 不发送,先补做。**
 
 **缓存命中时的最低展示要求**:
-- check 缓存: 必须展示 L1-L5 每项结果 + TP/TN 具体数值 + 来源 session
+- check 缓存: 必须展示静态规则检查结果 + TP/TN 具体数值 + 来源 session
 - cases 缓存: 必须展示完整用例表格(17 行,每行含 ID/类型/用例名/断言详情)
 - 禁止用 "hp:5 edge:3" 这种一行摘要代替
 
@@ -676,7 +694,7 @@ cases 步骤含 auto-exempt 环节(数据采集、用例审核),需主会话与�
 - **缓存复用**:SKILL.md hash 一致 + 产物存在 → 复用,标注「⚡ 缓存命中(上次 {date})」
 
 **缓存跳过展示规则**(跳过不等于静默,必须展示复用内容摘要):
-- check 缓存命中:展示 L1-L5 各项结果 + 触发率 TP/TN + 来源 session
+- check 缓存命中:展示静态规则检查结果 + 触发率 TP/TN + 来源 session
 - cases 缓存命中:展示按类型分组的用例清单表格 + 断言统计(exact/semantic/existence)
 - 禁止只输出"缓存命中,跳过"
 - **快速失败**(quick 模式):grader-report 评审前几个 eval 后通过率 < 20% → 询问是否继续
@@ -719,7 +737,7 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
 
 | 步骤 | 内容说明 |
 |------|----------|
-| static | L1 结构完整性 · L2 描述质量 · L3 HiL 安全检查 · L4 MCP 工具一致性 · L5 边界处理 · 触发率 TP/TN |
+| static | 结构完整性 · 描述质量 · HiL 安全检查 · MCP 工具一致性 · 边界处理 · 触发率 TP/TN |
 | cases | 需求分析 · 规则提取 · 用例矩阵设计 · 断言定义 · evals.json 生成 |
 | sync-pull | 从飞书 Bitable 拉取 human 用例合并到 evals.json |
 | sync-push-cases | 新用例推送到飞书 Bitable 用例表 |

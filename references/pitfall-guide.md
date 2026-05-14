@@ -328,7 +328,7 @@ tools/sentry-*/(业务逻辑层)
 - 三者共享完全相同的输入(被测 SKILL.md),都是纯读操作,无副作用 → 合并零风险
 - sentry-lint 和 sentry-trigger 原来各只有 14 行,本来就是 sentry-check 的子集
 - 但 lint 在 CI 集成和研发自检场景中需要独立调用(`sentry-static --lint-only`),不能只作为 full pipeline 的一部分
-- 合并后子步骤必须有独立输出(L1-L5 各自展示),不能最后一起吐
+- 合并后子步骤必须有独立输出(静态规则检查各规则组分别展示),不能最后一起吐
 
 ### 坑 27:comparator 不能合并到 executor--盲测方法论要求
 

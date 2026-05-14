@@ -111,13 +111,23 @@ bash install.sh
 | 工具 | 职责 | 独立可用 |
 |------|------|---------|
 | **SkillSentry** | 主编排 + 平台适配 + 飞书同步 | — |
-| **sentry-static** | 静态检查（L1-L5）+ 触发率（TP/TN） | ✅ |
+| **sentry-static** | 静态规则检查 + 触发率（TP/TN） | ✅ |
 | **sentry-cases** | 测试用例设计，输出 evals.json | ✅ |
 | **sentry-executor** | 用例并行执行，输出 transcript | ✅ |
 | **sentry-grader** | 主流程 `grader-report`：断言评审 + 汇总 + 生成 report.html | ✅ |
 | **sentry-report** | 独立重出报告：已有 grading 后重新生成 report.html | ✅ |
 
 > v9.0.0 变更：主流程统一使用 **grader-report**；`sentry-report` 仅用于已有 grading 后独立重出报告。`sentry-lint` / `sentry-trigger` / `sentry-check` 作为兼容命令路由到 **sentry-static**。
+
+### 确定性内核脚本
+
+| 脚本 | 职责 |
+|------|------|
+| `scripts/sentry_preflight.py` | 定位被测 Skill、计算 hash、识别 skill_type、检查 config 和 cases 缓存。 |
+| `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence。 |
+| `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict。 |
+
+这些脚本是 Tool-as-Code 改造的第一阶段:把确定性状态和门禁逻辑交给代码,把用例设计、语义评审、盲测对比和失败归因继续留给 LLM。
 
 ---
 
@@ -182,6 +192,9 @@ SkillSentry/
 │   ├── comparator.md
 │   └── analyzer.md
 ├── scripts/                   # Python 脚本
+│   ├── sentry_preflight.py     # 确定性环境预检
+│   ├── sentry_state.py         # session.json 状态管理
+│   ├── sentry_gate.py          # 发布门禁计算
 │   ├── validate_step.py       # OpenClaw 步骤校验
 │   ├── verify_proof.py        # CLI 读取证明校验
 │   ├── generate_html_report.py

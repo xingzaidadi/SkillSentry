@@ -34,6 +34,25 @@ v9.0 是契约收敛版,不是功能扩展版。
 
 ---
 
+## Tool-as-Code 确定性内核
+
+当前稳定口径允许把机械步骤交给代码执行,但不改变测评维度、报告视觉结构和主 pipeline 语义。
+
+已提供的确定性脚本:
+
+| 脚本 | 当前职责 | 不做什么 |
+|------|----------|----------|
+| `scripts/sentry_preflight.py` | 定位 Skill、读取 frontmatter、计算 hash、识别 skill_type、检查 config 和 cases 缓存 | 不生成用例、不做评分 |
+| `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,记录 milestone evidence | 不跳过 auto-exempt 用户确认 |
+| `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | 不改写 grading 原始证据 |
+
+原则:
+- 状态写入和发布门禁计算优先使用脚本,不要让 LLM 手写 JSON 或临场心算评分。
+- 脚本输出是事实来源;LLM 可以解释原因和建议,但不能改写核心数值。
+- `sentry-static` 仍是正式静态工具名;不要把代码版静态规则检查重新命名为正式 `sentry-lint`。
+
+---
+
 ## Grader/Report 契约
 
 主流程使用 `grader-report` 步骤,由 `sentry-grader` 在同一个 subagent 内完成:

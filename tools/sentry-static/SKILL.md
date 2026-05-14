@@ -16,7 +16,7 @@ description: >
 
 | 参数 | 效果 |
 |------|------|
-| `--lint-only` | 只执行 Sub-step 1（Lint L1-L5），跳过触发率 |
+| `--lint-only` | 只执行 Sub-step 1（静态规则检查），跳过触发率 |
 | `--trigger-only` | 只执行 Sub-step 2（Trigger TP/TN），跳过静态检查 |
 | 无参数（默认） | 执行全部 3 个子步骤：Lint → Trigger → 汇总 |
 
@@ -25,7 +25,7 @@ description: >
 ## 三子步骤架构
 
 ```
-Sub-step 1: Lint (L1-L5)        → 独立输出 lint 报告
+Sub-step 1: Static rules        → 独立输出静态规则检查报告
 Sub-step 2: Trigger (TP/TN)     → 独立输出触发率报告
 Sub-step 3: Summary             → 汇总两项结果 + 发布建议
 ```
@@ -39,7 +39,7 @@ Sub-step 3: Summary             → 汇总两项结果 + 发布建议
 
 未读取上述文件时，输出 BLOCKED 并说明缺少什么。
 
-两项分析合一：静态质量检查（L1-L5，约 30 秒）+ AI 模拟触发测试（TP/TN，约 2 分钟）。
+两项分析合一：静态规则检查（约 30 秒）+ AI 模拟触发测试（TP/TN，约 2 分钟）。
 
 **调用方式**：
 - `lint xxx` / `检查结构` / `--lint-only` → 只跑 Sub-step 1（静态检查）
@@ -57,11 +57,11 @@ Sub-step 3: Summary             → 汇总两项结果 + 发布建议
 
 ---
 
-## Sub-step 1：Lint 静态检查（L1-L5）
+## Sub-step 1：静态规则检查
 
 对目标 SKILL.md 做零执行的静态分析，约 30 秒完成。
 
-### L1：description 字段完整性
+### 规则组 1：description 字段完整性
 
 读取 frontmatter 中的 `description` 字段，逐项检查：
 
@@ -75,7 +75,7 @@ Sub-step 3: Summary             → 汇总两项结果 + 发布建议
 
 每项标注 ✅ / ⚠️ / ❌，并给出具体理由。
 
-### L2：Human-in-the-Loop（HiL）节点检查
+### 规则组 2：Human-in-the-Loop（HiL）节点检查
 
 扫描全文，查找不可逆操作关键词：
 
@@ -92,7 +92,7 @@ mcp_based 额外扫描工具名（camelCase/snake_case）中含：
 - HiL-1：操作前是否有用户确认步骤？→ 无：❌ 「缺少 HiL 确认节点」
 - HiL-2：用户拒绝时是否有中止逻辑？→ 无：⚠️ 「确认节点无拒绝处理」
 
-### L3：复杂度评分
+### 规则组 3：复杂度评分
 
 ```
 复杂度得分 = (行数/50) + (## 章节数 × 2) + (硬性规则数 × 0.5)
@@ -106,7 +106,7 @@ mcp_based 额外扫描工具名（camelCase/snake_case）中含：
 | 硬性规则数 | N | — |
 | 复杂度得分 | N | ✅ <10 / ⚠️ 10-20 / ❌ >20 建议重构 |
 
-### L4：冗余规则自检
+### 规则组 4：冗余规则自检
 
 对每条含「必须」「禁止」「需要」的规则，问：
 > 「如果删掉这条，真实对话中会出现什么具体问题？」
@@ -117,7 +117,7 @@ mcp_based 额外扫描工具名（camelCase/snake_case）中含：
 
 输出候选列表（仅供人工复核，不自动删除）。
 
-### L5：规则可测试性
+### 规则组 5：规则可测试性
 
 对每条硬性规则：
 - 可测试：有具体输入/输出/工具调用可验证 ✅
@@ -127,14 +127,14 @@ mcp_based 额外扫描工具名（camelCase/snake_case）中含：
 ### Sub-step 1 输出格式
 
 ```
-━━━ Sub-step 1: Lint (L1-L5) ━━━
+━━━ Sub-step 1: Static rules ━━━
 总览：检查项 5 类 | ✅ 通过 N | ⚠️ 建议改进 N | ❌ 需要修复 N
 
-L1 description 完整性：[逐项]
-L2 HiL 节点：[检查结果]
-L3 复杂度：[表格]
-L4 冗余规则候选：[列表 或「未发现」]
-L5 可测试性：[列表]
+规则组 1 description 完整性：[逐项]
+规则组 2 HiL 节点：[检查结果]
+规则组 3 复杂度：[表格]
+规则组 4 冗余规则候选：[列表 或「未发现」]
+规则组 5 可测试性：[列表]
 
 改进优先级：P0（必须修复）/ P1（建议修复）
 ━━━ Sub-step 1 完成 ━━━
