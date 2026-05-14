@@ -10,6 +10,7 @@
 - 新增 `references/current-contract.md` 作为当前术语和执行契约的冲突消解入口。
 - 新增 `VERSION` 文件；`.gitignore` 忽略 `config.json`、本地配置和备份文件。
 - 当前正式术语：`PASS/CONDITIONAL PASS/FAIL`、`S/A/B/C/D/F`、`authoritative_pass_rate`；`Pass³`、`L0-L5` 仅作为历史/方法论资料。
+- 新增当前口径自检脚本：`scripts/sentry_contract_lint.py` 用于检查 SkillSentry 本体，`scripts/sentry_article_lint.py` 用于检查文章仓库，防止旧工具名和旧指标重新污染当前入口。
 
 
 ## v8.4.0 · 2026-05-07

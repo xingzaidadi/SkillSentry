@@ -126,8 +126,10 @@ bash install.sh
 | `scripts/sentry_preflight.py` | 定位被测 Skill、计算 hash、识别 skill_type、检查 config 和 cases 缓存。 |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence。 |
 | `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict。 |
+| `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体是否混入旧工具名、旧指标或旧 pipeline 口径。 |
+| `scripts/sentry_article_lint.py` | 扫描文章仓库是否把历史术语误写成当前口径。 |
 
-这些脚本是 Tool-as-Code 改造的第一阶段:把确定性状态和门禁逻辑交给代码,把用例设计、语义评审、盲测对比和失败归因继续留给 LLM。
+这些脚本是 Tool-as-Code 改造的第一阶段:把确定性状态、门禁逻辑和口径自检交给代码,把用例设计、语义评审、盲测对比和失败归因继续留给 LLM。
 
 ---
 
@@ -195,6 +197,8 @@ SkillSentry/
 │   ├── sentry_preflight.py     # 确定性环境预检
 │   ├── sentry_state.py         # session.json 状态管理
 │   ├── sentry_gate.py          # 发布门禁计算
+│   ├── sentry_contract_lint.py # SkillSentry 当前口径自检
+│   ├── sentry_article_lint.py  # 文章当前口径自检
 │   ├── validate_step.py       # OpenClaw 步骤校验
 │   ├── verify_proof.py        # CLI 读取证明校验
 │   ├── generate_html_report.py

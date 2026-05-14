@@ -24,7 +24,7 @@ metadata:
 - 正式静态工具叫 `sentry-static`;`sentry-lint` / `sentry-trigger` / `sentry-check` 仅作为兼容命令。
 - 正式发布结论为 `PASS / CONDITIONAL PASS / FAIL`;正式等级为 `S/A/B/C/D/F`;`Pass³` 和 `L0-L5` 仅作为历史/方法论资料。
 - `mcp_based + smoke/quick` 默认跳过 without_skill;`mcp_based + standard/full` 默认保留可比较的 without_skill 侧,无法裸跑的单个 eval 才逐条跳过。
-- 下一阶段确定性内核已提供脚本入口:`scripts/sentry_preflight.py`、`scripts/sentry_state.py`、`scripts/sentry_gate.py`。优先用这些脚本处理环境预检、session 状态读写和发布门禁计算,不要让 LLM 手写 JSON 或临场心算评分。
+- 下一阶段确定性内核已提供脚本入口:`scripts/sentry_preflight.py`、`scripts/sentry_state.py`、`scripts/sentry_gate.py`、`scripts/sentry_contract_lint.py`、`scripts/sentry_article_lint.py`。优先用这些脚本处理环境预检、session 状态读写、发布门禁计算和当前口径自检,不要让 LLM 手写 JSON、临场心算评分或凭感觉扫描旧术语。
 
 更多冲突消解规则见 `references/current-contract.md`。本文件与旧 references 或旧文章冲突时,以本文件和 `references/current-contract.md` 为准。
 
@@ -123,10 +123,13 @@ message(action=send, msg_type="text", message="✅ Step 1 初始化 (Initializat
 | `scripts/sentry_preflight.py` | 定位被测 Skill、读取 frontmatter、计算 hash、识别 skill_type、检查 config 和 cases 缓存 | `python scripts/sentry_preflight.py --skill <Skill名> --mode quick` |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence | `python scripts/sentry_state.py transition <session_dir> grader-report` |
 | `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | `python scripts/sentry_gate.py <session_dir>` |
+| `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体是否混入旧工具名、旧指标、旧 pipeline 口径 | `python scripts/sentry_contract_lint.py --format text` |
+| `scripts/sentry_article_lint.py` | 扫描文章仓库是否把历史术语误写成当前口径 | `python scripts/sentry_article_lint.py --root <文章仓库> --format text` |
 
 执行规则:
 - 可由脚本完成的状态流转和评分计算,禁止改为 LLM 手写 JSON 或口算。
 - 脚本输出 JSON 是主流程和报告的事实来源;LLM 可以解释原因,但不能改写核心数值。
+- 当前口径自检优先用 `sentry_contract_lint.py` / `sentry_article_lint.py`,不要只靠人工肉眼搜索。
 - 如果脚本返回 `ERROR` 或 `FAIL`,必须把原始错误展示给用户,不能静默降级。
 
 ---

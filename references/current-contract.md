@@ -45,11 +45,14 @@ v9.0 是契约收敛版,不是功能扩展版。
 | `scripts/sentry_preflight.py` | 定位 Skill、读取 frontmatter、计算 hash、识别 skill_type、检查 config 和 cases 缓存 | 不生成用例、不做评分 |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,记录 milestone evidence | 不跳过 auto-exempt 用户确认 |
 | `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | 不改写 grading 原始证据 |
+| `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体的当前口径漂移 | 不替代静态规则检查、不评价被测 Skill 质量 |
+| `scripts/sentry_article_lint.py` | 扫描文章仓库的当前口径漂移 | 不改写文章、不替代人工编辑判断 |
 
 原则:
 - 状态写入和发布门禁计算优先使用脚本,不要让 LLM 手写 JSON 或临场心算评分。
 - 脚本输出是事实来源;LLM 可以解释原因和建议,但不能改写核心数值。
 - `sentry-static` 仍是正式静态工具名;不要把代码版静态规则检查重新命名为正式 `sentry-lint`。
+- 当前口径自检使用 `sentry_contract_lint.py` 和 `sentry_article_lint.py`;它们只检查 SkillSentry 自身与文章材料,不参与被测 Skill 的质量评分。
 
 ---
 
