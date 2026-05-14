@@ -1,7 +1,7 @@
 # output-format.md — 步骤完成消息格式规范
 
 > 主调度器产物验收（动作 3）的完整输出格式。
-> 所有步骤（executor/grader/report）的 completion message 必须遵循此格式。
+> 所有步骤（executor/grader-report/独立 report）的 completion message 必须遵循此格式。
 
 ---
 
@@ -46,7 +46,7 @@
 
 ---
 
-## grader/report 最终结果消息格式
+## grader-report 最终结果消息格式
 
 ### eval 展示规则（通过折叠，失败展开）
 

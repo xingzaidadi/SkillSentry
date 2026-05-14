@@ -2,6 +2,16 @@
 
 > 主 SKILL.md 仅保留最近 3 个版本，旧版本记录于此。
 
+## v9.0.0 · 2026-05-14
+- **契约收敛版**：不新增测评维度，专注统一执行契约和文档口径。
+- 主 pipeline 将 `grader` + `report` 收敛为 `grader-report`，由 `sentry-grader` 同一 subagent 完成评分和 HTML 报告。
+- `sentry-report` 保留为独立重出报告工具，仅在已有 grading 后调用。
+- 统一 `skip_without_skill` 规则：`mcp_based + smoke/quick` 默认跳过；`mcp_based + standard/full` 默认保留可比较 without_skill 侧，逐 eval 可跳过。
+- 新增 `references/current-contract.md` 作为当前术语和执行契约的冲突消解入口。
+- 新增 `VERSION` 文件；`.gitignore` 忽略 `config.json`、本地配置和备份文件。
+- 当前正式术语：`PASS/CONDITIONAL PASS/FAIL`、`S/A/B/C/D/F`、`authoritative_pass_rate`；`Pass³`、`L0-L5` 仅作为历史/方法论资料。
+
+
 ## v8.4.0 · 2026-05-07
 - **结构性修复**：sync 步骤纳入 pipeline 状态机
   - sync-pull、sync-push-cases、sync-push-results、gate 成为正式 pipeline 步骤

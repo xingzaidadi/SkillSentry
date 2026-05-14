@@ -2,3 +2,8 @@ sessions/
 inputs/*
 !inputs/manifest.json
 __pycache__/
+config.json
+*.local.json
+.env
+*.bak
+*.bak.*

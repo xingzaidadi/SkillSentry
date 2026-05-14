@@ -13,11 +13,11 @@
   "trigger": {"tp": 0, "tn": 0, "confidence": "", "issues": []},
   "cases": {"total": 0, "coverage": "", "types": {}, "assertions_total": 0},
   "executor": {"total_runs": 0, "success": 0, "failed": 0, "spawn_count": 0, "time_minutes": 0},
-  "grader": {"pass": 0, "fail": 0, "total": 0, "pass_rate": 0, "failed_evals": [], "vetoes": []},
+  "grader_report": {"pass": 0, "fail": 0, "total": 0, "pass_rate": 0, "failed_evals": [], "vetoes": [], "report_html": ""},
   "verdict": {"grade": "", "decision": "", "pass_rate": 0, "completion_status": ""},
   "recommendations": {"P0": [], "P1": [], "P2": []},
   "sync": {"pull": null, "push_cases": null, "push_results": null, "push_run": null},
-  "cost": {"static": 0, "cases": 0, "executor": 0, "grader": 0, "report": 0, "total": 0},
+  "cost": {"static": 0, "cases": 0, "executor": 0, "comparator": 0, "analyzer": 0, "grader_report": 0, "report_regen": 0, "total": 0},
   "milestones": {}
 }
 ```
@@ -28,12 +28,12 @@
 
 Step 2 推断完成后写入，Step 3 调度循环严格按数组顺序执行。
 
-各模式的合法 pipeline（v8.4.0 更新，sync 步骤已纳入）：
-- smoke: `["cases", "sync-pull", "sync-push-cases", "executor-with", "grader", "sync-push-results", "publish"]`
-- quick: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader", "sync-push-results", "report", "publish"]`
-- regression: `["sync-pull", "executor-with", "grader", "sync-push-results", "publish"]`
-- standard: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "grader", "sync-push-results", "report", "comparator", "gate", "publish"]`
-- full: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "grader", "sync-push-results", "report", "comparator", "analyzer", "gate", "publish"]`
+各模式的合法 pipeline（v9.0 当前契约，sync 步骤已纳入）：
+- smoke: `["cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- quick: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- regression: `["sync-pull", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- standard: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"]`
+- full: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"]`
 
 ### cost（v8.1 新增）
 
@@ -77,7 +77,7 @@ OpenClaw: ~/.openclaw/data/skill-eval/sessions/<Skill名>/<YYYY-MM-DD>_NNN/sessi
 
 - Step 1：写基础字段（skill / mode / skill_type / skill_hash / runtime / mcp_backend / started_at）
 - Step 2：写 pipeline 数组
-- 各步完成后：写对应字段（lint / trigger / cases / executor / grader）+ cost[step]
-- grader 完成：写 verdict / recommendations
+- 各步完成后：写对应字段（lint / trigger / cases / executor / grader_report）+ cost[step]
+- grader-report 完成：写 verdict / recommendations / report_html
 - publish：写 verdict.completion_status + cost.total
 - 飞书同步步骤：更新 sync 字段

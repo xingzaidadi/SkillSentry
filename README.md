@@ -37,7 +37,7 @@ git clone https://github.com/xingzaidadi/SkillSentry.git
 cd SkillSentry
 
 # 方式二：下载 tar.gz 并解压
-tar xzf SkillSentry-v8.4.0.tar.gz
+tar xzf SkillSentry-v9.0.0.tar.gz
 cd SkillSentry
 ```
 
@@ -57,7 +57,7 @@ bash install.sh
 
 ```
 📦 安装到 OpenClaw（~/.openclaw/skills）
-  ✅ SkillSentry（主编排 v8.4.0）
+  ✅ SkillSentry（主编排 v9.0.0）
   ✅ sentry-static
   ✅ sentry-cases
   ✅ sentry-executor
@@ -106,7 +106,7 @@ bash install.sh
 
 ---
 
-## 工具组成（v8.4.0）
+## 工具组成（v9.0.0）
 
 | 工具 | 职责 | 独立可用 |
 |------|------|---------|
@@ -114,10 +114,10 @@ bash install.sh
 | **sentry-static** | 静态检查（L1-L5）+ 触发率（TP/TN） | ✅ |
 | **sentry-cases** | 测试用例设计，输出 evals.json | ✅ |
 | **sentry-executor** | 用例并行执行，输出 transcript | ✅ |
-| **sentry-grader** | 断言评审，输出 grading.json | ✅ |
-| **sentry-report** | 报告生成 + 发布决策 + HiL 确认 | ✅ |
+| **sentry-grader** | 主流程 `grader-report`：断言评审 + 汇总 + 生成 report.html | ✅ |
+| **sentry-report** | 独立重出报告：已有 grading 后重新生成 report.html | ✅ |
 
-> v8.4.0 变更：sentry-lint + sentry-trigger + sentry-check 合并为 **sentry-static**；sentry-openclaw + sentry-sync 内联进主编排。旧工具保留归档 stub 保证向后兼容。
+> v9.0.0 变更：主流程统一使用 **grader-report**；`sentry-report` 仅用于已有 grading 后独立重出报告。`sentry-lint` / `sentry-trigger` / `sentry-check` 作为兼容命令路由到 **sentry-static**。
 
 ---
 
@@ -125,11 +125,11 @@ bash install.sh
 
 | 工作流 | 工具链 | 时间 | 适用场景 |
 |--------|--------|------|---------|
-| smoke | cases(4-5个) → executor(1次) → grader → report | 5-7 分钟 | 改了规则，快速确认没崩 |
-| quick | check → cases → executor(2次) → grader → report | 15-20 分钟 | 迭代完成，准备提测 |
-| regression | executor(已有用例) → grader → report | 5-10 分钟 | 规则没变，复跑基准 |
-| standard | check → cases → executor(3次) → grader → comparator → report | 30-45 分钟 | 重要迭代正式提测 |
-| full | check → cases → executor(3次) → grader → comparator → analyzer → report | 45 分钟+ | 正式发布前全量验证 |
+| smoke | cases → executor(1次) → grader-report | 5-7 分钟 | 改了规则，快速确认没崩 |
+| quick | static → cases → executor(2次) → grader-report | 15-20 分钟 | 迭代完成，准备提测 |
+| regression | executor(已有 golden 用例) → grader-report | 5-10 分钟 | 规则没变，复跑基准 |
+| standard | static → cases → executor(3次) → executor-without → comparator → grader-report | 30-45 分钟 | 重要迭代正式提测 |
+| full | static → cases → executor(3次) → executor-without → comparator → analyzer → grader-report | 45 分钟+ | 正式发布前全量验证 |
 
 ---
 
@@ -162,12 +162,13 @@ bash install.sh
 
 ```
 SkillSentry/
-├── SKILL.md                   # 主编排（v8.4.0）
+├── SKILL.md                   # 主编排（v9.0.0）
+├── VERSION
 ├── README.md
 ├── config.example.json        # 飞书同步配置模板
 ├── install.sh / install.ps1   # 安装脚本
 ├── tools/                     # 子工具（install.sh 展开到 skills/ 并列目录）
-│   ├── sentry-static/SKILL.md      ← v8.4.0 新增（lint + trigger 合并）
+│   ├── sentry-static/SKILL.md      ← 静态检查三合一（lint + trigger + summary）
 │   ├── sentry-cases/SKILL.md
 │   ├── sentry-executor/SKILL.md
 │   ├── sentry-grader/SKILL.md
@@ -209,9 +210,9 @@ A：能，只要有 `SKILL.md`。自动识别类型（mcp_based / text_generatio
 **Q：测评中断了怎么办？**
 A：已完成的 transcript 保存在 sessions/。重新说「测评 xxx」，系统检测已有结果，提示跳过。
 
-**Q：sentry-lint / sentry-trigger 去哪了？**
-A：说 `lint xxx` 或 `测触发率 xxx` 会自动路由到 `sentry-static`。旧工具保留归档 stub 保证兼容。
+**Q：sentry-lint / sentry-trigger / sentry-check 去哪了？**
+A：当前正式工具名是 `sentry-static`。说 `lint xxx`、`测触发率 xxx` 或 `check xxx` 会自动路由到 `sentry-static` 的对应子模式。旧名称只作为兼容入口。
 
 ---
 
-*v8.4.0 · 2026-04-27*
+*v9.0.0 · 2026-05-14*

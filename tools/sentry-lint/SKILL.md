@@ -7,8 +7,8 @@ description: >
 
 # sentry-lint · 已归档
 
-此工具已合并进 `sentry-check`（v7.0），作为 Part 1（静态检查）。
+此工具已合并进 `sentry-static`（v8.0），作为静态检查兼容入口。
 
-**使用方式**：说 `lint xxx` / `检查结构` / `check xxx` → 自动触发 `sentry-check`。
+**使用方式**：说 `lint xxx` / `检查结构` / `check xxx` → 自动触发 `sentry-static`。
 
 *归档于 v7.0 · 2026-04-27*

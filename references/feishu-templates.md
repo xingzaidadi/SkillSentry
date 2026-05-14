@@ -96,7 +96,7 @@ Skill：[Skill名称]
   "schema": "2.0",
   "config": {"update_multi": true},
   "header": {
-    "title": {"tag": "plain_text", "content": "🧠 SkillSentry v8.5.1 · 测评启动"},
+    "title": {"tag": "plain_text", "content": "SkillSentry v9.0 · 测评启动"},
     "subtitle": {"tag": "plain_text", "content": "AI Skill 质量守门人 · 回复 Skill 名称开始"},
     "template": "blue"
   },

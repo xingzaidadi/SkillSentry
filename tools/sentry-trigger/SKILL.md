@@ -7,8 +7,8 @@ description: >
 
 # sentry-trigger · 已归档
 
-此工具已合并进 `sentry-check`（v7.0），作为 Part 2（触发率评估）。
+此工具已合并进 `sentry-static`（v8.0），作为触发率评估兼容入口。
 
-**使用方式**：说 `测触发率` / `description 准不准` / `check xxx` → 自动触发 `sentry-check`。
+**使用方式**：说 `测触发率` / `description 准不准` / `check xxx` → 自动触发 `sentry-static`。
 
 *归档于 v7.0 · 2026-04-27*

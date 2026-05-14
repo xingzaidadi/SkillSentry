@@ -1,13 +1,13 @@
 ---
 name: sentry-report
 description: >
-  汇总测评结果，生成 HTML 报告和发布决策。需要先完成用例执行和 Grader 评审。
+  独立重出测评报告：在已有 grading.json / grading-summary.json 的情况下，重新生成 HTML 报告和发布决策。
   触发场景：说"生成测评报告"、"出报告"、"给我看结果"、"通过了吗"、"能上线吗"、
   "汇总测评结果"、"帮我写发布报告"。
   不触发场景：要执行测试用例（用 sentry-executor）、要做完整流程（用 SkillSentry）。
 ---
 
-# sentry-report · 测评报告生成与发布决策（独立模式）
+# sentry-report · 独立重出报告（v9.0）
 
 ## Required Reads (must_read)
 
@@ -17,8 +17,8 @@ description: >
 
 未读取上述文件时，输出 BLOCKED 并说明缺少什么。
 
-> **注意**：v7.5 起，sentry-grader 已内置报告生成。本工具仅用于**独立调用**场景（grading 已完成，只需生成报告）。
-> 主编排流程中不再单独调用本工具。
+> **注意**：v9.0 起，主 pipeline 使用 `grader-report`，由 `sentry-grader` 在同一个 subagent 内完成评分和报告。本工具仅用于**独立调用**场景（grading 已完成，只需重新生成报告）。
+> 主编排流程中不得把本工具作为常规步骤调用。
 
 读取 session 目录下所有 grading.json，汇总指标，生成 HTML 报告和 PASS/FAIL 发布决策。
 
@@ -29,7 +29,7 @@ description: >
 ## 输入
 
 - `workspace_dir`：本次测评工作目录
-- `inputs_dir`：`{skill-eval-测评根目录}/inputs/<skill_name>/`（sentry-trigger 结果存于此）
+- `inputs_dir`：`{skill-eval-测评根目录}/inputs/<skill_name>/`（sentry-static 的 trigger 结果存于此）
 - `mode`：测评模式（smoke/quick/standard/full）
 - `skill_name`：被测 Skill 名称
 
@@ -126,7 +126,7 @@ E-3：复杂度（从 execution-phases 数据中读取，若有）
 
 | 编号 | 指标 | 通过标准 | 数据来源 |
 |------|------|---------|----------|
-| Δ | 增量价值 | > 0 | Pass³(with) − Pass³(without)（已有） |
+| Δ | 增量价值 | > 0 | `authoritative_pass_rate(with_skill) - authoritative_pass_rate(without_skill)`；不可比时标记 `N/A` 或 `partial` |
 
 **null 处理规则**：指标值为 null（evals.json 无对应字段）时，该指标不参与等级判定，报告中显示为 N/A。
 
@@ -303,7 +303,7 @@ IFR：         95%          100%         +5% ↑
 十一、改进建议（来自 Grader eval_feedback + Analyzer analysis.json）
 十二、发布决策（PASS/CONDITIONAL PASS/FAIL + 等级）
 十三、下一步行动（具体可执行的改进项）
-十四、触发率预评估（若有 `inputs_dir/trigger_eval.json`，由 sentry-trigger 写入）
+十四、触发率预评估（若有 `inputs_dir/trigger_eval.json`，由 sentry-static 写入）
 十五、效率诊断（E-1/E-2/E-3 结果）
 ```
 
@@ -412,7 +412,7 @@ P0 为空时输出「✅ 无必须修复项」，不输出空标题。
 
 ## 最终步骤：飞书同步（PUSH）
 
-报告生成完成后，由主编排（SkillSentry）在 report 完成后自动执行 PUSH-RESULTS 和 PUSH-RUN：
+独立重出报告完成后，默认不执行 PUSH-RESULTS 和 PUSH-RUN；主流程的同步由 `grader-report` 完成后触发：
 
 ```
 检查 {skill-eval-测评根目录}/config.json

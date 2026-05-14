@@ -288,7 +288,7 @@ tools/sentry-*/(业务逻辑层)
 
 **根因**:`inputs/<Skill>/history.json` 包含 `grade: A, exact_match: 96.1`,`baseline.snapshot.json` 包含 `grade: S, pass_rate: 100.0`。主调度器在 Step 2 推断模式时 `ls inputs/<Skill>/` 能看到这些文件。LLM 的"好奇心"会顺手读一下,读到"上次 S 级"后,后续评审被锚定。
 
-**解法**:SKILL.md Step 2 加数据隔离规则--只读 `rules.cache.json`(判断 hash),禁止读 history/baseline/trigger_eval。这些文件只在 report 阶段由 sentry-report subagent 使用。
+**解法**:SKILL.md Step 2 加数据隔离规则--只读 `rules.cache.json`(判断 hash),禁止读 history/baseline/trigger_eval。这些文件只在 grader-report 或独立 sentry-report 阶段使用。
 
 **关键区分**:L1(sessions)是"答案泄露"→ 直接抄答案;L2(inputs)是"成绩锚定"→ 潜意识偏高。两者机制不同,解法也不同。
 

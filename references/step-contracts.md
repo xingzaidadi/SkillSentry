@@ -14,12 +14,12 @@
 通用流转：idle → step-0 → step-1 → step-2 → [pipeline 数组顺序执行] → idle
 ```
 
-**各模式的 pipeline 数组**：
-- smoke: `["cases", "sync-pull", "sync-push-cases", "executor-with", "grader", "sync-push-results", "publish"]`
-- quick: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader", "sync-push-results", "report", "publish"]`
-- regression: `["sync-pull", "executor-with", "grader", "sync-push-results", "publish"]`
-- standard: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "grader", "sync-push-results", "report", "comparator", "gate", "publish"]`
-- full: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "grader", "sync-push-results", "report", "comparator", "analyzer", "gate", "publish"]`
+**各模式的 pipeline 数组（v9.0 当前契约）**：
+- smoke: `["cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- quick: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- regression: `["sync-pull", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- standard: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"]`
+- full: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"]`
 
 主调度器每轮读 session.json.pipeline[current_index+1] 确定下一步。超出数组范围 = 测评结束。
 
@@ -132,14 +132,14 @@ fi
 
 ---
 
-## grader (sentry-grader)
+## grader-report (sentry-grader)
 
 | 维度 | 定义 |
 |------|------|
 | must_read | evals.json(assertions数组) + 每个 eval 的 response.md（不读不得评审） |
 | 输入 | eval-*/run-*/with_skill/outputs/* + evals.json(断言定义) |
-| 输出 | eval-{N}/grading.json + grading-summary.json |
-| 准出 | ≥ 1 个 eval 有 grading + report 文件存在 |
+| 输出 | eval-{N}/grading.json + grading-summary.json + report.html |
+| 准出 | ≥ 1 个 eval 有 grading + grading-summary.json 存在 + report.html 存在或降级摘要存在 |
 | 降级策略（三级） | |
 | - L1(正常) | 逐个 eval 详细评审，断言级别判定 |
 | - L2(超时降级) | subagent 600s 未完成 → 批量快速验证，只看关键断言 |
@@ -148,10 +148,10 @@ fi
 
 ---
 
-## report (sentry-report)
+## report (sentry-report, 独立重出报告)
 
-> ⚠️ v7.5+：sentry-grader v3.0 已内含报告生成。主编排流程中，若 grader 产物已包含 report.html，则此步骤自动跳过（输出「⭐️ report 已在 grader 中完成，跳过」）。
-> 仅当独立调用（用户说“出报告”）或 grader 产物不含 report.html 时才实际执行。
+> v9.0：主编排流程不再包含独立 `report` 步骤。`sentry-grader` 以 `grader-report` 步骤完成断言评审和报告生成。
+> 本节仅用于独立调用场景：用户说“出报告/重新生成报告”，且已有 grading 产物。
 
 | 维度 | 定义 |
 |------|------|
@@ -289,7 +289,7 @@ def dispatch_next():
 | static | 无 P0(lint) + TP ≥ 70%(trigger) | P0 → 暂停；TP 低 → 警告继续 |
 | cases | 用例数 ≥ 3 | 警告「覆盖不足」 |
 | executor | ≥ 1 个有 transcript | 全失败 → 终止 + 报告环境问题 |
-| grader | ≥ 1 个有 grading + report 存在 | 全超时 → 标注「评审缺失」；报告失败 → 纯文本替代 |
+| grader-report | ≥ 1 个有 grading + report 存在 | 全超时 → 标注「评审缺失」；报告失败 → 纯文本替代 |
 
 ---
 
@@ -302,7 +302,7 @@ def dispatch_next():
 | PUSH 操作 | 在哪个步骤之后执行 | 由谁执行 | 模式要求 |
 |-----------|-----------------|---------|---------|
 | PUSH-CASES | cases 步骤完成后 | 主调度器 | standard/full |
-| PUSH-RESULTS | grader 步骤完成后 | 主调度器 | standard/full |
+| PUSH-RESULTS | grader-report 步骤完成后 | 主调度器 | standard/full |
 | PUSH-RUN | publish 步骤中 | 主调度器 | standard/full |
 
 执行方式：主调度器在对应步骤验收通过后，调用 `feishu_bitable_app_table_record` 写入 Bitable。

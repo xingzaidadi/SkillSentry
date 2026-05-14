@@ -1,4 +1,4 @@
-# SkillSentry v7.0 安装脚本 (Windows PowerShell)
+# SkillSentry v9.0 安装脚本 (Windows PowerShell)
 # 用法: cd SkillSentry; .\install.ps1
 
 $ErrorActionPreference = "Stop"
@@ -8,11 +8,11 @@ $ToolsDir = Join-Path $RepoDir "tools"
 $ClaudeSkills  = Join-Path $env:USERPROFILE ".claude\skills"
 $OpenCodeSkills = Join-Path $env:USERPROFILE ".config\opencode\skills"
 
-# v7.0 活跃子工具
-$Tools = @("sentry-check","sentry-cases","sentry-executor","sentry-grader","sentry-report")
+# v9.0 活跃子工具
+$Tools = @("sentry-static","sentry-cases","sentry-executor","sentry-grader","sentry-report","sentry-comparator","sentry-analyzer")
 
-# v7.0 归档 stub
-$Archived = @("sentry-openclaw","sentry-sync","sentry-lint","sentry-trigger")
+# v9.0 兼容/归档 stub
+$Archived = @("sentry-openclaw","sentry-sync","sentry-check","sentry-lint","sentry-trigger")
 
 function Install-To($SkillsDir, $Platform) {
     Write-Host "`n📦 安装到 $Platform ($SkillsDir)"
@@ -22,7 +22,7 @@ function Install-To($SkillsDir, $Platform) {
 
     # 复制主体（排除 tools/sessions/.git）
     Get-ChildItem $RepoDir -Exclude "tools","sessions",".git" | Copy-Item -Destination $dest -Recurse -Force
-    Write-Host "  ✅ SkillSentry（主编排 v7.0）"
+    Write-Host "  ✅ SkillSentry（主编排 v9.0）"
 
     # 活跃子工具
     foreach ($tool in $Tools) {
@@ -47,7 +47,7 @@ function Install-To($SkillsDir, $Platform) {
     }
 }
 
-Write-Host "🛡  SkillSentry v7.0 安装脚本"
+Write-Host "🛡  SkillSentry v9.0 安装脚本"
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 $installed = $false

@@ -1,6 +1,6 @@
 ---
 name: skill-eval-测评
-version: "8.5.1"
+version: "9.0.0"
 description: >
   SkillSentry - AI Skill 质量测评系统。Each run is a fresh execution. Current SKILL.md and session state override memory.
   触发场景:说"测评/测试/验证/评估某个Skill"、"这个skill好不好用"、"能不能上线"、"帮我跑eval"、"Skill质量怎么样"、"上线前先测一下"、"发布前检查"。
@@ -14,7 +14,18 @@ metadata:
 
 ## ⛔ 版本锁定 & 行为优先级(本节不可删除)
 
-**本文件是 SkillSentry v8.5.1,是唯一权威的行为定义。**
+**本文件是 SkillSentry v9.0.0,是唯一权威的行为定义。**
+
+**v9.0 定位**:契约收敛版。当前版本优先统一执行契约、术语口径和文档入口,不新增测评维度、不新增平台适配、不改变报告视觉结构。
+
+**当前口径速记**:
+- 主流程评分报告步骤叫 `grader-report`:由 `sentry-grader` 在同一个 subagent 内完成断言评审 + `grading-summary.json` + `report.html`。
+- `sentry-report` 只用于独立重出报告:已有 grading 后,用户说「出报告/重新生成报告/看结果」才调用。
+- 正式静态工具叫 `sentry-static`;`sentry-lint` / `sentry-trigger` / `sentry-check` 仅作为兼容命令。
+- 正式发布结论为 `PASS / CONDITIONAL PASS / FAIL`;正式等级为 `S/A/B/C/D/F`;`Pass³` 和 `L0-L5` 仅作为历史/方法论资料。
+- `mcp_based + smoke/quick` 默认跳过 without_skill;`mcp_based + standard/full` 默认保留可比较的 without_skill 侧,无法裸跑的单个 eval 才逐条跳过。
+
+更多冲突消解规则见 `references/current-contract.md`。本文件与旧 references 或旧文章冲突时,以本文件和 `references/current-contract.md` 为准。
 
 **行为优先级(一行版)**:当前用户请求 > 当前 SKILL.md > 本次读取的 references/文件 > 本次工具输出 > 对话历史 > memory
 
@@ -93,8 +104,8 @@ message(action=send, msg_type="text", message="✅ Step 1 初始化 (Initializat
 | `sentry-static` | `./tools/sentry-static/SKILL.md` | 静态检查(L1-L5)+ 触发率(TP/TN),三合一(原 check/lint/trigger),支持 --lint-only / --trigger-only |
 | `sentry-cases` | `./tools/sentry-cases/SKILL.md` | 测试用例设计,输出 evals.json |
 | `sentry-executor` | `./tools/sentry-executor/SKILL.md` | 用例并行执行,输出 transcript |
-| `sentry-grader` | `./tools/sentry-grader/SKILL.md` | 断言评审,输出 grading.json |
-| `sentry-report` | `./tools/sentry-report/SKILL.md` | 报告 + 发布决策 + HiL 确认 |
+| `sentry-grader` | `./tools/sentry-grader/SKILL.md` | 主流程 `grader-report`:断言评审 + 汇总 + 生成 report.html |
+| `sentry-report` | `./tools/sentry-report/SKILL.md` | 独立重出报告:已有 grading 后重新生成 report.html |
 | `sentry-comparator` | `./tools/sentry-comparator/SKILL.md` | 盲测对比(with vs without),仅 standard/full |
 | `sentry-analyzer` | `./tools/sentry-analyzer/SKILL.md` | 解盲分析 + 改进建议,仅 full |
 | `sentry-sync` | `./tools/sentry-sync/SKILL.md` | 飞书 Bitable 同步(PULL/PUSH) |
@@ -110,8 +121,8 @@ message(action=send, msg_type="text", message="✅ Step 1 初始化 (Initializat
 | `lint xxx` / `检查结构` / `有没有HiL问题` | 只跑 sentry-static --lint-only |
 | `测触发率` / `description 准不准` | 只跑 sentry-static --trigger-only |
 | `设计用例 xxx` / `只出 cases` | 只跑 sentry-cases |
-| `跑用例` / `用现有用例` | executor → grader → report |
-| `出报告` / `通过了吗` / `看结果` | sentry-report(需已有 grading.json)|
+| `跑用例` / `用现有用例` | executor → grader-report |
+| `出报告` / `重新生成报告` / `通过了吗` / `看结果` | sentry-report(独立重出报告,需已有 grading.json / grading-summary.json)|
 | `继续` / `resume` / `从断点继续` | 读取 session.json.last_step + pipeline 数组,从 pipeline[indexOf(last_step)+1] 继续执行,跳过 Step 0/1/2 |
 
 ### 素材自动存档
@@ -216,7 +227,7 @@ OpenClaw:
    - 部分可用 → 告知用户哪些缺失,询问是否继续(部分用例将受限)
    - 全不可用 → ⛔ 阻断,展示缺失列表,提供两个选项:
      a) 用户配置 MCP 后继续
-     b) 降级为纯静态分析(跳过 executor,只出 check + cases + report)
+     b) 降级为纯静态分析(跳过 executor,只出 static + cases + grader-report 摘要)
 ```
 
 mcp_backend 写入 session.json,executor 根据此字段自动选择执行方式:
@@ -287,7 +298,7 @@ config.json 字段映射(OpenClaw 环境):
 ```
 计算 SKILL.md MD5 → 读取 inputs_dir/rules.cache.json
 
-**⛔ 数据隔离规则**:Step 2 只读 `rules.cache.json`(判断 hash)。禁止读 inputs/ 下的 `history.json`、`baseline.snapshot.json`、`trigger_eval.json` 等结果文件--这些只在 report 阶段由 sentry-report subagent 使用。主调度器提前看到历史成绩会产生锚定效应,污染后续评审判断。
+**⛔ 数据隔离规则**:Step 2 只读 `rules.cache.json`(判断 hash)。禁止读 inputs/ 下的 `history.json`、`baseline.snapshot.json`、`trigger_eval.json` 等结果文件--这些只在 grader-report / 独立 sentry-report 阶段使用。主调度器提前看到历史成绩会产生锚定效应,污染后续评审判断。
 
   不存在               → quick(首次测评)
   hash 不匹配          → smoke(Skill 有变更)+ MARK_STALE
@@ -299,11 +310,11 @@ config.json 字段映射(OpenClaw 环境):
 
 | 模式 | 工具链 | 预计时间 |
 |------|--------|---------|
-| smoke | cases → sync-pull → sync-push-cases → executor-with(×1) → grader → sync-push-results → publish | ~10min |
-| quick | static → cases → sync-pull → sync-push-cases → executor-with(×2) → grader → sync-push-results → report → publish | ~20min |
-| regression | sync-pull → executor-with(golden) → grader → sync-push-results → publish | ~5min |
-| standard | static → cases → sync-pull → sync-push-cases → executor-with(×3) → executor-without → grader → sync-push-results → report → comparator → gate → publish | ~40min |
-| full | static → cases → sync-pull → sync-push-cases → executor-with(×3) → executor-without → grader → sync-push-results → report → comparator → analyzer → gate → publish | ~50min |
+| smoke | cases → sync-pull → sync-push-cases → executor-with(×1) → grader-report → sync-push-results → publish | ~10min |
+| quick | static → cases → sync-pull → sync-push-cases → executor-with(×2) → grader-report → sync-push-results → publish | ~20min |
+| regression | sync-pull → executor-with(golden) → grader-report → sync-push-results → publish | ~5min |
+| standard | static → cases → sync-pull → sync-push-cases → executor-with(×3) → executor-without → comparator → grader-report → sync-push-results → gate → publish | ~40min |
+| full | static → cases → sync-pull → sync-push-cases → executor-with(×3) → executor-without → comparator → analyzer → grader-report → sync-push-results → gate → publish | ~50min |
 
 输出确认(自动模式直接开始):
 ```
@@ -330,7 +341,7 @@ message(action=send, message="
   "schema": "2.0",
   "config": {"update_multi": true},
   "header": {
-    "title": {"tag": "plain_text", "content": "🧠 SkillSentry v8.5.1 · 测评启动"},
+    "title": {"tag": "plain_text", "content": "🧠 SkillSentry v9.0.0 · 测评启动"},
     "subtitle": {"tag": "plain_text", "content": "AI Skill 质量守门人 · 选完后回复「开始」"},
     "template": "blue"
   },
@@ -414,7 +425,7 @@ message: "⏭️ cases (2/12) [Resume]:32 用例 (HP:10 EC:6 NEG:5 ROB:3 SEC:3 E
 message: "⏭️ sync-pull (3/12) [Resume]:skipped_no_config"
 message: "⏭️ sync-push-cases (4/12) [Resume]:skipped_no_config"
 message: "✅ executor-with (5/12) [Resume]:Run-1 32/32 | Run-2 31/32 | Run-3 32/32"
-message: "→ 当前步骤:grader (6/12)..."
+message: "→ 当前步骤:grader-report (6/11)..."
 ```
 
 禁止:
@@ -464,11 +475,11 @@ idle → step-0 → step-1 → step-2 → [pipeline per mode] → publish → id
 ```
 
 **各模式的合法 pipeline**(按 session.json.pipeline 数组严格执行,不可自行跳步):
-- smoke: `["cases", "sync-pull", "sync-push-cases", "executor-with", "grader", "sync-push-results", "publish"]`
-- quick: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader", "sync-push-results", "report", "publish"]`
-- regression: `["sync-pull", "executor-with", "grader", "sync-push-results", "publish"]`
-- standard: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "grader", "sync-push-results", "report", "comparator", "gate", "publish"]`
-- full: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "grader", "sync-push-results", "report", "comparator", "analyzer", "gate", "publish"]`
+- smoke: `["cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- quick: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- regression: `["sync-pull", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- standard: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"]`
+- full: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"]`
 
 Step 2 推断完成后写入 session.json.pipeline,Step 3 调度循环严格按数组顺序执行。
 不在当前模式 pipeline 数组中的步骤 = 不存在。
@@ -484,7 +495,7 @@ Step 2 推断完成后写入 session.json.pipeline,Step 3 调度循环严格按�
 
 ### 核心原则:主会话只调度,不执行
 
-主会话永远只做三件事:**派活、验收、通知用户**。所有复杂步骤(含 sentry-report)全部委派给 subagent 执行。
+主会话永远只做三件事:**派活、验收、通知用户**。所有复杂步骤全部委派给 subagent 执行。主流程报告生成由 `grader-report` 完成;`sentry-report` 只在独立重出报告场景调用。
 
 **⛔ 主调度器铁律(每轮必须遵守)**:
 1. 每轮开始必须 read session.json(不靠记忆)
@@ -524,7 +535,7 @@ Step 2 推断完成后写入 session.json.pipeline,Step 3 调度循环严格按�
   "mode": "standard",
   "session_dir": "2026-05-07_003",
   "current_step": "executor-with",
-  "next_step": "grader",
+  "next_step": "grader-report",
   "pending_subagents": ["executor-run1-all", "executor-run2-all", "executor-run3-all"],
   "started_at": "2026-05-07T15:03:00+08:00",
   "timeout_minutes": 60,
@@ -534,7 +545,7 @@ Step 2 推断完成后写入 session.json.pipeline,Step 3 调度循环严格按�
 
 #### 写入时机(⛔ 必须在 spawn 之后、yield 之前)
 
-每次 spawn 长时间 subagent(executor、grader、comparator、analyzer)后,**立即**写入 checkpoint:
+每次 spawn 长时间 subagent(executor、comparator、analyzer、grader-report)后,**立即**写入 checkpoint:
 
 ```
 spawn subagent → write active-pipeline.json → sessions_yield
@@ -580,14 +591,15 @@ spawn subagent → write active-pipeline.json → sessions_yield
 | static | sentry-static | ./tools/sentry-static/SKILL.md | session.json.lint + trigger_eval.json | subagent |
 | cases | sentry-cases | ./tools/sentry-cases/SKILL.md | evals.json + cases.cache.json | subagent(↩️ auto-exempt 步骤需主会话中转) |
 | executor-with | sentry-executor | ./tools/sentry-executor/SKILL.md | eval-*/run-{1..R}/with_skill/outputs/* | 批次 subagent(runs数: smoke=1, quick=2, standard/full=3) |
-| executor-without | sentry-executor | ./tools/sentry-executor/SKILL.md | eval-*/run-1/without_skill/outputs/* | subagent(仅 standard/full + text_generation) |
-| grader | sentry-grader | ./tools/sentry-grader/SKILL.md | eval-*/grading.json + grading-summary.json | 单 subagent |
-| report | sentry-report | ./tools/sentry-report/SKILL.md | report.html + history.json 更新 | subagent(quick+) |
+| executor-without | sentry-executor | ./tools/sentry-executor/SKILL.md | eval-*/run-1/without_skill/outputs/* | subagent(standard/full 默认执行;逐 eval 可跳过) |
+| comparator | sentry-comparator | ./tools/sentry-comparator/SKILL.md | comparator-results.json | subagent(standard/full) |
+| analyzer | sentry-analyzer | ./tools/sentry-analyzer/SKILL.md | analyzer-recommendations.json | subagent(full only) |
+| grader-report | sentry-grader | ./tools/sentry-grader/SKILL.md | eval-*/grading.json + grading-summary.json + report.html | 单 subagent |
 | comparator | sentry-comparator | ./tools/sentry-comparator/SKILL.md | comparator-results.json | subagent(standard/full) |
 | analyzer | sentry-analyzer | ./tools/sentry-analyzer/SKILL.md | analyzer-recommendations.json | subagent(full only) |
 | publish | 主调度器直接执行 | - | 飞书文件URL + 所有权转让 + 最终卡片 | 主会话直接执行 |
 
-**executor-without 跳过条件**:mcp_based + smoke/quick → 跳过(N/A),Delta 标注"N/A(跳过 without_skill)"
+**executor-without 跳过条件**:mcp_based + smoke/quick → 跳过(N/A);mcp_based + standard/full → 默认保留可比较的 without_skill 侧,无法裸跑的单个 eval 才逐条跳过,Delta 标注为 computed / partial / N/A。
 
 **publish 步骤内容**(主调度器直接执行,不 spawn):
 
@@ -667,7 +679,7 @@ cases 步骤含 auto-exempt 环节(数据采集、用例审核),需主会话与�
 - check 缓存命中:展示 L1-L5 各项结果 + 触发率 TP/TN + 来源 session
 - cases 缓存命中:展示按类型分组的用例清单表格 + 断言统计(exact/semantic/existence)
 - 禁止只输出"缓存命中,跳过"
-- **快速失败**(quick 模式):grader 评审前几个 eval 后通过率 < 20% → 询问是否继续
+- **快速失败**(quick 模式):grader-report 评审前几个 eval 后通过率 < 20% → 询问是否继续
 - **透明执行**:每步完成后必须展示结果,自动模式也不例外
 - **⛔ 禁止**:主会话直接执行任何子工具的业务逻辑;凭记忆生成报告/用例/评分;手写用例替代 sentry-cases
 - **⛔ 所有模式必须 spawn sentry-cases subagent**:禁止主会话自己编写 evals.json。但流程深度按模式分级(见下方「模式分级控制」)
@@ -685,7 +697,7 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
 
 - 每个 step 完成后发一条独立 message,不是最后一起发
 - Step 0、Step 1、Step 2 必须各自独立发送,禁止合并
-- grader 结果卡片必须包含 per-assertion 详情(smoke/quick 全量,standard/full 只展示 failed)
+- grader-report 结果卡片必须包含 per-assertion 详情(smoke/quick 全量,standard/full 只展示 failed)
 - 缓存命中时必须展示内容摘要,禁止只写"缓存命中,跳过"
 - **进度摘要**:每完成一个 pipeline 步骤后,在消息末尾附加进度条:`[██████░░░░] 3/5 steps`(用 █ 和 ░ 字符模拟)
 
@@ -713,9 +725,9 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
 | sync-push-cases | 新用例推送到飞书 Bitable 用例表 |
 | executor-with | 加载 Skill 执行每个用例 · 记录 transcript · 采集 MCP 调用链 |
 | executor-without | 不加载 Skill 执行同样用例 · 作为基线对比 |
-| grader | 每个用例的断言评审 · exact_match/semantic/existence · 输出 grading.json |
+| grader-report | 每个用例的断言评审 · exact_match/semantic/existence · 输出 grading.json + grading-summary.json + report.html |
 | sync-push-results | 将 grading 结果推送到飞书 Bitable 运行记录表 |
-| report | HTML 报告生成 · 发布决策 · history.json 更新 |
+| sentry-report | 独立重出 HTML 报告 · 仅在已有 grading 时使用 |
 | comparator | with_skill vs without_skill 盲测对比 · 计算 Delta 增益 |
 | analyzer | 解盲分析 · 根因定位 · 改进建议 |
 | gate | Completion Gate 7 项检查 · 确定 COMPLETE/PARTIAL/BLOCKED |
@@ -759,7 +771,7 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
 
 完整 schema 见:`./references/session-json-schema.md`
 
-写入时机:Step 1 写基础字段 → 各步完成后写对应字段 → grader 完成写 verdict/recommendations。
+写入时机:Step 1 写基础字段 → 各步完成后写对应字段 → grader-report 完成写 verdict/recommendations。
 
 ### Token 计量(v8.0 新增)
 
@@ -772,9 +784,10 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
     "static": 12500,
     "cases": 18000,
     "executor": 45000,
-    "grader": 32000,
-    "report": 8000,
-    "total": 115500
+    "comparator": 8000,
+    "analyzer": 6000,
+    "grader_report": 40000,
+    "total": 129500
   }
 }
 ```
@@ -785,13 +798,7 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
 3. 差值写入:`cost[step_name] = after_usage - before_usage`
 4. 最后 publish 时汇总 `cost.total = sum(cost.values())`
 
-*v8.5.1 · 飞书卡片从 V1 action 语法迁移到 V2 form+select_static原生组件 + publish.py 三件套脚本 · 2026-05-11*
-*v8.5.0 · Pipeline持久化+自动恢复(active-pipeline.json + 10min watchdog cron) + spawn后必须yield铁律 · 2026-05-08*
-*v8.4.0 · sync步骤纳入pipeline状态机(结构性修复⛔标记≠执行保障) + 坂26 · 2026-05-07*
-*v8.3.0 · 合入数据污染四层模型(坂23-28) + CI能力对齐 · 2026-05-03*
-*v8.2.0 · 融合 OpenClaw 生产改进(数据隔离/进度条/缓存展示详化/timeout调整/workspace路径分离/admission-criteria/faq) + 保留CI能力 · 2026-05-03*
-*v8.1.0 · 融合 v8.0.0 四大支柱+pipeline数组+checkpoint resume+token计量+sentry-static三合一 + 保留CI能力(sentry_ci.py) · 2026-05-03*
-*v8.0.0 · sentry-static 三合一 + checkpoint resume + grader分批 + token计量 + dashboard + 结果卡片折叠优化 · 2026-05-03*
+*v9.0.0 · 契约收敛版:统一 grader-report、without_skill/Delta 规则、当前术语口径、配置卫生与文档入口 · 2026-05-14*
 
 <!-- 旧版本历史已移至 CHANGELOG.md -->
 

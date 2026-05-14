@@ -52,8 +52,8 @@ text_generation（默认兜底）：
 | `rules.cache.json` | SkillSentry | sentry-cases | `skill_hash`, `extracted_at`, `rules[]` |
 | `cases.cache.json` | sentry-cases | sentry-executor | `rules_hash`, `mode`, `evals[]` |
 | `evals.json` | sentry-cases | sentry-executor | `id`, `type`, `source`, `prompt`, `skip_without_skill`, `skip_reason`, `expectations[]{text, precision, rule_ref}` |
-| `timing_with.json` / `timing_without.json` | sentry-executor | sentry-report | `executor_start_ms`, `executor_end_ms`, `duration_ms`, `total_tokens`, `input_tokens`, `output_tokens` |
-| `grading.json` | agents/grader | sentry-report | `runs: {run-1: {pass, assertions[], summary{pass,fail,total,precision_breakdown,authoritative_pass_rate}}, run-2: {...}, run-3: {...}}, feishu_record_id` |
+| `timing_with.json` / `timing_without.json` | sentry-executor | grader-report / sentry-report | `executor_start_ms`, `executor_end_ms`, `duration_ms`, `total_tokens`, `input_tokens`, `output_tokens` |
+| `grading.json` | grader-report | grader-report / sentry-report | `runs: {run-1: {pass, assertions[], summary{pass,fail,total,precision_breakdown,authoritative_pass_rate}}, run-2: {...}, run-3: {...}}, feishu_record_id` |
 | `eval_environment.json` | sentry-executor | 审计用 | `parallelism_audit[]{batch,parallel_rate,violations[]}`, `overall_parallel_rate` |
 
 ---
@@ -62,12 +62,13 @@ text_generation（默认兜底）：
 
 | 条件 | skip_without_skill | skip_reason |
 |------|-------------------|-------------|
-| `skill_type = "mcp_based"` AND `mode ∈ {smoke, quick}` | true（全部用例） | 无 Skill 指导时模型几乎必然调错 MCP 工具，Δ 总为正，without_skill 无增量价值；standard/full 保留双侧 |
+| `skill_type = "mcp_based"` AND `mode ∈ {smoke, quick}` | true（全部用例） | 无 Skill 指导时模型几乎必然调错 MCP 工具，without_skill 无增量价值；standard/full 保留可比较双侧 |
+| `skill_type = "mcp_based"` AND `mode ∈ {standard, full}` | false（默认）；仅无法裸跑的单个 eval 标 true | standard/full 需要尽量保留 Delta 证据，报告可标注 partial |
 | `type = "negative"` | true | 负向测试，without_skill 无对比价值 |
 | 所有断言 `precision = "existence"` | true | existence 断言对有无 Skill 不敏感 |
 | `type = "robustness"` 且核心断言为负向存在性 | true | 鲁棒性用例，without_skill 行为已知（混乱） |
 
-> **优先级**：首行（mcp_based + smoke/quick）最高，命中后直接标记，不再逐条判断。
+> **优先级**：mcp_based + smoke/quick 的全局跳过规则最高。standard/full 不全局跳过，只允许逐 eval 标记。
 
 ---
 
@@ -125,7 +126,7 @@ else:
 - smoke：同步启动，等待完成后再执行后续步骤
 - quick：第一批同步（用于快速失败检测），其余批次后台非阻塞启动；mcp_based+quick 为单批次，整个 Grader 同步等待
 - regression / standard / full：后台非阻塞启动，每批 Executor 完成后立即触发，无需等待上一批 Grader 结束
-- 所有 Grader 的最终完成检查在 sentry-report 启动前统一执行（由 SKILL.md 强制等待点保障）
+- 所有 Grader 的最终完成检查在 grader-report 内统一执行（由 SKILL.md 强制等待点保障）
 
 ---
 
@@ -134,11 +135,11 @@ else:
 - **仅对** `happy_path` + `e2e` 类型用例运行，其他类型跳过
 - 非阻塞启动，主流程不等待其完成，直接继续下一批
 - smoke 模式完全跳过 Comparator/Analyzer
-- 进入 sentry-report 前，确认所有 Comparator/Analyzer 已完成
+- 进入 grader-report 前，确认所有 Comparator/Analyzer 已完成或写入跳过说明
 
 ---
 
 ## 七、报告模板预加载时机
 
 `references/report-template.md` 在第一批 Executor 完成后后台预加载（不阻塞主流程），
-sentry-report 启动时直接使用缓存，无需等待文件读取。
+grader-report 启动时直接使用缓存，无需等待文件读取。独立重出报告时由 sentry-report 读取同一模板。

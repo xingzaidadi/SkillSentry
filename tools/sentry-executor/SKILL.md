@@ -151,7 +151,7 @@ workspace_dir/
     │   └── metrics.json
     ├── timing_with.json
     ├── timing_without.json
-    └── grading.json                ← 由 grader 填写
+    └── grading.json                ← 由 grader-report 填写
 ```
 
 **多次运行（quick=2次 / standard/full=3次）**：
@@ -170,7 +170,7 @@ workspace_dir/
     │   │   └── response.md
     │   ├── timing_with.json
     │   ├── timing_without.json
-    │   └── grading.json            ← 由 grader 填写
+    │   └── grading.json            ← 由 grader-report 填写
     ├── run-2/
     │   └── ...（同 run-1 结构）
     └── run-3/                      ← 仅 standard/full
@@ -205,9 +205,14 @@ without_skill 策略：[全部跳过（mcp_based + smoke/quick 模式）/ 正常
 **自动跳过规则**：
 
 ```
-mcp_based + 任何模式：skip_without_skill = true
-  → 原因：无 skill 指导时 AI 不知道调哪个 MCP 工具，Δ 数据无参考价值
-  → 报告标注：Δ=N/A（设计决策：mcp_based 跳过 without_skill）
+mcp_based + smoke/quick：skip_without_skill = true
+  → 原因：无 skill 指导时 AI 几乎必然调错业务 MCP 工具，Δ 数据无参考价值
+  → 报告标注：Δ=N/A（设计决策：mcp_based + smoke/quick 跳过 without_skill）
+
+mcp_based + standard/full：默认 skip_without_skill = false
+  → 保留可比较的 without_skill 侧，作为增益证据
+  → 无法裸跑的单个 eval 可在 evals.json 中标记 skip_without_skill=true
+  → 报告标注：Δ=computed / partial / N/A（按可计算用例数量区分）
 
 其他 skill_type：
   smoke/quick/regression：视 evals.json 中 skip_without_skill 字段
@@ -217,7 +222,7 @@ mcp_based + 任何模式：skip_without_skill = true
 读取 evals.json 中每个用例的 `skip_without_skill` 字段：
 - `true`：只启动 with_skill，在声明中注明「eval-[N] without_skill 已跳过」
 - `false` 或不存在：正常启动双侧
-- **手动覆盖**：用户明确要求出 Δ 时，可设 skip_without_skill: false 强制双侧执行
+- **手动覆盖**：用户明确要求出 Δ 时，可设 skip_without_skill: false 强制双侧执行；涉及写操作或环境风险时必须先确认
 
 ---
 
@@ -639,7 +644,7 @@ batch_parallel_rate = parallel_count / total_count
 | E3 效率达标率 | Token ≤ 100,000 且耗时 ≤ 120s | timing_with.json | ✅ |
 
 **C3、C6、E1 由 Grader 判定**，不在 executor 里提取。
-**E2 由 report 跨轮次汇总**，不在 executor 里提取。
+**E2 由 grader-report / 独立 sentry-report 跨轮次汇总**，不在 executor 里提取。
 
 ### metrics_raw.json 格式
 
@@ -666,7 +671,7 @@ batch_parallel_rate = parallel_count / total_count
 }
 ```
 
-**向后兼容**：如果 evals.json 中没有 tools_required / tools_forbidden / critical_params 字段，对应指标标记为 `null`（不是 false），表示“无法判定”而非“未通过”。report 统计时跳过 null 值的指标。
+**向后兼容**：如果 evals.json 中没有 tools_required / tools_forbidden / critical_params 字段，对应指标标记为 `null`（不是 false），表示“无法判定”而非“未通过”。grader-report / sentry-report 统计时跳过 null 值的指标。
 
 **失败处理**：指标提取失败不影响用例执行结果，仅在 metrics_raw.json 中标记 `"extraction_error": "<原因>"`。
 
@@ -707,7 +712,7 @@ batch_parallel_rate = parallel_count / total_count
 
 - 降级用例的 metrics_raw.json 标记 `"direct_fallback": true`
 - grading 时：A1/A2/A3/E3 正常评分，C3/C6 标记为 `null`（非 subagent 执行，无法评判 skill 指导效果）
-- report 中单独统计降级比例：`direct_fallback_rate = N/total`
+- grader-report / sentry-report 中单独统计降级比例：`direct_fallback_rate = N/total`
 
 ---
 
@@ -722,7 +727,7 @@ batch_parallel_rate = parallel_count / total_count
 
 下一步：
   评分 → 使用 SkillSentry 内置 Grader，或说「帮我评审这批结果」
-  报告 → 先运行 Grader，再使用 sentry-report
+  报告 → 主流程先运行 grader-report；已有 grading 需要重出 HTML 时使用 sentry-report
 ```
 
 ---

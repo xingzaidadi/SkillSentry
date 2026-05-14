@@ -24,14 +24,14 @@
 | 能力 | smoke | quick | standard | full |
 |------|:---:|:---:|:---:|:---:|
 | with_skill runs | 1 | 2 | 3 | 3 |
-| without_skill | ❌ 跳过 | ❌ 跳过(mcp) / ✅(text) | ✅ 1 run | ✅ 1 run |
+| without_skill | ❌ 跳过 | ❌ 跳过(mcp) / ✅(text/code) | ✅ 1 run | ✅ 1 run |
 | Delta 计算 | N/A | N/A(mcp) / ✅(text) | ✅ | ✅ |
 | 批次大小 | 全部 | 全部 | ∖55/batch | ∖55/batch |
 
 **without_skill 跳过规则**：
 - mcp_based + smoke/quick → 跳过，Delta 卡片展示 "N/A(跳过 without_skill，mcp_based 无法在无 Skill 时调用工具)"
-- text_generation 所有模式 → 必须执行（可以纯文本对比）
-- mcp_based + standard/full → 必须执行（without_skill 只跑文本部分，不调 MCP）
+- text_generation / code_execution 所有模式 → 默认执行（安全或环境原因跳过时必须说明）
+- mcp_based + standard/full → 默认执行可比较的 without_skill 侧；无法裸跑的单个 eval 才逐条跳过，报告标注 partial
 
 ---
 
@@ -40,7 +40,7 @@
 | 模式 | 产出 |
 |------|------|
 | smoke | grading-summary.json（本地） |
-| quick | grading-summary.json + 飞书卡片推送 |
+| quick | grading-summary.json + report.html（本地）+ 飞书卡片推送 |
 | standard/full | 三件套（HTML + summary + history）+ HTML 上传飞书 |
 
 ---

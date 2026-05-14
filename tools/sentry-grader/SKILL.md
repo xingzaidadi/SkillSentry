@@ -204,7 +204,7 @@ Grader subagent 超时（600s 无响应）时：
 3. 全部超时 → 标记该 run 所有 eval 为超时
 4. 输出：「⚠️ Grader run-{R} 超时，{N} 个 eval 评审缺失」
 5. 不阻塞其他 run 的 grader（并行独立）
-6. report 阶段对超时 eval 标注「评审缺失」，不计入通过率
+6. `grader-report` 报告生成阶段对超时 eval 标注「评审缺失」，不计入通过率
 
 ### 重试策略
 
@@ -230,7 +230,7 @@ if per_eval_variance > 0.5:
 ## 回执格式
 
 ```
-✅ grader 完成 | ⏱ Xmin
+✅ grader-report 完成 | ⏱ Xmin
 
 总断言：N 条 | 通过：X | 失败：Y | 不确定：Z
 精确通过率：X% | 综合通过率：Y%
@@ -287,13 +287,13 @@ if per_eval_variance > 0.5:
 
 **禁止的格式**：`runs` 为数组、`expectations` 嵌套 `runs`、`verdict` 替代 `pass` 等变体。必须严格按上述结构。
 
-更新 `session.json` 的 `last_step` 为 `"grader"`。
+更新 `session.json` 的 `last_step` 为 `"grader-report"`。
 
 ---
 
-## Step 7：合并 grading 并生成报告（grader 完成后自动执行）
+## Step 7：合并 grading 并生成报告（grader-report 内自动执行）
 
-grader 评审全部完成后，在同一个 subagent 中执行以下步骤（无需另起 subagent）：
+断言评审全部完成后，在同一个 subagent 中执行以下步骤（无需另起 subagent）：
 
 ### 7.1 合并 grading.json
 
@@ -361,14 +361,14 @@ for eval_id in eval_ids:
 4. **每个 eval 详情**：通过/失败断言列表，含 evidence 引用
 5. **建议**：P0/P1/P2 分级改进建议
 
-评级标准：见 references/admission-criteria.md Step 4.1 的六档层级达标制。本步骤只输出各项指标值（精确通过率、语义通过率、IFR、一致性、稳定性等），等级判定由 report 逻辑执行。
+评级标准：见 references/admission-criteria.md Step 4.1 的六档层级达标制。本步骤输出各项指标值（精确通过率、语义通过率、IFR、一致性、稳定性等），并在同一 subagent 内执行 report 逻辑生成报告。
 
 ### 7.4 更新 session.json
 
 ```json
 {
   "last_step": "grader-report",
-  "grader": {"pass": N, "fail": N, "total": N, "pass_rate": N, "per_run": {...}},
+  "grader_report": {"pass": N, "fail": N, "total": N, "pass_rate": N, "per_run": {...}, "report_html": "report.html"},
   "verdict": {"grade": "A", "decision": "CONDITIONAL_PASS", "pass_rate": 87.2}
 }
 ```
@@ -383,7 +383,7 @@ for eval_id in eval_ids:
 ### 7.6 输出回执
 
 ```
-✅ grader + report 完成 | ⏱ Xmin
+✅ grader-report 完成 | ⏱ Xmin
 
 总断言：N 条 | 通过：X | 失败：Y | 综合通过率：Z%
 评级：A | 发布决策：CONDITIONAL PASS
