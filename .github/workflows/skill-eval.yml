@@ -20,7 +20,7 @@ on:
         required: false
         default: 'smoke'
         type: choice
-        options: [smoke, quick]
+        options: [smoke, quick, regression, standard, full]
 
 permissions:
   checks: write
@@ -87,7 +87,7 @@ jobs:
         run: |
           mkdir -p ~/.claude/skills
           # 部署主编排器
-          cp -r . ~/.claude/skills/skill-eval-测评
+          cp -r . ~/.claude/skills/SkillSentry
           # 部署各原子工具
           for tool_dir in tools/sentry-*/; do
             tool_name=$(basename "$tool_dir")
@@ -108,43 +108,44 @@ jobs:
             exit 0  # 跳过，不 fail
           fi
 
-      - name: 运行 SkillSentry 测评（${{ github.event.inputs.mode || 'smoke' }} 模式）
+      - name: 运行 SkillSentry CI（${{ github.event.inputs.mode || 'smoke' }} 模式）
+        id: sentry_ci
+        continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_MAX_OUTPUT_TOKENS: 8192
         run: |
           MODE="${{ github.event.inputs.mode || 'smoke' }}"
-          # 非交互模式：自动确认（利用 --yes 标志和 stdin 重定向）
-          echo "开始" | claude --dangerously-skip-permissions \
-            "测评 ${{ matrix.skill }} 模式=$MODE 自动" \
-            --output-format text \
-            2>&1 | tee eval-output.log
-          echo "测评输出已写入 eval-output.log"
-
-      - name: 汇总评估结果
-        id: summarize
-        run: |
-          python3 ~/.claude/skills/skill-eval-测评/scripts/ci_eval.py \
+          set +e
+          python3 ~/.claude/skills/SkillSentry/scripts/sentry_ci.py \
             --skill ${{ matrix.skill }} \
-            --mode ${{ github.event.inputs.mode || 'smoke' }} \
+            --mode "$MODE" \
             --threshold 0.80 \
             --output-dir ./ci-eval-results/${{ matrix.skill }} \
-            --github-output
-        continue-on-error: true  # 允许 FAIL 时继续（以便推送 Check）
+            --github-output \
+            2>&1 | tee eval-output.log
+          STATUS=${PIPESTATUS[0]}
+          echo "sentry_ci_exit_code=$STATUS" >> "$GITHUB_OUTPUT"
+          exit "$STATUS"
 
       - name: 更新历史记录
         if: always()
         run: |
-          SESSION=$(find ~/.claude/skills/skill-eval-测评/sessions/${{ matrix.skill }} -maxdepth 1 -mindepth 1 -type d | sort | tail -1)
+          SESSION_ROOT=~/.claude/skills/SkillSentry/sessions/${{ matrix.skill }}
+          if [ -d "$SESSION_ROOT" ]; then
+            SESSION=$(find "$SESSION_ROOT" -maxdepth 1 -mindepth 1 -type d | sort | tail -1)
+          else
+            SESSION=""
+          fi
           if [ -n "$SESSION" ]; then
-            python3 ~/.claude/skills/skill-eval-测评/scripts/update_history.py \
+            python3 ~/.claude/skills/SkillSentry/scripts/update_history.py \
               --skill ${{ matrix.skill }} \
               --session-dir "$SESSION" \
               --mode ${{ github.event.inputs.mode || 'smoke' }} \
               --git-sha ${{ github.sha }} \
               --note "CI: ${{ github.event.head_commit.message || 'workflow_dispatch' }}" || true
             # 将 history.json 复制到工作目录，便于提交
-            cp ~/.claude/skills/skill-eval-测评/inputs/${{ matrix.skill }}/history.json \
+            cp ~/.claude/skills/SkillSentry/inputs/${{ matrix.skill }}/history.json \
                ./ci-eval-results/${{ matrix.skill }}/history.json 2>/dev/null || true
           fi
 
@@ -171,7 +172,7 @@ jobs:
         run: |
           RESULT_FILE="./ci-eval-results/${{ matrix.skill }}/eval_result.json"
           if [ -f "$RESULT_FILE" ]; then
-            python3 ~/.claude/skills/skill-eval-测评/scripts/report_to_checks.py \
+            python3 ~/.claude/skills/SkillSentry/scripts/report_to_checks.py \
               --result "$RESULT_FILE" \
               --check-name "SkillSentry / ${{ matrix.skill }}"
           else
@@ -192,15 +193,14 @@ jobs:
         run: |
           RESULT_FILE="./ci-eval-results/${{ matrix.skill }}/eval_result.json"
           if [ -f "$RESULT_FILE" ]; then
-            VERDICT=$(python3 -c "import json; d=json.load(open('$RESULT_FILE')); print(d['verdict'])")
-            if [ "$VERDICT" != "PASS" ]; then
-              echo "❌ 测评 FAIL: ${{ matrix.skill }}"
-              exit 1
-            fi
-            echo "✅ 测评 PASS: ${{ matrix.skill }}"
+            EXIT_CODE=$(python3 -c "import json; d=json.load(open('$RESULT_FILE', encoding='utf-8')); print(d.get('exit_code', 2))")
+            STATUS=$(python3 -c "import json; d=json.load(open('$RESULT_FILE', encoding='utf-8')); print(d.get('status', 'error'))")
+            VERDICT=$(python3 -c "import json; d=json.load(open('$RESULT_FILE', encoding='utf-8')); print(d.get('verdict', 'ERROR'))")
+            echo "SkillSentry status=$STATUS verdict=$VERDICT exit_code=$EXIT_CODE"
+            exit "$EXIT_CODE"
           else
             echo "⚠️ 无法确认测评结果，视为失败"
-            exit 1
+            exit 2
           fi
 
   summary:

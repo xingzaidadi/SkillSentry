@@ -40,6 +40,15 @@ python scripts/sentry_ci.py --skill my-skill --mode smoke \
 
 `--github-output` 会写入 `verdict/status/release_status/exit_code/report_html/session_report_html/diagnostic_categories/authoritative_pass_rate/grade`。其中 `status`/`release_status` 取值为 `pass`、`conditional`、`fail` 或 `error`。
 
+GitHub Checks 结论映射:
+
+| release_status | Checks conclusion |
+|----------------|-------------------|
+| `pass` | `success` |
+| `conditional` | `action_required` |
+| `fail` | `failure` |
+| `error` | `failure` |
+
 ## 架构
 
 ```
@@ -78,6 +87,7 @@ sentry_ci.py (编排入口)
 
 workflow 文件 `.github/workflows/skill-eval.yml` 已配置：
 - 变更检测：只对修改了 SKILL.md 的 Skill 触发测评
+- 直接调用 `scripts/sentry_ci.py`,不再通过交互式 LLM prompt + 旧 `ci_eval.py` 汇总
 - Matrix 并行：多个 Skill 变更时并行测评
 - Artifact 上传：测评产物保留 30 天
 - GitHub Checks：结果推送到 PR 的 Checks 面板
