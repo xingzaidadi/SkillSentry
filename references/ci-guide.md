@@ -34,9 +34,11 @@ python scripts/sentry_ci.py --skill my-skill --mode smoke \
 
 | 退出码 | 含义 |
 |--------|------|
-| 0 | PASS（或 DEGRADED，不阻断 CI） |
-| 1 | FAIL（通过率低于阈值） |
+| 0 | PASS |
+| 1 | CONDITIONAL PASS 或 FAIL（需要人工确认或不允许发布） |
 | 2 | ERROR（pipeline 步骤失败、找不到 Skill 等） |
+
+`--github-output` 会写入 `verdict/status/release_status/exit_code/report_html/session_report_html/diagnostic_categories/authoritative_pass_rate/grade`。其中 `status`/`release_status` 取值为 `pass`、`conditional`、`fail` 或 `error`。
 
 ## 架构
 
@@ -62,10 +64,7 @@ sentry_ci.py (编排入口)
 
 ## MCP Skill 降级策略
 
-`skill_type=mcp_based` 的 Skill 在 CI 环境中无法执行（无 MCP Server），自动降级：
-- 只运行 `cases` 步骤（验证用例设计覆盖度）
-- 跳过 executor 和 grader
-- 返回 `DEGRADED` verdict（exit 0，不阻断 CI）
+`skill_type=mcp_based` 的 Skill 在 CI 环境中如果缺少 MCP Server 或 without-skill baseline 条件,必须通过 preflight/diagnostics 记录环境事实。当前正式发布结论只使用 `PASS` / `CONDITIONAL PASS` / `FAIL` / `ERROR`;不再输出历史 `DEGRADED` verdict。
 
 ## 成本估算
 
