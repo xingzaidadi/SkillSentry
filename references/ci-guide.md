@@ -105,6 +105,7 @@ CI 运行后在 `--output-dir` 下生成：
 |------|------|
 | `eval_result.json` | 结构化结果（verdict + summary + reasons + diagnostics,含 preflight 事实） |
 | `summary.md` | GitHub Step Summary 格式的结果摘要,包含 `Execution Diagnostics` |
+| `report.html` | 每次 CI 都生成的稳定 HTML artifact;preflight 失败也会生成 |
 
 Session 目录下额外产物：
 - `evals.json` — 生成的测试用例
@@ -112,4 +113,4 @@ Session 目录下额外产物：
 - `eval-N/with_skill/outputs/transcript.md` — 完整交互记录
 - `eval-N/grading.json` — 断言评审结果
 - `executor_results.json` — 执行器汇总
-- `report.html` — 最小 HTML 兜底报告时包含 `Execution Diagnostics`,用于区分 preflight、用例、runner、grader、sync/publish 环境问题和质量失败
+- `report.html` — session 已创建时的 HTML 报告;pipeline 中途失败也会补最小兜底报告

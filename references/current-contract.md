@@ -59,7 +59,7 @@ v9.0 是契约收敛版,不是功能扩展版。
 - pipeline 查询和下一步判断优先使用 `sentry_pipeline.py` 或复用其定义,不要在 CI、主 `SKILL.md` 和状态脚本中各自维护一套数组。
 - sync/publish 步骤优先使用 `sentry_sync.py`、`sentry_publish.py` 输出稳定 JSON;飞书配置缺失时必须留下结构化 `skipped_no_config` 或本地发布结果。
 - CI 生成或复用 cases 后必须保留可执行性 warning;发现不存在的本地路径、不可访问项目或超出单用例预算的重型用例时,应记录到 `session.json.case_warnings` 并在解释结论时区分“用例不可执行”和“Skill 质量失败”。
-- CI 启动前必须运行 preflight,并把结果写入 `session.json.preflight`;CI JSON、summary Markdown 和最小 HTML 报告必须带 `Execution Diagnostics`,把 `preflight_error`、`runner_unavailable`、`llm_unavailable`、`case_unusable`、`runner_timeout`、`grader_error`、`environment_skipped` 和 `quality_failure` 分开呈现。
+- CI 启动前必须运行 preflight,并把结果写入 `session.json.preflight`;CI 所有结果路径都必须写 `--output-dir/report.html`,有 session 的失败路径也必须补 `session/report.html`;CI JSON、summary Markdown 和最小 HTML 报告必须带 `Execution Diagnostics`,把 `preflight_error`、`runner_unavailable`、`llm_unavailable`、`case_unusable`、`runner_timeout`、`grader_error`、`environment_skipped` 和 `quality_failure` 分开呈现。
 - CI orchestration 必须覆盖 `smoke / quick / regression / standard / full` 全部模式。`regression` 虽不执行 cases 步骤,但进入 executor 前必须已有 `evals.json`,可由 `--cases` 或缓存预置。
 - 脚本输出是事实来源;LLM 可以解释原因和建议,但不能改写核心数值。
 - `sentry-static` 仍是正式静态工具名;不要把代码版静态规则检查重新命名为正式 `sentry-lint`。
