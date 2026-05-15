@@ -135,6 +135,8 @@ bash install.sh
 
 这些脚本是 Tool-as-Code 改造的第一阶段:把确定性状态、门禁逻辑和口径自检交给代码,把用例设计、语义评审、盲测对比和失败归因继续留给 LLM。方案里的 `sentry-score` 在当前实现中统一命名为 `sentry_gate.py`,因为它不只算分,还产出发布门禁 verdict。
 
+`scripts/verify_ci_modes.py` 会模拟 heavy LLM 步骤,并让真实 state/sync/comparator/analyzer/gate/publish 代码跑完 `smoke / quick / regression / standard / full` 五种模式,用于确认不是只支持 smoke。
+
 ---
 
 ## 工作流一览
@@ -207,6 +209,7 @@ SkillSentry/
 │   ├── sentry_contract_lint.py # SkillSentry 当前口径自检
 │   ├── sentry_article_lint.py  # 文章当前口径自检
 │   ├── verify_ci_feasibility.py # CI 用例可执行性 warning 回归
+│   ├── verify_ci_modes.py      # 五种 CI 模式编排回归
 │   ├── validate_step.py       # OpenClaw 步骤校验
 │   ├── verify_proof.py        # CLI 读取证明校验
 │   ├── generate_html_report.py

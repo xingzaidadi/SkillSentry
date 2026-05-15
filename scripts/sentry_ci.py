@@ -206,6 +206,31 @@ def record_case_feasibility(session_dir: Path, cases: list) -> None:
     merge_session(session_dir, {"case_warnings": warnings})
 
 
+def prepare_existing_cases(session_dir: Path, existing_cases: Path | None) -> bool:
+    """Copy reusable evals.json into a session before modes without a cases step."""
+    if not existing_cases:
+        return True
+    existing_cases = Path(existing_cases).expanduser()
+    if not existing_cases.exists():
+        log(f"  ❌ 指定用例不存在: {existing_cases}")
+        return False
+
+    import shutil
+
+    shutil.copy2(existing_cases, session_dir / "evals.json")
+    log(f"  ⚡ 预置已有用例: {existing_cases}")
+    try:
+        cases = json.loads((session_dir / "evals.json").read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        log(f"  ❌ 用例 JSON 解析失败: {exc}")
+        return False
+
+    total = len(cases) if isinstance(cases, list) else 0
+    record_case_feasibility(session_dir, cases)
+    merge_session(session_dir, {"cases": {"total": total, "types": {}, "reused": True}})
+    return True
+
+
 def merge_session(session_dir: Path, data: dict):
     """Merge step data into session.json without advancing last_step."""
     session = sentry_state.load_session(session_dir)
@@ -760,6 +785,10 @@ def main():
         existing_cases = find_existing_cases(skill_name)
         if not existing_cases:
             log("❌ regression 模式需要已有 cases，但未找到缓存")
+            sys.exit(2)
+
+    if existing_cases and "cases" not in pipeline:
+        if not prepare_existing_cases(session_dir, existing_cases):
             sys.exit(2)
 
     # 6. 执行 pipeline
