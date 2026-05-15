@@ -137,6 +137,15 @@ bash install.sh
 
 `scripts/verify_ci_modes.py` 会模拟 heavy LLM 步骤,并让真实 state/sync/comparator/analyzer/gate/publish 代码跑完 `smoke / quick / regression / standard / full` 五种模式,用于确认不是只支持 smoke。
 
+需要真实调用 executor/grader 时,可用内置 fixture 跑一次 regression:
+
+```bash
+set SKILLSENTRY_CI_LLM_FALLBACK=claude
+python scripts/sentry_ci.py --skill tests/fixtures/ci_modes/fixture-skill/SKILL.md --mode regression --cases tests/fixtures/ci_modes/evals.json --model sonnet --executor-model sonnet --timeout-per-eval 90
+```
+
+这条命令会调用 Claude CLI,所以不放进默认确定性回归。
+
 ---
 
 ## 工作流一览

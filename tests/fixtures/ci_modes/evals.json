@@ -1,0 +1,16 @@
+[
+  {
+    "id": "eval-1",
+    "type": "happy_path",
+    "name": "fixture ping",
+    "prompt": "fixture ping",
+    "assertions": [
+      {
+        "name": "returns OK",
+        "type": "exact_match",
+        "expected": "OK",
+        "rule_ref": "fixture"
+      }
+    ]
+  }
+]
