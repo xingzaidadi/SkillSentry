@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SkillSentry → GitHub Checks API 桥接器
-把 ci_eval.py 输出的 eval_result.json 推送到 GitHub Checks
+SkillSentry → GitHub Checks API bridge.
+Push sentry_ci.py eval_result.json output to GitHub Checks.
 
 用法：
   python report_to_checks.py \
@@ -40,25 +40,66 @@ def load_result(path: str) -> dict:
         return json.load(f)
 
 
+def first_present(*values):
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def format_rate(value) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:.1%}"
+    return "N/A"
+
+
+def format_delta(delta) -> str:
+    if isinstance(delta, dict):
+        value = delta.get("value")
+        status = delta.get("status", "N/A")
+        if isinstance(value, (int, float)):
+            return f"{status} ({value:+.1%})"
+        return str(status)
+    if isinstance(delta, (int, float)):
+        return f"{delta:+.1%}"
+    return "N/A"
+
+
+def check_conclusion(status: str, verdict: str) -> str:
+    normalized_status = (status or "").lower()
+    normalized_verdict = (verdict or "").upper()
+    if normalized_status == "pass" or normalized_verdict == "PASS":
+        return "success"
+    if normalized_status == "conditional" or normalized_verdict == "CONDITIONAL PASS":
+        return "action_required"
+    return "failure"
+
+
 def build_check_payload(result: dict, check_name: str, sha: str) -> dict:
-    verdict = result["verdict"]
-    summary = result["summary"]
+    verdict = result.get("verdict", "ERROR")
+    status = result.get("status") or result.get("release_status") or "error"
+    exit_code = result.get("exit_code")
+    summary = result.get("summary", {})
+    diagnostics = result.get("diagnostics", {})
+    artifacts = result.get("artifacts", {})
     reasons = result.get("reasons", [])
-    skill = result["skill"]
-    mode = result["mode"]
+    skill = result.get("skill", "unknown")
+    mode = result.get("mode", "unknown")
 
-    exact_rate = summary.get("exact_pass_rate")
-    delta = summary.get("avg_delta")
+    rate = first_present(summary.get("authoritative_pass_rate"), summary.get("exact_pass_rate"))
+    delta = first_present(summary.get("delta"), summary.get("avg_delta"))
+    grade = summary.get("grade", "N/A")
+    categories = diagnostics.get("categories", []) if isinstance(diagnostics, dict) else []
+    notes = diagnostics.get("notes", []) if isinstance(diagnostics, dict) else []
+    report_html = artifacts.get("output_report_html") or artifacts.get("session_report_html") or "N/A"
 
-    # GitHub Checks conclusion
-    conclusion = "success" if verdict == "PASS" else "failure"
+    conclusion = check_conclusion(status, verdict)
 
-    # 标题行
-    rate_str = f"{exact_rate:.1%}" if exact_rate is not None else "N/A"
-    delta_str = f"{delta:+.1%}" if delta is not None else "N/A"
-    title = f"SkillSentry [{mode}] — {verdict} (精确通过率 {rate_str}, Δ {delta_str})"
+    rate_str = format_rate(rate)
+    delta_str = format_delta(delta)
+    category_str = ", ".join(str(item) for item in categories) if categories else "none"
+    title = f"SkillSentry [{mode}] — {verdict} ({status}, {rate_str})"
 
-    # 正文（Markdown）
     lines = [
         f"## SkillSentry 测评结果",
         f"",
@@ -66,11 +107,15 @@ def build_check_payload(result: dict, check_name: str, sha: str) -> dict:
         f"|------|-----|",
         f"| Skill | `{skill}` |",
         f"| Mode | `{mode}` |",
-        f"| Eval 数 | {summary.get('eval_count', 0)} |",
-        f"| 精确通过率 | **{rate_str}** |",
+        f"| Status | `{status}` |",
+        f"| Exit code | `{exit_code}` |",
+        f"| Grade | `{grade}` |",
+        f"| Authoritative pass rate | **{rate_str}** |",
         f"| 增益 Δ | {delta_str} |",
         f"| 阈值 | {result.get('threshold', 0.8):.1%} |",
         f"| 判决 | **{verdict}** |",
+        f"| Diagnostics | `{category_str}` |",
+        f"| Report | `{report_html}` |",
         f"",
     ]
 
@@ -80,12 +125,26 @@ def build_check_payload(result: dict, check_name: str, sha: str) -> dict:
             lines.append(f"- {r}")
         lines.append("")
 
-    failed_evals = summary.get("failed_evals", [])
-    if failed_evals:
-        lines.append("### 未通过用例")
-        for e in failed_evals:
-            lines.append(f"- `{e}`")
+    if notes:
+        lines.append("### 诊断说明")
+        for note in notes:
+            lines.append(f"- {note}")
         lines.append("")
+
+    if isinstance(diagnostics, dict):
+        executor = diagnostics.get("executor", {})
+        if isinstance(executor, dict) and executor:
+            lines.extend(
+                [
+                    "### Executor",
+                    "",
+                    f"- total: {executor.get('total', 0)}",
+                    f"- success: {executor.get('success', 0)}",
+                    f"- failed: {executor.get('failed', 0)}",
+                    f"- timeouts: {executor.get('timeouts', 0)}",
+                    "",
+                ]
+            )
 
     lines.append(f"*由 [SkillSentry](https://github.com/xingzaidadi/SkillSentry) 自动生成 · {result.get('evaluated_at', '')}*")
 
