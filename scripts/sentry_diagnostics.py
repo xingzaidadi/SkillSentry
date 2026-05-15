@@ -149,6 +149,33 @@ def collect_publish(session_dir: Path, session: dict) -> dict:
     }
 
 
+def collect_preflight(session: dict) -> dict:
+    preflight = _as_dict(session.get("preflight"))
+    tools = _as_dict(preflight.get("runtime_tools"))
+    claude_cli = _as_dict(tools.get("claude_cli"))
+    anthropic_sdk = _as_dict(tools.get("anthropic_sdk"))
+    anthropic_api_key = _as_dict(tools.get("anthropic_api_key"))
+    fallback = _as_dict(tools.get("llm_fallback"))
+    cache = _as_dict(preflight.get("cases_cache"))
+    config = _as_dict(preflight.get("config"))
+    return {
+        "status": preflight.get("status"),
+        "skill_path": preflight.get("skill_path"),
+        "skill_type": preflight.get("skill_type"),
+        "skill_hash_short": preflight.get("skill_hash_short"),
+        "runtime": preflight.get("runtime"),
+        "cached_cases": cache.get("has_cached_cases"),
+        "cache_hash_matched": cache.get("hash_matched"),
+        "feishu_configured": config.get("feishu_configured"),
+        "claude_cli_available": claude_cli.get("available"),
+        "claude_cli_path": claude_cli.get("path"),
+        "anthropic_sdk_available": anthropic_sdk.get("available"),
+        "anthropic_api_key_configured": anthropic_api_key.get("configured"),
+        "llm_fallback": fallback.get("mode"),
+        "error": preflight.get("error"),
+    }
+
+
 def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> dict:
     session_path = Path(session_dir)
     session = _as_dict(load_json(session_path / "session.json"))
@@ -159,10 +186,32 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
     grader_errors = collect_grader_errors(session_path)
     sync = collect_sync(session)
     publish = collect_publish(session_path, session)
+    preflight = collect_preflight(session)
     delta = _as_dict(gate_data.get("delta"))
 
     categories = []
     notes = []
+
+    if preflight.get("status") and preflight.get("status") != "OK":
+        categories.append("preflight_error")
+        notes.append(f"Preflight failed: {preflight.get('error') or preflight.get('status')}.")
+
+    if preflight.get("status") == "OK":
+        if preflight.get("claude_cli_available") is False:
+            categories.append("runner_unavailable")
+            notes.append("Claude CLI was not found during preflight; executor steps cannot run in real CI.")
+        if (
+            preflight.get("anthropic_sdk_available") is False
+            and preflight.get("llm_fallback") != "claude"
+        ):
+            categories.append("llm_unavailable")
+            notes.append("Anthropic SDK is unavailable and Claude CLI fallback is not enabled.")
+        elif (
+            preflight.get("anthropic_api_key_configured") is False
+            and preflight.get("llm_fallback") != "claude"
+        ):
+            categories.append("llm_unavailable")
+            notes.append("ANTHROPIC_API_KEY is not configured and Claude CLI fallback is not enabled.")
 
     if case_warnings:
         categories.append("case_unusable")
@@ -196,7 +245,15 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
     verdict = gate_data.get("verdict")
     rate = gate_data.get("authoritative_pass_rate")
     counts = _as_dict(gate_data.get("counts"))
-    technical_blockers = {"case_unusable", "runner_timeout", "runner_error", "grader_error"}
+    technical_blockers = {
+        "preflight_error",
+        "runner_unavailable",
+        "llm_unavailable",
+        "case_unusable",
+        "runner_timeout",
+        "runner_error",
+        "grader_error",
+    }
     if (
         verdict == "FAIL"
         and rate is not None
@@ -212,6 +269,7 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
     return {
         "case_warnings_count": len(case_warnings),
         "case_warnings": case_warnings[:10],
+        "preflight": preflight,
         "executor": executor,
         "grader_errors": grader_errors,
         "sync": sync,
@@ -227,6 +285,7 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
 
 
 def render_markdown(diagnostics: dict) -> str:
+    preflight = _as_dict(diagnostics.get("preflight"))
     executor = _as_dict(diagnostics.get("executor"))
     sync = _as_dict(diagnostics.get("sync"))
     delta = _as_dict(diagnostics.get("delta"))
@@ -237,6 +296,12 @@ def render_markdown(diagnostics: dict) -> str:
         "| Item | Value |",
         "|------|-------|",
         f"| Categories | {', '.join(diagnostics.get('categories') or ['none'])} |",
+        (
+            "| Preflight | "
+            f"{preflight.get('status') or 'N/A'}, "
+            f"type={preflight.get('skill_type') or 'N/A'}, "
+            f"claude_cli={preflight.get('claude_cli_available') if preflight else 'N/A'} |"
+        ),
         f"| Case warnings | {diagnostics.get('case_warnings_count', 0)} |",
         (
             "| Executor | "
@@ -261,6 +326,7 @@ def render_markdown(diagnostics: dict) -> str:
 
 
 def render_html_section(diagnostics: dict) -> str:
+    preflight = _as_dict(diagnostics.get("preflight"))
     executor = _as_dict(diagnostics.get("executor"))
     sync = _as_dict(diagnostics.get("sync"))
     delta = _as_dict(diagnostics.get("delta"))
@@ -284,6 +350,7 @@ def render_html_section(diagnostics: dict) -> str:
   <h2>Execution Diagnostics</h2>
   <table>
     <tr><th>Categories</th><td>{html.escape(categories)}</td></tr>
+    <tr><th>Preflight</th><td>{html.escape(str(preflight.get("status") or "N/A"))}, type={html.escape(str(preflight.get("skill_type") or "N/A"))}, claude_cli={html.escape(str(preflight.get("claude_cli_available") if preflight else "N/A"))}</td></tr>
     <tr><th>Case warnings</th><td>{diagnostics.get("case_warnings_count", 0)}</td></tr>
     <tr><th>Executor</th><td>{executor.get("success", 0)}/{executor.get("total", 0)} success, {executor.get("failed", 0)} failed, {executor.get("timeouts", 0)} timeout(s)</td></tr>
     <tr><th>Sync</th><td>pull={html.escape(str(sync.get("pull") or "N/A"))}, push_cases={html.escape(str(sync.get("push_cases") or "N/A"))}, push_results={html.escape(str(sync.get("push_results") or "N/A"))}</td></tr>

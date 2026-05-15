@@ -123,7 +123,7 @@ bash install.sh
 
 | 脚本 | 职责 |
 |------|------|
-| `scripts/sentry_preflight.py` | 定位被测 Skill、计算 hash、识别 skill_type、检查 config 和 cases 缓存。 |
+| `scripts/sentry_preflight.py` | 定位被测 Skill、计算 hash、识别 skill_type、检查 config、cases 缓存和 Claude/SDK 运行时可用性。 |
 | `scripts/sentry_pipeline.py` | 输出当前稳定口径 pipeline、下一步、步骤类型、工具和 required artifacts。 |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence。 |
 | `scripts/sentry_gate.py` | 原方案 `sentry-score` 的当前落地形态;聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict。 |
@@ -138,7 +138,7 @@ bash install.sh
 
 `scripts/verify_ci_modes.py` 会模拟 heavy LLM 步骤,并让真实 state/sync/comparator/analyzer/gate/publish 代码跑完 `smoke / quick / regression / standard / full` 五种模式,用于确认不是只支持 smoke。
 
-`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。
+`scripts/verify_ci_preflight.py` 会验证 CI 启动前的环境事实被写入 session 和 diagnostics。`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。
 
 需要真实调用 executor/grader 时,可用内置 fixture 跑一次 regression:
 
@@ -178,7 +178,7 @@ python scripts/sentry_ci.py --skill tests/fixtures/ci_modes/fixture-skill/SKILL.
 
 ## 报告怎么看
 
-CI 报告现在包含 `Execution Diagnostics` 区块,用于区分用例不可执行、runner 超时/错误、grader 错误、`skipped_no_config` 这类环境降级,以及真正的 Skill 质量失败。
+CI 报告现在包含 `Execution Diagnostics` 区块,用于区分 preflight 环境问题、用例不可执行、runner 超时/错误、grader 错误、`skipped_no_config` 这类环境降级,以及真正的 Skill 质量失败。
 
 | 等级 | 精确通过率 | 含义 |
 |------|----------|------|
@@ -223,6 +223,7 @@ SkillSentry/
 │   ├── sentry_publish.py       # publish 步骤稳定 JSON wrapper
 │   ├── sentry_contract_lint.py # SkillSentry 当前口径自检
 │   ├── sentry_article_lint.py  # 文章当前口径自检
+│   ├── verify_ci_preflight.py  # CI 预检证据回归
 │   ├── verify_ci_feasibility.py # CI 用例可执行性 warning 回归
 │   ├── verify_ci_modes.py      # 五种 CI 模式编排回归
 │   ├── verify_ci_diagnostics.py # CI 诊断输出回归

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -137,13 +139,54 @@ def config_status(config_path: Path) -> dict:
             "error": f"invalid_json: {exc}",
         }
 
-    keys = ("app_id", "app_secret", "app_token", "table_id")
-    configured = all(bool(str(data.get(k, "")).strip()) for k in keys)
+    feishu = data.get("feishu") if isinstance(data, dict) else None
+    bitable = data.get("bitable") if isinstance(data, dict) else None
+    if isinstance(feishu, dict):
+        keys = ("app_id", "app_secret", "app_token")
+        configured = all(bool(str(feishu.get(k, "")).strip()) for k in keys)
+        schema = "feishu"
+    elif isinstance(bitable, dict):
+        configured = bool(str(bitable.get("app_token", "")).strip())
+        schema = "bitable"
+    else:
+        keys = ("app_id", "app_secret", "app_token", "table_id")
+        configured = all(bool(str(data.get(k, "")).strip()) for k in keys)
+        schema = "legacy_flat"
+    tables = {}
+    if isinstance(data.get("tables"), dict):
+        tables = data["tables"]
+    elif isinstance(feishu, dict) and isinstance(feishu.get("tables"), dict):
+        tables = feishu["tables"]
+    elif isinstance(bitable, dict) and isinstance(bitable.get("tables"), dict):
+        tables = bitable["tables"]
+
     return {
         "exists": True,
         "feishu_configured": configured,
         "path": str(config_path),
-        "tables": sorted(data.get("tables", {}).keys()) if isinstance(data.get("tables"), dict) else [],
+        "schema": schema,
+        "tables": sorted(tables.keys()),
+    }
+
+
+def runtime_tools_status() -> dict:
+    claude_cmd = shutil.which("claude.cmd") or shutil.which("claude")
+    fallback = os.environ.get("SKILLSENTRY_CI_LLM_FALLBACK", "").lower()
+    return {
+        "claude_cli": {
+            "available": bool(claude_cmd),
+            "path": claude_cmd,
+        },
+        "anthropic_sdk": {
+            "available": importlib.util.find_spec("anthropic") is not None,
+        },
+        "anthropic_api_key": {
+            "configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        },
+        "llm_fallback": {
+            "mode": fallback or None,
+            "claude_enabled": fallback == "claude",
+        },
     }
 
 
@@ -222,6 +265,7 @@ def build_result(args: argparse.Namespace) -> tuple[int, dict]:
         "mcp_servers": detect_mcp_servers(content),
         "config": config_status(Path(args.config).expanduser()),
         "cases_cache": cache_status(skill_path.parent.name, skill_hash),
+        "runtime_tools": runtime_tools_status(),
     }
 
 
@@ -235,6 +279,7 @@ def print_text(result: dict) -> None:
     print(f"hash: {result['skill_hash_short']}")
     print(f"cached_cases: {result['cases_cache']['has_cached_cases']}")
     print(f"feishu_configured: {result['config']['feishu_configured']}")
+    print(f"claude_cli: {result['runtime_tools']['claude_cli']['available']}")
 
 
 def main() -> int:

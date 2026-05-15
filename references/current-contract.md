@@ -42,7 +42,7 @@ v9.0 是契约收敛版,不是功能扩展版。
 
 | 脚本 | 当前职责 | 不做什么 |
 |------|----------|----------|
-| `scripts/sentry_preflight.py` | 定位 Skill、读取 frontmatter、计算 hash、识别 skill_type、检查 config 和 cases 缓存 | 不生成用例、不做评分 |
+| `scripts/sentry_preflight.py` | 定位 Skill、读取 frontmatter、计算 hash、识别 skill_type、检查 config、cases 缓存和 Claude/SDK 运行时可用性 | 不生成用例、不做评分 |
 | `scripts/sentry_pipeline.py` | 输出当前稳定口径 pipeline、下一步、步骤类型、工具和 required artifacts | 不执行步骤、不生成产物 |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,记录 milestone evidence | 不跳过 auto-exempt 用户确认 |
 | `scripts/sentry_gate.py` | 原方案 `sentry-score` 的当前落地形态;聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | 不改写 grading 原始证据;不把门禁判断拆回 LLM 心算 |
@@ -59,7 +59,7 @@ v9.0 是契约收敛版,不是功能扩展版。
 - pipeline 查询和下一步判断优先使用 `sentry_pipeline.py` 或复用其定义,不要在 CI、主 `SKILL.md` 和状态脚本中各自维护一套数组。
 - sync/publish 步骤优先使用 `sentry_sync.py`、`sentry_publish.py` 输出稳定 JSON;飞书配置缺失时必须留下结构化 `skipped_no_config` 或本地发布结果。
 - CI 生成或复用 cases 后必须保留可执行性 warning;发现不存在的本地路径、不可访问项目或超出单用例预算的重型用例时,应记录到 `session.json.case_warnings` 并在解释结论时区分“用例不可执行”和“Skill 质量失败”。
-- CI JSON、summary Markdown 和最小 HTML 报告必须带 `Execution Diagnostics`,把 `case_unusable`、`runner_timeout`、`grader_error`、`environment_skipped` 和 `quality_failure` 分开呈现。
+- CI 启动前必须运行 preflight,并把结果写入 `session.json.preflight`;CI JSON、summary Markdown 和最小 HTML 报告必须带 `Execution Diagnostics`,把 `preflight_error`、`runner_unavailable`、`llm_unavailable`、`case_unusable`、`runner_timeout`、`grader_error`、`environment_skipped` 和 `quality_failure` 分开呈现。
 - CI orchestration 必须覆盖 `smoke / quick / regression / standard / full` 全部模式。`regression` 虽不执行 cases 步骤,但进入 executor 前必须已有 `evals.json`,可由 `--cases` 或缓存预置。
 - 脚本输出是事实来源;LLM 可以解释原因和建议,但不能改写核心数值。
 - `sentry-static` 仍是正式静态工具名;不要把代码版静态规则检查重新命名为正式 `sentry-lint`。

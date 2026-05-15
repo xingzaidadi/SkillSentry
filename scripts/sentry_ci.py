@@ -30,6 +30,7 @@ SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import sentry_state
+import sentry_preflight
 from sentry_diagnostics import collect_diagnostics, render_html_section, render_markdown
 from sentry_gate import build_gate
 from sentry_pipeline import PIPELINES, pipeline_for_mode, step_definition
@@ -64,6 +65,8 @@ def parse_args():
     parser.add_argument("--model", default="claude-sonnet-4-6", help="LLM model（SDK 调用用）")
     parser.add_argument("--executor-model", default=None, help="executor 使用的 claude CLI model（默认同 --model）")
     parser.add_argument("--timeout", type=int, default=1800, help="总超时秒数（默认 30 分钟）")
+    parser.add_argument("--runtime", choices=["auto", "cli", "openclaw"], default="auto", help="运行环境预检模式")
+    parser.add_argument("--config", default=str(sentry_preflight.DEFAULT_CONFIG), help="飞书/同步配置 JSON 路径")
     parser.add_argument(
         "--timeout-per-eval",
         type=int,
@@ -124,7 +127,18 @@ def compute_skill_hash(skill_md_path: Path) -> str:
     return hashlib.md5(content).hexdigest()
 
 
-def init_session(skill_name: str, skill_hash: str, skill_type: str, mode: str) -> Path:
+def run_preflight(args) -> tuple[int, dict]:
+    preflight_args = argparse.Namespace(
+        skill=args.skill,
+        mode=args.mode,
+        runtime=args.runtime,
+        config=args.config,
+        format="json",
+    )
+    return sentry_preflight.build_result(preflight_args)
+
+
+def init_session(skill_name: str, skill_hash: str, skill_type: str, mode: str, preflight: dict | None = None) -> Path:
     """创建 session 目录和初始 session.json"""
     base = Path.home() / ".claude" / "skills" / "SkillSentry" / "sessions" / skill_name
     base.mkdir(parents=True, exist_ok=True)
@@ -147,6 +161,7 @@ def init_session(skill_name: str, skill_hash: str, skill_type: str, mode: str) -
         "skill_type": skill_type,
         "skill_hash": skill_hash,
         "runtime": "ci",
+        "preflight": preflight or {},
         "mcp_backend": "unavailable",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -260,11 +275,11 @@ def run_step(step: str, session_dir: Path, skill_path: Path, args, **kwargs) -> 
         elif step == "cases":
             success = run_cases(session_dir, skill_path, args, **kwargs)
         elif step == "sync-pull":
-            success = run_sync_step(session_dir, "pull")
+            success = run_sync_step(session_dir, "pull", config=getattr(args, "config", None))
         elif step == "sync-push-cases":
-            success = run_sync_step(session_dir, "push_cases")
+            success = run_sync_step(session_dir, "push_cases", config=getattr(args, "config", None))
         elif step == "sync-push-results":
-            success = run_sync_step(session_dir, "push_results")
+            success = run_sync_step(session_dir, "push_results", config=getattr(args, "config", None))
         elif step == "executor-with":
             success = run_executor_with(session_dir, skill_path, args)
         elif step == "executor-without":
@@ -424,7 +439,7 @@ SKILL.md 内容：
     return False
 
 
-def run_sync_step(session_dir: Path, sync_key: str) -> bool:
+def run_sync_step(session_dir: Path, sync_key: str, config: str | None = None) -> bool:
     """Run the stable sync wrapper; skipped_no_config is a valid CI outcome."""
     from sentry_sync import execute_sync_step
 
@@ -433,7 +448,7 @@ def run_sync_step(session_dir: Path, sync_key: str) -> bool:
         "push_cases": "sync-push-cases",
         "push_results": "sync-push-results",
     }
-    payload = execute_sync_step(step_by_key[sync_key], session_dir=session_dir)
+    payload = execute_sync_step(step_by_key[sync_key], session_dir=session_dir, config=config)
     log(f"  ⏭️ sync.{sync_key}: {payload['status']}")
     return payload["status"] != "ERROR"
 
@@ -766,23 +781,39 @@ def main():
 
     log(f"SkillSentry CI current-contract — mode={args.mode}, threshold={args.threshold:.0%}")
 
-    # 1. 定位 Skill
-    skill_path = find_skill(args.skill)
-    if not skill_path:
-        log(f"❌ 找不到 Skill: {args.skill}")
+    # 1. 预检并定位 Skill
+    preflight_code, preflight = run_preflight(args)
+    if preflight_code != 0:
+        log(f"❌ preflight 失败: {preflight.get('error', 'unknown')}")
+        results = {
+            "verdict": "ERROR",
+            "reasons": [f"Preflight failed: {preflight.get('error', 'unknown')}"],
+            "summary": {},
+            "diagnostics": {
+                "preflight": preflight,
+                "categories": ["preflight_error"],
+                "notes": [f"Preflight failed before session creation: {preflight.get('error', 'unknown')}."],
+            },
+        }
+        write_ci_output(Path(args.output_dir), results, args)
         sys.exit(2)
+    skill_path = Path(preflight["skill_path"])
     log(f"📂 Skill: {skill_path}")
 
-    skill_name = skill_path.parent.name
+    skill_name = preflight.get("skill_dir_name") or skill_path.parent.name
     skill_content = skill_path.read_text(encoding="utf-8")
 
-    # 2. 检测 skill_type
-    skill_type = detect_skill_type(skill_content)
-    skill_hash = compute_skill_hash(skill_path)
+    # 2. 使用 preflight 的确定性识别结果
+    skill_type = preflight["skill_type"]
+    skill_hash = preflight["skill_hash"]
     log(f"📋 Type: {skill_type} | Hash: {skill_hash[:8]}")
+    tools = preflight.get("runtime_tools", {})
+    claude_cli = tools.get("claude_cli", {}) if isinstance(tools, dict) else {}
+    if claude_cli.get("available") is False:
+        log("  ⚠️ preflight: claude CLI not found; real executor steps will fail unless the environment is fixed")
 
     # 3. 初始化 session
-    session_dir = init_session(skill_name, skill_hash, skill_type, args.mode)
+    session_dir = init_session(skill_name, skill_hash, skill_type, args.mode, preflight)
     log(f"📁 Session: {session_dir}")
 
     # 4. 确定 pipeline
@@ -850,6 +881,7 @@ def main():
             "verdict": "ERROR",
             "reasons": [f"Pipeline 步骤失败: {', '.join(failed_steps)}"],
             "summary": {},
+            "diagnostics": collect_diagnostics(session_dir),
         }
 
     # 8. 输出
