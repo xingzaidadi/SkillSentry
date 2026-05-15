@@ -128,6 +128,7 @@ bash install.sh
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence。 |
 | `scripts/sentry_gate.py` | 原方案 `sentry-score` 的当前落地形态;聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict。 |
 | `scripts/sentry_ci.py` | CI 编排入口;用 `--timeout-per-eval` 控制单用例 executor 超时,并在 `session.json.case_warnings` 记录不可执行用例风险。 |
+| `scripts/sentry_diagnostics.py` | 聚合 CI 诊断:用例可执行性、executor 失败/超时、grader 错误、sync 降级、Delta 状态和 publish 状态。 |
 | `scripts/sentry_sync.py` | 包装 `sync_cases.py`,为 `sync-pull`/`sync-push-*` 输出稳定 JSON,无配置时显式 `skipped_no_config`。 |
 | `scripts/sentry_publish.py` | 包装发布步骤,生成本地 `publish-result.json`/报告兜底,保留 `publish.py` 交互发布入口。 |
 | `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体是否混入旧工具名、旧指标或旧 pipeline 口径。 |
@@ -136,6 +137,8 @@ bash install.sh
 这些脚本是 Tool-as-Code 改造的第一阶段:把确定性状态、门禁逻辑和口径自检交给代码,把用例设计、语义评审、盲测对比和失败归因继续留给 LLM。方案里的 `sentry-score` 在当前实现中统一命名为 `sentry_gate.py`,因为它不只算分,还产出发布门禁 verdict。
 
 `scripts/verify_ci_modes.py` 会模拟 heavy LLM 步骤,并让真实 state/sync/comparator/analyzer/gate/publish 代码跑完 `smoke / quick / regression / standard / full` 五种模式,用于确认不是只支持 smoke。
+
+`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。
 
 需要真实调用 executor/grader 时,可用内置 fixture 跑一次 regression:
 
@@ -175,6 +178,8 @@ python scripts/sentry_ci.py --skill tests/fixtures/ci_modes/fixture-skill/SKILL.
 
 ## 报告怎么看
 
+CI 报告现在包含 `Execution Diagnostics` 区块,用于区分用例不可执行、runner 超时/错误、grader 错误、`skipped_no_config` 这类环境降级,以及真正的 Skill 质量失败。
+
 | 等级 | 精确通过率 | 含义 |
 |------|----------|------|
 | S | ≥ 95% | 可直接发布 |
@@ -213,12 +218,14 @@ SkillSentry/
 │   ├── sentry_pipeline.py      # 当前 pipeline 单一事实来源
 │   ├── sentry_state.py         # session.json 状态管理
 │   ├── sentry_gate.py          # sentry-score + 发布门禁计算
+│   ├── sentry_diagnostics.py   # CI/publish 执行诊断聚合
 │   ├── sentry_sync.py          # sync 步骤稳定 JSON wrapper
 │   ├── sentry_publish.py       # publish 步骤稳定 JSON wrapper
 │   ├── sentry_contract_lint.py # SkillSentry 当前口径自检
 │   ├── sentry_article_lint.py  # 文章当前口径自检
 │   ├── verify_ci_feasibility.py # CI 用例可执行性 warning 回归
 │   ├── verify_ci_modes.py      # 五种 CI 模式编排回归
+│   ├── verify_ci_diagnostics.py # CI 诊断输出回归
 │   ├── validate_step.py       # OpenClaw 步骤校验
 │   ├── verify_proof.py        # CLI 读取证明校验
 │   ├── generate_html_report.py
