@@ -9,6 +9,8 @@ SkillSentry CI Grader — 用 Anthropic SDK 直调 LLM 做断言评审
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -19,16 +21,64 @@ except ImportError:
     anthropic = None
 
 
+def _claude_fallback_enabled() -> bool:
+    return os.environ.get("SKILLSENTRY_CI_LLM_FALLBACK", "").lower() == "claude"
+
+
+def _call_claude_cli(prompt: str, model: str = "sonnet", max_tokens: int = 4000) -> str | None:
+    """Optional local fallback for CI smoke validation when SDK calls are unavailable."""
+    if not _claude_fallback_enabled():
+        return None
+    claude_cmd = shutil.which("claude.cmd") or shutil.which("claude")
+    if not claude_cmd:
+        print("  ❌ SKILLSENTRY_CI_LLM_FALLBACK=claude but claude CLI was not found", file=sys.stderr)
+        return None
+
+    cli_model = os.environ.get("SKILLSENTRY_CI_CLAUDE_MODEL", model or "sonnet")
+    if cli_model == "claude-sonnet-4-6":
+        cli_model = "sonnet"
+
+    cmd = [
+        claude_cmd,
+        "--output-format",
+        "text",
+        "-p",
+        "--model",
+        cli_model,
+        "--max-budget-usd",
+        os.environ.get("SKILLSENTRY_CI_CLAUDE_MAX_BUDGET_USD", "1"),
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=int(os.environ.get("SKILLSENTRY_CI_CLAUDE_TIMEOUT", "300")),
+        )
+    except Exception as exc:
+        print(f"  ❌ claude CLI fallback failed before completion: {exc}", file=sys.stderr)
+        return None
+
+    if proc.returncode != 0:
+        err = proc.stderr.strip() or proc.stdout.strip()
+        print(f"  ❌ claude CLI fallback failed: {err[:500]}", file=sys.stderr)
+        return None
+    return proc.stdout.strip()
+
+
 def call_llm(prompt: str, model: str = "claude-sonnet-4-6", max_tokens: int = 4000) -> str | None:
     """通用 LLM 调用（Anthropic SDK），供 sentry_ci.py 的 check/cases 步骤复用"""
     if anthropic is None:
         print("  ❌ anthropic SDK 未安装，请 pip install anthropic", file=sys.stderr)
-        return None
+        return _call_claude_cli(prompt, model=model, max_tokens=max_tokens)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         print("  ❌ ANTHROPIC_API_KEY 环境变量未设置", file=sys.stderr)
-        return None
+        return _call_claude_cli(prompt, model=model, max_tokens=max_tokens)
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -40,7 +90,7 @@ def call_llm(prompt: str, model: str = "claude-sonnet-4-6", max_tokens: int = 40
         return response.content[0].text
     except Exception as e:
         print(f"  ❌ LLM 调用失败: {e}", file=sys.stderr)
-        return None
+        return _call_claude_cli(prompt, model=model, max_tokens=max_tokens)
 
 
 def build_grading_prompt(eval_config: dict, transcript: str, response_text: str) -> str:
@@ -93,6 +143,44 @@ def build_grading_prompt(eval_config: dict, transcript: str, response_text: str)
     "total": 总数
   }}
 }}"""
+
+
+def build_failed_grading(eval_config: dict, reason: str) -> dict:
+    """Build a deterministic failing grading result when the grader cannot score."""
+    eval_id = eval_config.get("id", "eval-1")
+    assertions = eval_config.get("assertions", [])
+    exact_total = sum(1 for a in assertions if a.get("type") == "exact_match")
+    sem_total = sum(1 for a in assertions if a.get("type") == "semantic")
+
+    return {
+        "eval_id": eval_id,
+        "runs": {
+            "run-1": {
+                "pass": False,
+                "assertions": [
+                    {
+                        "id": a.get("name", f"A{i+1}"),
+                        "type": a.get("type", "semantic"),
+                        "expect": a.get("expected", ""),
+                        "pass": False,
+                        "evidence": reason,
+                    }
+                    for i, a in enumerate(assertions)
+                ],
+            }
+        },
+        "summary": {
+            "pass": 0,
+            "fail": len(assertions),
+            "total": len(assertions),
+            "precision_breakdown": {
+                "exact_match": {"pass": 0, "total": exact_total},
+                "semantic": {"pass": 0, "total": sem_total},
+            },
+            "authoritative_pass_rate": 0.0,
+            "grader_error": reason,
+        },
+    }
 
 
 def grade_single_eval(
@@ -164,7 +252,7 @@ def grade_single_eval(
     if not result:
         if verbose:
             print(f"  ❌ {eval_id}: LLM 评审调用失败", file=sys.stderr)
-        return None
+        return build_failed_grading(eval_config, "LLM grader call failed")
 
     # 解析 JSON 结果
     try:
@@ -172,7 +260,7 @@ def grade_single_eval(
         if not json_match:
             if verbose:
                 print(f"  ❌ {eval_id}: 评审结果无 JSON", file=sys.stderr)
-            return None
+            return build_failed_grading(eval_config, "LLM grader returned no JSON")
 
         grading_data = json.loads(json_match.group())
         graded_assertions = grading_data.get("assertions", [])
@@ -226,7 +314,7 @@ def grade_single_eval(
     except json.JSONDecodeError as e:
         if verbose:
             print(f"  ❌ {eval_id}: JSON 解析失败: {e}", file=sys.stderr)
-        return None
+        return build_failed_grading(eval_config, f"LLM grader returned invalid JSON: {e}")
 
 
 def grade_all_evals(

@@ -1,4 +1,5 @@
 sessions/
+ci-eval-results/
 inputs/*
 !inputs/manifest.json
 __pycache__/

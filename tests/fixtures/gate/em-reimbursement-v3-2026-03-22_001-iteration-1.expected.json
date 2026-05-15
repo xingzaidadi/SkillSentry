@@ -1,0 +1,8 @@
+{
+  "session_dir": "sessions/em-reimbursement-v3/2026-03-22_001/iteration-1",
+  "verdict": "FAIL",
+  "grade": "D",
+  "authoritative_pass_rate": 0.6774193548387096,
+  "overall_pass_rate": 0.6774193548387096,
+  "delta.status": "N/A"
+}

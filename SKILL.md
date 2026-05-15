@@ -24,7 +24,7 @@ metadata:
 - 正式静态工具叫 `sentry-static`;`sentry-lint` / `sentry-trigger` / `sentry-check` 仅作为兼容命令。
 - 正式发布结论为 `PASS / CONDITIONAL PASS / FAIL`;正式等级为 `S/A/B/C/D/F`;`Pass³` 和 `L0-L5` 仅作为历史/方法论资料。
 - `mcp_based + smoke/quick` 默认跳过 without_skill;`mcp_based + standard/full` 默认保留可比较的 without_skill 侧,无法裸跑的单个 eval 才逐条跳过。
-- 下一阶段确定性内核已提供脚本入口:`scripts/sentry_preflight.py`、`scripts/sentry_state.py`、`scripts/sentry_gate.py`、`scripts/sentry_contract_lint.py`、`scripts/sentry_article_lint.py`。优先用这些脚本处理环境预检、session 状态读写、发布门禁计算和当前口径自检,不要让 LLM 手写 JSON、临场心算评分或凭感觉扫描旧术语。
+- 下一阶段确定性内核已提供脚本入口:`scripts/sentry_preflight.py`、`scripts/sentry_pipeline.py`、`scripts/sentry_state.py`、`scripts/sentry_gate.py`、`scripts/sentry_sync.py`、`scripts/sentry_publish.py`、`scripts/sentry_contract_lint.py`、`scripts/sentry_article_lint.py`。优先用这些脚本处理环境预检、pipeline 查询、session 状态读写、同步/发布包装、发布门禁计算和当前口径自检,不要让 LLM 手写 JSON、临场心算评分或凭感觉扫描旧术语。
 
 更多冲突消解规则见 `references/current-contract.md`。本文件与旧 references 或旧文章冲突时,以本文件和 `references/current-contract.md` 为准。
 
@@ -121,8 +121,11 @@ message(action=send, msg_type="text", message="✅ Step 1 初始化 (Initializat
 | 脚本 | 用途 | 典型命令 |
 |------|------|----------|
 | `scripts/sentry_preflight.py` | 定位被测 Skill、读取 frontmatter、计算 hash、识别 skill_type、检查 config 和 cases 缓存 | `python scripts/sentry_preflight.py --skill <Skill名> --mode quick` |
+| `scripts/sentry_pipeline.py` | 输出当前稳定口径 pipeline、下一步、步骤类型、工具和 required artifacts | `python scripts/sentry_pipeline.py plan --mode quick` |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence | `python scripts/sentry_state.py transition <session_dir> grader-report` |
 | `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | `python scripts/sentry_gate.py <session_dir>` |
+| `scripts/sentry_sync.py` | 为 `sync-pull`/`sync-push-*` 输出稳定 JSON,无飞书配置时显式记录 `skipped_no_config` | `python scripts/sentry_sync.py sync-pull --skill <Skill名> --session-dir <session_dir>` |
+| `scripts/sentry_publish.py` | 为发布步骤输出稳定 JSON,生成本地报告兜底并保留 legacy `publish.py` 入口 | `python scripts/sentry_publish.py --session-dir <session_dir>` |
 | `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体是否混入旧工具名、旧指标、旧 pipeline 口径 | `python scripts/sentry_contract_lint.py --format text` |
 | `scripts/sentry_article_lint.py` | 扫描文章仓库是否把历史术语误写成当前口径 | `python scripts/sentry_article_lint.py --root <文章仓库> --format text` |
 
@@ -155,156 +158,35 @@ message(action=send, msg_type="text", message="✅ Step 1 初始化 (Initializat
 
 ---
 
-## Step 0: 环境预检(每次测评必须执行,全自动)
+## Step 0: 环境预检(每次测评必须执行)
 
-Step 0 包含两个子步骤,全部自动执行,无需用户干预。
+目标:确认当前运行环境会按 Skill 执行纪律调度,不会用旧 memory 或自由发挥污染测评。
 
-### Step 0.1: 环境对齐检查
+执行要点:
+- 读取当前 `SKILL.md` 的 `version:` 和已有 `session.json`。如果测评目标变化,只重置当前 session 临时状态,不删除 memory 或历史记录。
+- 检查 AGENTS.md 是否包含 `Skill 执行纪律`。缺失时追加纪律规则;无写权限时告警但不阻断。
+- Step 0 必须独立输出一条消息:`✅ Step 0 完成 | 环境已对齐 | AGENTS.md 已检查`。
 
-每次触发测评时,自动检查环境状态。不删除任何 memory 文件。
+详细契约见 `references/step-contracts.md` 的 step-0 定义。可代码化预检优先使用:
 
-**检查内容**:
-1. 读取 SKILL.md 的 `version:` 字段
-2. 读取 `session.json`(如有),检查 `skill` 和 `skill_version` 字段
-3. 如果 session.json 中的 `skill` 与当前要测评的 Skill 不同 → 清空 session.json(旧测评的残留数据会干扰新测评)
-4. 如果 `skill_version` 与当前 SKILL.md 版本不同 → 输出版本变更提示
-
-**执行规则**:
-- session.json 为空或不存在 → 输出 `✅ 首次运行,版本 v{version}`
-- skill 一致 + 版本一致 → 跳过,输出 `✅ 环境一致 (v{version})`
-- skill 不一致(上次测 A,这次测 B)→ 清空 session.json,输出 `🔄 检测到测评目标变更 ({old_skill} → {new_skill}),已重置 session`
-- 版本不一致 → 输出 `⚠️ 版本变更: {old} → {new}`
-
-**为什么不删 memory**:memory 中的 session 历史、执行结果、用例数据都是有价值的资产。行为冲突的问题通过「SKILL.md > memory」的优先级规则解决,不需要删除文件。session.json 的清空只影响当前测评的临时状态,不影响历史记录。
-
-### Step 0.2: AGENTS.md 合规检查
-
-确保当前 OpenClaw 实例的 AGENTS.md 包含 Skill 执行纪律规则。缺少此规则会导致 Agent 跳过 Skill 直接执行,测评结果不可信。
-
-**检查内容**:读取 AGENTS.md(优先 `/app/xiaomi/prompts/AGENTS.md`,其次 `~/.openclaw/workspace/AGENTS.md`),搜索是否包含 `Skill 执行纪律` 关键词。
-
-**缺失时自动注入**:
-
-```markdown
-## Skill 执行纪律
-
-当用户消息匹配到任何已安装 Skill 的触发词时:
-1. 你必须先读取该 Skill 的 SKILL.md
-2. 按 SKILL.md 定义的流程执行
-3. 禁止跳过 Skill 直接编排 subagent 或自行执行
-
-判断依据:系统提示词中该 Skill 的 description 包含与用户消息匹配的关键词。
-即使你觉得自己知道怎么做,也必须先读 SKILL.md。
-
-违反此规则 = 严重错误。
+```bash
+python scripts/sentry_preflight.py --skill <Skill名> --mode <mode>
 ```
-
-**执行规则**:
-- 检测到已存在 → 跳过,输出 `✅ AGENTS.md 已含 Skill 执行纪律`
-- 检测到缺失 → 追加到 AGENTS.md 末尾,输出 `⚠️ 已自动注入 Skill 执行纪律到 AGENTS.md`
-- 无写权限 → 告警但不阻断,输出 `⚠️ 无法写入 AGENTS.md,请手动添加 Skill 执行纪律`
-
-**为什么 Step 0 必须在所有其他步骤之前**:如果 Agent 没有 Skill 执行纪律,后续测评中 Agent 可能跳过被测 Skill 的流程,导致测评结果失真(测的是 Agent 自由发挥,不是 Skill 的真实效果)。两个子步骤都通过后,输出 `✅ Step 0 完成 | 环境已对齐 | AGENTS.md 已检查`,继续 Step 1。
 
 ---
 
 ## Step 1:找 Skill + 初始化
 
-**查找优先级**:
-1. 用户提供路径 → 直接使用
-2. 用户只说名字 →
-   - CLI: `~/.claude/skills/<名字>/` → `~/.config/opencode/skills/<名字>/`
-   - OpenClaw: `~/.openclaw/workspace/skills/<名字>/` → `~/.openclaw/skills/<名字>/`
-3. 「测评这个 skill」→ 当前目录下的 SKILL.md
+优先使用 `scripts/sentry_preflight.py` 定位 Skill、计算 hash、识别 `skill_type`、检查 config/cases 缓存。不要在主会话里手写等价探测逻辑。
 
-找不到 → `❌ 找不到 Skill:{name}。已搜索:{paths}。请确认拼写或提供完整路径。`
+查找优先级:
+1. 用户提供路径 → 直接使用。
+2. 用户只说名字 → 按 CLI/OpenClaw 默认 skill 目录查找。
+3. 「测评这个 skill」→ 使用当前目录下的 `SKILL.md`。
 
-**工作路径**:
-```
-CLI:
-  workspace_dir = ~/.claude/data/skill-eval/sessions/<Skill名>/<YYYY-MM-DD>_NNN/
-  inputs_dir    = ~/.claude/skills/skill-eval-测评/inputs/<Skill名>/
-OpenClaw:
-  workspace_dir = ~/.openclaw/data/skill-eval/sessions/<Skill名>/<YYYY-MM-DD>_NNN/
-  inputs_dir    = ~/.openclaw/skills/skill-eval-测评/inputs/<Skill名>/
-```
+初始化必须写入 `session.json`: `skill`、`mode`、`skill_type`、`skill_hash`、`runtime`、`started_at`、`pipeline`、`sync`。
 
-目录不存在 → 自动创建。
-
-**skill_type 检测**:含业务 MCP 工具名(camelCase)→ `mcp_based`;含 bash/python/exec → `code_execution`;其他 → `text_generation`。详见 `references/execution-phases.md`。
-
-**MCP 预检(仅 mcp_based,⛔ auto-exempt)**:
-
-自动探测链,无需用户手动配置:
-
-```
-1. 列出 SKILL.md 中引用的所有 MCP Server
-2. 按顺序探测可用后端:
-   a) openclaw.json mcpServers → mcp_backend = "native"
-   b) mcporter config list     → mcp_backend = "mcporter"
-   c) 均未配置                → mcp_backend = "unavailable"
-3. 结果分级:
-   - 全部可用 → 继续,记录 mcp_backend 到 session.json
-   - 部分可用 → 告知用户哪些缺失,询问是否继续(部分用例将受限)
-   - 全不可用 → ⛔ 阻断,展示缺失列表,提供两个选项:
-     a) 用户配置 MCP 后继续
-     b) 降级为纯静态分析(跳过 executor,只出 static + cases + grader-report 摘要)
-```
-
-mcp_backend 写入 session.json,executor 根据此字段自动选择执行方式:
-- `native`:子 agent 直接调用原生 MCP 工具
-- `mcporter`:通过 `HOME=/root/.openclaw mcporter call <server>.<tool>(params)` 执行
-
-此检查全自动完成。仅当全不可用时才阻断等待用户决策。
-
-**飞书同步配置检查**:
-```
-查找 config.json:workspace_dir 父目录 → inputs_dir 父目录 → skill-eval-测评 根目录
-  → 不存在:询问「是否启用飞书同步?启用可在飞书多维表格中管理用例和查看报告」
-    - 用户说是 → 自动创建 Bitable(用例表 + 运行记录表 + 版本标签表)+ 写入 config.json
-    - 用户说否 → 纯本地模式,所有 PUSH/PULL 标记为 skipped_no_config
-  → 已存在:启用飞书同步
-
-config.json 字段映射(OpenClaw 环境):
-  app_token         = config.bitable.app_token
-  cases_table_id    = config.bitable.tables.cases
-  run_history_table_id = config.bitable.tables.runs
-  versions_table_id = config.bitable.tables.versions
-  注:OpenClaw 环境使用 feishu_bitable_app_table_record 等 工具(内置鉴权),无需 app_id/app_secret
-  CLI 环境使用 REST API 时,需在 config.json 中额外配置 feishu.app_id + feishu.app_secret
-```
-
-写 `session.json`(skill / mode / skill_type / skill_hash / runtime / started_at)。
-
-**MCP 预检(仅 mcp_based,所有模式必须执行)**:
-
-具体工具调用序列:
-```
-1. exec: grep -E "\"[a-z_]+_claw_[a-z]+\"" ~/.openclaw/skills/{skill}/SKILL.md
-   → 提取 SKILL.md 中引用的所有 MCP Server 名
-
-2. exec: HOME=/root/.openclaw mcporter config list 2>/dev/null | grep -E "^[a-z]" | head -10
-   → 获取已配置的 MCP Server 列表
-
-3. 比对:SKILL.md 中引用的 vs mcporter 已配置的 → 标注可用/不可用
-
-4. message(action=send, message="
-   ✅ Step 1 初始化
-   • 被测 Skill:{name}
-   • 类型:{skill_type}
-   • MCP 预检:
-     ✅ {server1} - 可用
-     ✅ {server2} - 可用
-     ❌ {server3} - 不可用
-   • MCP 后端:{mcporter/native/unavailable}
-   • 工作目录:{workspace}
-   ")
-```
-
-结果分级:
-- 全部可用 → 继续
-- 部分可用 → 告知用户哪些缺失,询问是否继续
-- 全不可用 → ⛔ 阻断,提供降级选项
+`mcp_based` 必须做 MCP 预检。全部不可用时属于 `auto-exempt`,必须阻断并让用户选择配置 MCP 或降级;部分不可用时展示缺失项并询问是否继续。飞书配置缺失不阻断,后续 sync 步骤由 `sentry_sync.py` 记录 `skipped_no_config`。
 
 输出:`✅ Step 1 完成 | {skill_name} | {skill_type} | {runtime} | 工作目录已创建`
 
@@ -329,13 +211,14 @@ config.json 字段映射(OpenClaw 环境):
 
 **工作流模式**:
 
-| 模式 | 工具链 | 预计时间 |
-|------|--------|---------|
-| smoke | cases → sync-pull → sync-push-cases → executor-with(×1) → grader-report → sync-push-results → publish | ~10min |
-| quick | static → cases → sync-pull → sync-push-cases → executor-with(×2) → grader-report → sync-push-results → publish | ~20min |
-| regression | sync-pull → executor-with(golden) → grader-report → sync-push-results → publish | ~5min |
-| standard | static → cases → sync-pull → sync-push-cases → executor-with(×3) → executor-without → comparator → grader-report → sync-push-results → gate → publish | ~40min |
-| full | static → cases → sync-pull → sync-push-cases → executor-with(×3) → executor-without → comparator → analyzer → grader-report → sync-push-results → gate → publish | ~50min |
+合法 pipeline 以 `scripts/sentry_pipeline.py` 为单一事实来源,不要在主会话中维护数组副本。
+
+```bash
+python scripts/sentry_pipeline.py plan --mode {mode} --format text
+python scripts/sentry_pipeline.py next --session-dir {session_dir} --format text
+```
+
+预计时间:smoke ~10min, quick ~20min, regression ~5min, standard ~40min, full ~50min。
 
 输出确认(自动模式直接开始):
 ```
@@ -352,74 +235,11 @@ message(action=send, message="
 
 **OpenClaw 无上下文时(用户只说「测评」未指定 Skill)**:必须用飞书 V2 卡片发交互表单,禁止纯文本罗列。
 
-构造方式:
-1. 扫描 `~/.openclaw/skills/` 和 `~/.openclaw/workspace/skills/` 下所有含 SKILL.md 的目录
-2. 排除 sentry-* / skill-eval-测评 自身 / SkillSentry / .bak 目录
-3. 用 `message(action=send, kind=interactive)` 发送飞书 V2 卡片(独立 select_static + markdown):
-
-```json
-{
-  "schema": "2.0",
-  "config": {"update_multi": true},
-  "header": {
-    "title": {"tag": "plain_text", "content": "🧠 SkillSentry v9.0.0 · 测评启动"},
-    "subtitle": {"tag": "plain_text", "content": "AI Skill 质量守门人 · 选完后回复「开始」"},
-    "template": "blue"
-  },
-  "body": {
-    "elements": [
-      {"tag": "markdown", "content": "依次选择 **被测 Skill** → **测评模式** → **执行方式**:"},
-      {
-        "tag": "select_static",
-        "name": "skill_name",
-        "placeholder": {"tag": "plain_text", "content": "1️⃣ 选择被测 Skill"},
-        "options": [
-          {"text": {"tag": "plain_text", "content": "{skill_name} · {描述}"}, "value": "{skill_name}"},
-          "// 动态生成:扫描每个 Skill 的 description,截取精练中文描述"
-        ]
-      },
-      {
-        "tag": "select_static",
-        "name": "eval_mode",
-        "placeholder": {"tag": "plain_text", "content": "2️⃣ 选择测评模式(默认自动推断)"},
-        "options": [
-          {"text": {"tag": "plain_text", "content": "🔥 smoke · 冒烟测试 ~5min"}, "value": "smoke"},
-          {"text": {"tag": "plain_text", "content": "⚡ quick · 快速测评 ~15min"}, "value": "quick"},
-          {"text": {"tag": "plain_text", "content": "📊 standard · 标准测评 ~40min"}, "value": "standard"},
-          {"text": {"tag": "plain_text", "content": "🔬 full · 完整测评 ~50min"}, "value": "full"},
-          {"text": {"tag": "plain_text", "content": "🔄 regression · 回归测试 ~5min"}, "value": "regression"},
-          {"text": {"tag": "plain_text", "content": "🤖 自动推断 · 根据缓存状态选择"}, "value": "auto"}
-        ]
-      },
-      {
-        "tag": "select_static",
-        "name": "exec_mode",
-        "placeholder": {"tag": "plain_text", "content": "3️⃣ 选择执行方式"},
-        "options": [
-          {"text": {"tag": "plain_text", "content": "🚀 自动(全程无需干预)"}, "value": "auto"},
-          {"text": {"tag": "plain_text", "content": "👀 逐步确认(每步等确认)"}, "value": "manual"}
-        ]
-      },
-      {"tag": "markdown", "content": "💡 选完后回复「**开始**」启动测评 · 未在列表中的 Skill 可直接回复名称"}
-    ]
-  }
-}
-```
-
-**Skill 选项生成规则**:
-- 扫描每个 Skill 的 SKILL.md,读取 frontmatter `description` 字段
-- 截取精练中文描述,格式:`"{skill_name} · {描述}"`
-- 无 description 的 Skill 只显示名称
-
-⚠️ **飞书卡片限制**:
-- 禁止使用已废弃的 V1 `action` 容器标签
-- 禁止使用 `form` + `button(form_action_type=submit)`:message tool 发的卡片不走 CardKit,submit 回调会触发飞书 200530 错误
-- `select_static` 作为独立 element 放在 `body.elements` 中(不包 form)
-- 用户通过下拉框浏览选项,回复文字确认
-
-备选方案(卡片发送失败时):用纯 markdown 卡片展示 Skill 列表 + 纯文本引导用户回复选择。
-
-4. 等待用户选择或回复后继续 Step 2 剩余流程
+执行方式:
+- 扫描 `~/.openclaw/skills/` 和 `~/.openclaw/workspace/skills/` 下所有含 SKILL.md 的目录,排除 sentry-* / SkillSentry / .bak。
+- 读取 frontmatter `description`,生成 `{skill_name} · {描述}` 选项。
+- 发送 `message(action=send, kind=interactive)` 飞书 V2 卡片。模板见 `references/card-templates.md`;必须使用独立 `select_static`,禁止 V1 `action`、`form` 和 `button(form_action_type=submit)`。
+- 卡片发送失败时,用 markdown 列表兜底,等待用户选择或回复后继续 Step 2。
 
 ### Checkpoint Resume 检测(Step 2 工作流推断完成后执行)
 
@@ -436,43 +256,9 @@ message(action=send, message="
 
 当用户输入 `继续` / `resume` / `从断点继续` 时,直接触发 resume 逻辑,无需重新跑 Step 0/1/2。
 
-**⛔ Resume 展示铁律(跳过执行 ≠ 跳过展示)**:
+**⛔ Resume 展示铁律(跳过执行 ≠ 跳过展示)**:必须按 pipeline 顺序逐步输出已完成步骤摘要,每步一条独立消息。禁止直接跳到当前步骤、合并多个步骤、只写 "5/12" 而不解释前置步骤结果。缓存命中或跳过时也必须展示摘要;cases 跳过要展示用例清单和断言统计。
 
-Resume 时必须按顺序逐步输出已完成步骤的摘要,每步一条独立消息:
-
-```
-message: "⏭️ static (1/12) [Resume]:L1=4.5 L2=PASS L3=23 L4=轻微 L5=良好 | TP=95% TN=100%"
-message: "⏭️ cases (2/12) [Resume]:32 用例 (HP:10 EC:6 NEG:5 ROB:3 SEC:3 E2E:3 AL:2)"
-message: "⏭️ sync-pull (3/12) [Resume]:skipped_no_config"
-message: "⏭️ sync-push-cases (4/12) [Resume]:skipped_no_config"
-message: "✅ executor-with (5/12) [Resume]:Run-1 32/32 | Run-2 31/32 | Run-3 32/32"
-message: "→ 当前步骤:grader-report (6/11)..."
-```
-
-禁止:
-- 直接跳到当前步骤而不展示前置步骤
-- 合并多个步骤为一条消息
-- 用‌"5/12"这样的数字而不解释前 4 步发生了什么
-
-原因:用户看到 "5/12" 但不知道前 4 步是什么结果 = 黑箱感 = 不信任。Resume 的目的是节省执行时间,不是节省展示时间。
-5. 如果用户指定了 Skill 名但未指定模式,只发模式选择卡片(单问题)
-6. 如果用户同时指定了 Skill 和模式,跳过卡片直接进入推断
-7. **每个步骤必须输出一条独立消息**:
-   - 执行的步骤:输出结果(含关键数据摘要,不能只写"成功")
-   - 跳过的步骤:输出「⏭️ Step X {名称} (Skipped):跳过(原因)」+ 内容摘要
-   - 禁止合并为一条消息,禁止静默跳过任何步骤
-   - sentry-static 跳过时:输出规则数量 + 覆盖率摘要
-   - sentry-cases 跳过时:输出用例清单表格(ID、类型、用例名、断言详情)
-   - 示例:
-     ```
-     ⏭️ sentry-cases:跳过(复用上次用例,hash 匹配)
-
-     | # | 类型 | 用例名 | 断言详情 |
-     |---|------|-------|----------|
-     | E001 | happy_path | 清单查询-预算申请列表 | E1: 调用list工具(exact) E2: 返回含单号(semantic) E3: 未编造(exact) |
-     | E002 | happy_path | 单号详情-BR202503250232 | E1: BR路由到预算系统(exact) E2: 展示审批状态(exact) E3: 结构化输出(semantic) |
-     | ... | ... | ... | ... |
-     ```
+如果用户指定 Skill 但未指定模式,只发模式选择卡片;如果 Skill 和模式都已指定,跳过卡片直接进入推断。
 
 ---
 
@@ -495,15 +281,7 @@ message: "→ 当前步骤:grader-report (6/11)..."
 idle → step-0 → step-1 → step-2 → [pipeline per mode] → publish → idle
 ```
 
-**各模式的合法 pipeline**(按 session.json.pipeline 数组严格执行,不可自行跳步):
-- smoke: `["cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
-- quick: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
-- regression: `["sync-pull", "executor-with", "grader-report", "sync-push-results", "publish"]`
-- standard: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"]`
-- full: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"]`
-
-Step 2 推断完成后写入 session.json.pipeline,Step 3 调度循环严格按数组顺序执行。
-不在当前模式 pipeline 数组中的步骤 = 不存在。
+**各模式的合法 pipeline**:以 `scripts/sentry_pipeline.py` 和 `references/current-contract.md` 为准。Step 2 推断完成后写入 `session.json.pipeline`,Step 3 严格按数组顺序执行;不在当前模式 pipeline 中的步骤视为不存在。
 
 **降级触发条件**:
 - subagent 900s 未完成 → L2(批量快速模式)
@@ -531,7 +309,7 @@ Step 2 推断完成后写入 session.json.pipeline,Step 3 调度循环严格按�
 
 ```
 1. 读 session.json → 取 last_step
-2. 查 pipeline 定义 → 确定 next_step
+2. 调用 sentry_pipeline.py next 或复用其定义 → 确定 next_step
 3. 读取 next_step 对应子工具的 SKILL.md(必须 read,不能凭记忆)
 4. spawn subagent(task = SKILL.md 内容 + session 数据 + 输入文件路径)
 5. 写入 active-pipeline.json(见下方「Pipeline 持久化与自动恢复」)
@@ -544,104 +322,17 @@ Step 2 推断完成后写入 session.json.pipeline,Step 3 调度循环严格按�
 
 ### Pipeline 持久化与自动恢复
 
-**设计目标**:即使主 session 意外终止(LLM 忘记 yield、超时、崩溃),pipeline 也能在下次心跳时自动恢复,不会静默断裂。
+长耗时 subagent(executor、comparator、analyzer、grader-report)必须在 spawn 后、yield 前写入 `~/.openclaw/data/skill-eval/active-pipeline.json`。恢复时从 checkpoint 的 `next_step` 继续,不重跑 Step 0/1/2。subagent 验收通过、publish 完成或用户取消时清理 checkpoint。
 
-#### Checkpoint 文件
+### pipeline 定义与发布
 
-路径:`~/.openclaw/data/skill-eval/active-pipeline.json`
+- 步骤定义、子工具、required artifacts:调用 `python scripts/sentry_pipeline.py describe <step>`。
+- 状态流转:调用 `python scripts/sentry_state.py transition <session_dir> <step>`。
+- sync 步骤:调用 `python scripts/sentry_sync.py <sync-step> --session-dir <session_dir>`;无配置必须记录 `skipped_no_config`。
+- gate:调用 `python scripts/sentry_gate.py <session_dir>`。
+- publish:优先调用 `python scripts/sentry_publish.py --session-dir <session_dir>` 输出 `publish-result.json`;需要交互式飞书上传时再调用 legacy `scripts/publish.py`。
 
-```json
-{
-  "skill": "finance-doc-query-prod",
-  "mode": "standard",
-  "session_dir": "2026-05-07_003",
-  "current_step": "executor-with",
-  "next_step": "grader-report",
-  "pending_subagents": ["executor-run1-all", "executor-run2-all", "executor-run3-all"],
-  "started_at": "2026-05-07T15:03:00+08:00",
-  "timeout_minutes": 60,
-  "workspace_dir": "~/.openclaw/data/skill-eval/sessions/finance-doc-query-prod/2026-05-07_003/"
-}
-```
-
-#### 写入时机(⛔ 必须在 spawn 之后、yield 之前)
-
-每次 spawn 长时间 subagent(executor、comparator、analyzer、grader-report)后,**立即**写入 checkpoint:
-
-```
-spawn subagent → write active-pipeline.json → sessions_yield
-```
-
-⛔ **铁律**:spawn 后不写 checkpoint 就 yield = 违规。spawn 后不 yield 直接 stop = 严重违规(pipeline 必断)。
-
-#### 清理时机
-
-以下任一条件满足时删除 `active-pipeline.json`:
-- subagent 完成 + 验收通过 + session.json.last_step 已更新
-- pipeline 最终步骤(publish)完成
-- 用户手动取消测评
-
-#### 自动恢复(心跳触发)
-
-系统 cron 每 10 分钟发送 `PIPELINE_CHECK` systemEvent 到主 session。收到后执行:
-
-```
-1. exec: cat ~/.openclaw/data/skill-eval/active-pipeline.json 2>/dev/null
-2. 文件不存在 → HEARTBEAT_OK(无活跃 pipeline)
-3. 文件存在 →
-   a. sessions_list 查 pending_subagents 的状态
-   b. 全部 done → 读本 SKILL.md → 从 next_step 继续执行(验收产物 → 展示结果 → 推进 pipeline)
-   c. 仍在运行 + 未超时 → HEARTBEAT_OK(正常等待)
-   d. 超时(started_at + timeout_minutes 已过)→ 通知用户 "⚠️ Pipeline 超时: {skill} 的 {current_step} 已运行超过 {timeout_minutes}min"
-```
-
-#### 恢复后的行为
-
-恢复执行时,主调度器从 checkpoint 的 `next_step` 开始,按正常流程:
-- 读 session.json 确认上下文
-- 验收上一步产物
-- 推进到 next_step
-- 继续正常调度循环
-
-**不需要重跑 Step 0/1/2**,直接从 pipeline 断点续接。
-
-### pipeline 定义(每步的子工具 + 产物清单)
-
-| 步骤 | 子工具 | SKILL.md 路径 | 必须产物 | 调度方式 |
-|------|---------|--------------|---------|----------|
-| static | sentry-static | ./tools/sentry-static/SKILL.md | session.json.lint + trigger_eval.json | subagent |
-| cases | sentry-cases | ./tools/sentry-cases/SKILL.md | evals.json + cases.cache.json | subagent(↩️ auto-exempt 步骤需主会话中转) |
-| executor-with | sentry-executor | ./tools/sentry-executor/SKILL.md | eval-*/run-{1..R}/with_skill/outputs/* | 批次 subagent(runs数: smoke=1, quick=2, standard/full=3) |
-| executor-without | sentry-executor | ./tools/sentry-executor/SKILL.md | eval-*/run-1/without_skill/outputs/* | subagent(standard/full 默认执行;逐 eval 可跳过) |
-| comparator | sentry-comparator | ./tools/sentry-comparator/SKILL.md | comparator-results.json | subagent(standard/full) |
-| analyzer | sentry-analyzer | ./tools/sentry-analyzer/SKILL.md | analyzer-recommendations.json | subagent(full only) |
-| grader-report | sentry-grader | ./tools/sentry-grader/SKILL.md | eval-*/grading.json + grading-summary.json + report.html | 单 subagent |
-| comparator | sentry-comparator | ./tools/sentry-comparator/SKILL.md | comparator-results.json | subagent(standard/full) |
-| analyzer | sentry-analyzer | ./tools/sentry-analyzer/SKILL.md | analyzer-recommendations.json | subagent(full only) |
-| publish | 主调度器直接执行 | - | 飞书文件URL + 所有权转让 + 最终卡片 | 主会话直接执行 |
-
-**executor-without 跳过条件**:mcp_based + smoke/quick → 跳过(N/A);mcp_based + standard/full → 默认保留可比较的 without_skill 侧,无法裸跑的单个 eval 才逐条跳过,Delta 标注为 computed / partial / N/A。
-
-**publish 步骤内容**(主调度器直接执行,不 spawn):
-
-**首选方式:调用 `scripts/publish.py` 一步完成三件套**:
-```bash
-python3 scripts/publish.py \
-  --workspace-dir {iteration_dir} \
-  --skill-name "{skill_name}" \
-  --user-open-id "{user_ou_id}" \
-  --mode {mode} \
-  --risk-level {risk_level} \
-  [--avg-delta {delta}] \
-  [--user-name "{user_name}"]
-```
-脚本输出 JSON 到 stdout,包含 html_path + feishu_upload_instructions + message。
-主调度器根据输出:
-1. 执行 `feishu_drive_file(action=upload, file_path=html_path)` → 获取 file_token
-2. 执行 `feishu_drive_permission(action=transfer_owner, token=file_token, member_id=user_ou_id)` → 转让
-3. 执行 Completion Gate 检查(见 references/output-format.md)→ 确定状态为 COMPLETE/PARTIAL/BLOCKED
-4. 发送最终结果卡片(含 HTML 链接 + 五部分完整格式 + completion_status)
-5. 更新 session.json.last_step = "publish"
+`executor-without` 规则:`mcp_based + smoke/quick` 默认 N/A;`mcp_based + standard/full` 保留可比较 baseline,无法裸跑的单个 eval 才逐条跳过。
 
 ### 主调度器自约束检查清单(每次发消息前必须过)
 
@@ -721,103 +412,18 @@ sentry-cases subagent 的 task 中必须注入 `mode` 参数,子工具根据 mod
 - grader-report 结果卡片必须包含 per-assertion 详情(smoke/quick 全量,standard/full 只展示 failed)
 - 缓存命中时必须展示内容摘要,禁止只写"缓存命中,跳过"
 - **进度摘要**:每完成一个 pipeline 步骤后,在消息末尾附加进度条:`[██████░░░░] 3/5 steps`(用 █ 和 ░ 字符模拟)
-
-**步骤启动通知（强制）**:每个 pipeline 步骤 spawn subagent 后，必须立即发一条「正在执行」通知，包含该步骤的具体检查项说明。格式：
-
-```
-🔍 Step {N}/{total}: {step_name} {step_zh_name} · 执行中
-
-正在做的事情：
-• **{check_item_1}** — {description_1}
-• **{check_item_2}** — {description_2}
-• ...
-
-完成后自动进入下一步 → {next_step_name}
-[██░░░░░░░░] {N}/{total} steps
-```
-
-各步骤内容说明（复制到启动通知）：
-
-| 步骤 | 内容说明 |
-|------|----------|
-| static | 结构完整性 · 描述质量 · HiL 安全检查 · MCP 工具一致性 · 边界处理 · 触发率 TP/TN |
-| cases | 需求分析 · 规则提取 · 用例矩阵设计 · 断言定义 · evals.json 生成 |
-| sync-pull | 从飞书 Bitable 拉取 human 用例合并到 evals.json |
-| sync-push-cases | 新用例推送到飞书 Bitable 用例表 |
-| executor-with | 加载 Skill 执行每个用例 · 记录 transcript · 采集 MCP 调用链 |
-| executor-without | 不加载 Skill 执行同样用例 · 作为基线对比 |
-| grader-report | 每个用例的断言评审 · exact_match/semantic/existence · 输出 grading.json + grading-summary.json + report.html |
-| sync-push-results | 将 grading 结果推送到飞书 Bitable 运行记录表 |
-| sentry-report | 独立重出 HTML 报告 · 仅在已有 grading 时使用 |
-| comparator | with_skill vs without_skill 盲测对比 · 计算 Delta 增益 |
-| analyzer | 解盲分析 · 根因定位 · 改进建议 |
-| gate | Completion Gate 7 项检查 · 确定 COMPLETE/PARTIAL/BLOCKED |
-| publish | HTML 上传飞书 · 所有权转让 · 最终结果卡片 · session.json 完结 |
+- 每个 pipeline 步骤启动后立即发送「正在执行」通知,说明当前步骤正在检查什么、完成后进入哪一步。步骤说明从 `scripts/sentry_pipeline.py describe <step>` 和子工具职责表生成。
 
 ---
 
-## 飞书同步(已纳入 pipeline 状态机)
+## Sync / Gate / Publish
 
-> config.json 不存在时,所有操作静默跳过并记录 `skipped_no_config`,不中断主流程。
-> 详细执行流程见:`./references/feishu-sync.md`
+- sync 是正式 pipeline 步骤,不可静默跳过。调用 `scripts/sentry_sync.py`;无 `config.json` 时返回并写入 `skipped_no_config`。
+- gate 仅 standard/full 强制执行。调用 `scripts/sentry_gate.py` 或复用其 `build_gate()` 输出。
+- publish 调用 `scripts/sentry_publish.py` 生成稳定本地结果;需要飞书上传/所有权转让时再走 legacy `scripts/publish.py`。
+- Pipeline 准出标准见 `references/step-contracts.md`;session schema 见 `references/session-json-schema.md`;飞书细节见 `references/feishu-sync.md`。
 
-**❗ v8.4.0 重要变更**:sync 步骤已从"步骤间隙的附加动作"升级为 pipeline 正式步骤。
-状态机强制执行,不再依赖主调度器"记得"执行。
-
-| pipeline 步骤 | 执行内容 | 准出条件 |
-|--------------|----------|----------|
-| sync-pull | 从飞书 Bitable 拉取 human 用例合并到 evals.json | session.json.sync.pull != null |
-| sync-push-cases | 将 evals.json 推送到飞书 Bitable 用例表 | session.json.sync.push_cases != null |
-| sync-push-results | 将 grading.json 推送到飞书 Bitable 运行记录表 | session.json.sync.push_results != null |
-| gate | Completion Gate 校验(7项),确定 COMPLETE/PARTIAL/BLOCKED | session.json.verdict.completion_status != null |
-
-**降级规则**:
-- config.json 不存在 → sync 步骤执行结果为 `skipped_no_config`,不阻断流程
-- config.json 存在但同步失败 → 记录 error,不阻断,但 report 中标注"同步异常"
-
-**PUSH-RUN 保留在 publish 内部**(依赖 gate 结果,拆出来反而需要两步)
-
-关键规则(所有模式):
-- ⛔ sync 步骤在 pipeline 中不可跳过(可降级为 skipped_no_config,但必须被状态机走过)
-- ⛔ 报告前置校验:sync.push_cases 和 sync.push_results 必须非 null
-- gate 步骤仅 standard/full 模式启用(smoke/quick 的简单校验内嵌在 publish 中)
-
-## Pipeline 准出标准
-
-> 详见 `./references/step-contracts.md`
-
----
-
-## session.json
-
-完整 schema 见:`./references/session-json-schema.md`
-
-写入时机:Step 1 写基础字段 → 各步完成后写对应字段 → grader-report 完成写 verdict/recommendations。
-
-### Token 计量(v8.0 新增)
-
-每步 spawn subagent 前后通过 `session_status` 获取 usage 差值,记录该步骤消耗的 token 数。
-
-写入 session.json 的 `cost` 字段:
-```json
-{
-  "cost": {
-    "static": 12500,
-    "cases": 18000,
-    "executor": 45000,
-    "comparator": 8000,
-    "analyzer": 6000,
-    "grader_report": 40000,
-    "total": 129500
-  }
-}
-```
-
-**采集方法**:
-1. spawn 前:`before_usage = session_status().usage.total_tokens`
-2. subagent 完成后:`after_usage = session_status().usage.total_tokens`
-3. 差值写入:`cost[step_name] = after_usage - before_usage`
-4. 最后 publish 时汇总 `cost.total = sum(cost.values())`
+Token 计量:每步 spawn 前后读取 `session_status().usage.total_tokens`,差值写入 `session.json.cost[step_name]`,publish 时汇总 `cost.total`。
 
 *v9.0.0 · 契约收敛版:统一 grader-report、without_skill/Delta 规则、当前术语口径、配置卫生与文档入口 · 2026-05-14*
 

@@ -10,18 +10,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sentry_pipeline import PIPELINES, next_step, pipeline_for_mode
+
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
-
-PIPELINES = {
-    "smoke": ["cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
-    "quick": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
-    "regression": ["sync-pull", "executor-with", "grader-report", "sync-push-results", "publish"],
-    "standard": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"],
-    "full": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"],
-}
 
 
 def now_iso() -> str:
@@ -129,7 +123,7 @@ def init_session(args: argparse.Namespace) -> dict:
         "started_at": now_iso(),
         "updated_at": now_iso(),
         "last_step": "init",
-        "pipeline": PIPELINES[args.mode],
+        "pipeline": pipeline_for_mode(args.mode),
         "completed_steps": [],
         "milestones": {},
         "sync": {"pull": None, "push_cases": None, "push_results": None, "push_run": None},
@@ -140,7 +134,7 @@ def init_session(args: argparse.Namespace) -> dict:
 
 def transition(args: argparse.Namespace) -> dict:
     data = load_session(args.session_dir)
-    pipeline = data.get("pipeline") or PIPELINES.get(data.get("mode", ""), [])
+    pipeline = data.get("pipeline") or pipeline_for_mode(data.get("mode", ""))
     if args.step not in pipeline:
         return {"status": "ERROR", "error": "step_not_in_pipeline", "step": args.step, "pipeline": pipeline}
 
@@ -193,18 +187,13 @@ def status(args: argparse.Namespace) -> dict:
     data = load_session(args.session_dir)
     pipeline = data.get("pipeline", [])
     last_step = data.get("last_step")
-    next_step = None
-    if last_step in pipeline:
-        idx = pipeline.index(last_step)
-        next_step = pipeline[idx + 1] if idx + 1 < len(pipeline) else None
-    elif pipeline:
-        next_step = pipeline[0]
+    next_step_value = next_step(pipeline, last_step)
     return {
         "status": "OK",
         "skill": data.get("skill"),
         "mode": data.get("mode"),
         "last_step": last_step,
-        "next_step": next_step,
+        "next_step": next_step_value,
         "completed_steps": data.get("completed_steps", []),
     }
 

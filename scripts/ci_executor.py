@@ -3,20 +3,35 @@
 SkillSentry CI Executor — 用 claude CLI 逐个执行测试用例
 
 每个 eval 独立 subprocess，隔离故障、可超时、可重试。
-产出：eval-N/with_skill/outputs/transcript.md + response.md
+产出：eval-N/<with_skill|without_skill>/outputs/transcript.md + response.md
 """
 
 import json
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 
-def build_eval_prompt(eval_config: dict, skill_content: str) -> str:
+def build_eval_prompt(eval_config: dict, skill_content: str, variant: str = "with_skill") -> str:
     """构造单个 eval 的执行 prompt"""
     prompt = eval_config.get("prompt", "")
     name = eval_config.get("name", "unknown")
+
+    if variant == "without_skill":
+        return f"""你正在执行一个 AI Skill 的无 Skill 基线测试用例。
+
+## 测试用例
+用例名：{name}
+
+## 用户输入
+
+{prompt}
+
+---
+
+请在不读取、不依赖被测 Skill 指令的情况下，按你的通用能力直接响应用户输入。直接给出响应，不要说"我在测试"之类的元评论。"""
 
     return f"""你正在执行一个 AI Skill 的测试用例。
 
@@ -47,36 +62,41 @@ def execute_single_eval(
     model: str = "claude-sonnet-4-6",
     timeout: int = 120,
     verbose: bool = False,
+    variant: str = "with_skill",
 ) -> dict:
     """执行单个 eval，返回结果字典"""
     eval_id = eval_config.get("id", f"eval-{eval_idx}")
     name = eval_config.get("name", "unknown")
 
     # 创建输出目录
-    output_dir = session_dir / eval_id / "with_skill" / "outputs"
+    output_dir = session_dir / eval_id / variant / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    skill_content = skill_path.read_text(encoding="utf-8")
-    prompt = build_eval_prompt(eval_config, skill_content)
+    skill_content = skill_path.read_text(encoding="utf-8") if variant == "with_skill" else ""
+    prompt = build_eval_prompt(eval_config, skill_content, variant=variant)
 
     start = time.time()
     result = {"eval_id": eval_id, "name": name, "status": "unknown", "duration": 0}
 
     try:
+        claude_cmd = shutil.which("claude.cmd") or shutil.which("claude") or "claude"
         cmd = [
-            "claude",
+            claude_cmd,
             "--dangerously-skip-permissions",
             "--output-format", "text",
-            "-p", prompt,
+            "-p",
         ]
         if model:
             cmd.extend(["--model", model])
 
         proc = subprocess.run(
             cmd,
+            input=prompt,
             timeout=timeout,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=str(session_dir),
         )
 
@@ -91,10 +111,13 @@ def execute_single_eval(
                 f.write(response)
 
             # 写 transcript.md（包含 prompt + response）
-            transcript = f"""## User Input
+            transcript = f"""## Variant
+{variant}
+
+## User Input
 {eval_config.get('prompt', '')}
 
-## Skill Response
+## Response
 {response}
 """
             with open(output_dir / "transcript.md", "w", encoding="utf-8") as f:
@@ -104,7 +127,7 @@ def execute_single_eval(
             result["response_length"] = len(response)
 
             if verbose:
-                print(f"  ✅ {eval_id} ({name}): {duration:.1f}s, {len(response)} chars", file=sys.stderr)
+                print(f"  ✅ {variant} {eval_id} ({name}): {duration:.1f}s, {len(response)} chars", file=sys.stderr)
         else:
             result["status"] = "failed"
             result["error"] = proc.stderr[:500] if proc.stderr else "empty response"
@@ -114,7 +137,7 @@ def execute_single_eval(
                 f.write(f"[EXECUTION FAILED]\n{proc.stderr[:500]}")
 
             if verbose:
-                print(f"  ❌ {eval_id} ({name}): exit={proc.returncode}", file=sys.stderr)
+                print(f"  ❌ {variant} {eval_id} ({name}): exit={proc.returncode}", file=sys.stderr)
 
     except subprocess.TimeoutExpired:
         duration = time.time() - start
@@ -126,14 +149,14 @@ def execute_single_eval(
             f.write(f"[TIMEOUT after {timeout}s]")
 
         if verbose:
-            print(f"  ⏰ {eval_id} ({name}): timeout", file=sys.stderr)
+            print(f"  ⏰ {variant} {eval_id} ({name}): timeout", file=sys.stderr)
 
     except Exception as e:
         result["status"] = "error"
         result["error"] = str(e)
 
         if verbose:
-            print(f"  💥 {eval_id} ({name}): {e}", file=sys.stderr)
+            print(f"  💥 {variant} {eval_id} ({name}): {e}", file=sys.stderr)
 
     return result
 
@@ -145,6 +168,7 @@ def execute_all_evals(
     model: str = "claude-sonnet-4-6",
     timeout_per_eval: int = 120,
     verbose: bool = False,
+    variant: str = "with_skill",
 ) -> bool:
     """执行所有 evals，返回是否有至少 1 个成功"""
     with open(evals_file, encoding="utf-8") as f:
@@ -154,7 +178,7 @@ def execute_all_evals(
         print("  ⚠️ evals.json 为空", file=sys.stderr)
         return False
 
-    print(f"  📋 执行 {len(evals)} 个用例 (model={model}, timeout={timeout_per_eval}s/eval)", file=sys.stderr)
+    print(f"  📋 执行 {len(evals)} 个用例 variant={variant} (model={model}, timeout={timeout_per_eval}s/eval)", file=sys.stderr)
 
     results = []
     success_count = 0
@@ -168,6 +192,7 @@ def execute_all_evals(
             model=model,
             timeout=timeout_per_eval,
             verbose=verbose,
+            variant=variant,
         )
         results.append(result)
         if result["status"] == "success":
@@ -181,7 +206,8 @@ def execute_all_evals(
         "results": results,
     }
 
-    with open(session_dir / "executor_results.json", "w", encoding="utf-8") as f:
+    summary_name = "executor_results.json" if variant == "with_skill" else f"executor_{variant}_results.json"
+    with open(session_dir / summary_name, "w", encoding="utf-8") as f:
         json.dump(exec_summary, f, ensure_ascii=False, indent=2)
 
     print(f"  📊 执行完成: {success_count}/{len(results)} 成功", file=sys.stderr)
@@ -199,6 +225,7 @@ if __name__ == "__main__":
     parser.add_argument("--session-dir", required=True, help="session 目录")
     parser.add_argument("--model", default="claude-sonnet-4-6")
     parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--variant", choices=["with_skill", "without_skill"], default="with_skill")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -209,5 +236,6 @@ if __name__ == "__main__":
         model=args.model,
         timeout_per_eval=args.timeout,
         verbose=args.verbose,
+        variant=args.variant,
     )
     sys.exit(0 if success else 1)

@@ -16,7 +16,7 @@ v9.0 是契约收敛版,不是功能扩展版。
 非目标:
 - 不新增测评维度。
 - 不新增平台适配。
-- 不重写 CI。
+- 不重写 CI 平台集成；允许 CI 复用当前 pipeline/state/gate 口径。
 - 不改变报告视觉结构。
 
 ---
@@ -43,13 +43,18 @@ v9.0 是契约收敛版,不是功能扩展版。
 | 脚本 | 当前职责 | 不做什么 |
 |------|----------|----------|
 | `scripts/sentry_preflight.py` | 定位 Skill、读取 frontmatter、计算 hash、识别 skill_type、检查 config 和 cases 缓存 | 不生成用例、不做评分 |
+| `scripts/sentry_pipeline.py` | 输出当前稳定口径 pipeline、下一步、步骤类型、工具和 required artifacts | 不执行步骤、不生成产物 |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,记录 milestone evidence | 不跳过 auto-exempt 用户确认 |
 | `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | 不改写 grading 原始证据 |
+| `scripts/sentry_sync.py` | 包装 `sync_cases.py`,为 sync 步骤输出稳定 JSON,无飞书配置时显式 `skipped_no_config` | 不替代飞书 API 实现、不隐式跳过 sync 步骤 |
+| `scripts/sentry_publish.py` | 包装发布步骤,输出稳定 `publish-result.json` 并生成本地报告兜底 | 不替代交互式飞书上传、不改变报告视觉结构 |
 | `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体的当前口径漂移 | 不替代静态规则检查、不评价被测 Skill 质量 |
 | `scripts/sentry_article_lint.py` | 扫描文章仓库的当前口径漂移 | 不改写文章、不替代人工编辑判断 |
 
 原则:
 - 状态写入和发布门禁计算优先使用脚本,不要让 LLM 手写 JSON 或临场心算评分。
+- pipeline 查询和下一步判断优先使用 `sentry_pipeline.py` 或复用其定义,不要在 CI、主 `SKILL.md` 和状态脚本中各自维护一套数组。
+- sync/publish 步骤优先使用 `sentry_sync.py`、`sentry_publish.py` 输出稳定 JSON;飞书配置缺失时必须留下结构化 `skipped_no_config` 或本地发布结果。
 - 脚本输出是事实来源;LLM 可以解释原因和建议,但不能改写核心数值。
 - `sentry-static` 仍是正式静态工具名;不要把代码版静态规则检查重新命名为正式 `sentry-lint`。
 - 当前口径自检使用 `sentry_contract_lint.py` 和 `sentry_article_lint.py`;它们只检查 SkillSentry 自身与文章材料,不参与被测 Skill 的质量评分。

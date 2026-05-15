@@ -124,8 +124,11 @@ bash install.sh
 | 脚本 | 职责 |
 |------|------|
 | `scripts/sentry_preflight.py` | 定位被测 Skill、计算 hash、识别 skill_type、检查 config 和 cases 缓存。 |
+| `scripts/sentry_pipeline.py` | 输出当前稳定口径 pipeline、下一步、步骤类型、工具和 required artifacts。 |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence。 |
 | `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict。 |
+| `scripts/sentry_sync.py` | 包装 `sync_cases.py`,为 `sync-pull`/`sync-push-*` 输出稳定 JSON,无配置时显式 `skipped_no_config`。 |
+| `scripts/sentry_publish.py` | 包装发布步骤,生成本地 `publish-result.json`/报告兜底,保留 `publish.py` 交互发布入口。 |
 | `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体是否混入旧工具名、旧指标或旧 pipeline 口径。 |
 | `scripts/sentry_article_lint.py` | 扫描文章仓库是否把历史术语误写成当前口径。 |
 
@@ -137,11 +140,11 @@ bash install.sh
 
 | 工作流 | 工具链 | 时间 | 适用场景 |
 |--------|--------|------|---------|
-| smoke | cases → executor(1次) → grader-report | 5-7 分钟 | 改了规则，快速确认没崩 |
-| quick | static → cases → executor(2次) → grader-report | 15-20 分钟 | 迭代完成，准备提测 |
-| regression | executor(已有 golden 用例) → grader-report | 5-10 分钟 | 规则没变，复跑基准 |
-| standard | static → cases → executor(3次) → executor-without → comparator → grader-report | 30-45 分钟 | 重要迭代正式提测 |
-| full | static → cases → executor(3次) → executor-without → comparator → analyzer → grader-report | 45 分钟+ | 正式发布前全量验证 |
+| smoke | cases → sync-pull → sync-push-cases → executor-with → grader-report → sync-push-results → publish | 5-10 分钟 | 改了规则，快速确认没崩 |
+| quick | static → cases → sync-pull → sync-push-cases → executor-with → grader-report → sync-push-results → publish | 15-20 分钟 | 迭代完成，准备提测 |
+| regression | sync-pull → executor-with → grader-report → sync-push-results → publish | 5-10 分钟 | 规则没变，复跑基准 |
+| standard | static → cases → sync-pull → sync-push-cases → executor-with → executor-without → comparator → grader-report → sync-push-results → gate → publish | 30-45 分钟 | 重要迭代正式提测 |
+| full | static → cases → sync-pull → sync-push-cases → executor-with → executor-without → comparator → analyzer → grader-report → sync-push-results → gate → publish | 45 分钟+ | 正式发布前全量验证 |
 
 ---
 
@@ -195,8 +198,11 @@ SkillSentry/
 │   └── analyzer.md
 ├── scripts/                   # Python 脚本
 │   ├── sentry_preflight.py     # 确定性环境预检
+│   ├── sentry_pipeline.py      # 当前 pipeline 单一事实来源
 │   ├── sentry_state.py         # session.json 状态管理
 │   ├── sentry_gate.py          # 发布门禁计算
+│   ├── sentry_sync.py          # sync 步骤稳定 JSON wrapper
+│   ├── sentry_publish.py       # publish 步骤稳定 JSON wrapper
 │   ├── sentry_contract_lint.py # SkillSentry 当前口径自检
 │   ├── sentry_article_lint.py  # 文章当前口径自检
 │   ├── validate_step.py       # OpenClaw 步骤校验

@@ -27,6 +27,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("session_dir", help="Session/workspace directory")
     parser.add_argument("--format", choices=["json", "text"], default="json")
     parser.add_argument("--output", default=None, help="Optional gate-result.json path")
+    parser.add_argument("--expect", default=None, help="Optional expected JSON fixture to compare against")
+    parser.add_argument("--tolerance", type=float, default=0.0001, help="Numeric comparison tolerance for --expect")
     return parser.parse_args()
 
 
@@ -53,11 +55,24 @@ def first_number(*values):
 
 
 def bool_value(item: dict) -> bool:
-    return bool(item.get("passed", item.get("pass", False)))
+    if "passed" in item or "pass" in item:
+        return bool(item.get("passed", item.get("pass", False)))
+    result = str(item.get("result", "")).strip().lower()
+    if result in {"pass", "passed", "true", "ok", "success"}:
+        return True
+    if result in {"fail", "failed", "false", "error"}:
+        return False
+    return False
 
 
 def precision_value(item: dict) -> str:
-    return str(item.get("precision") or item.get("type") or "").strip()
+    precision = str(item.get("precision") or "").strip()
+    if precision in {"exact_match", "semantic", "existence"}:
+        return precision
+    item_type = str(item.get("type") or "").strip()
+    if item_type in {"exact_match", "semantic", "existence"}:
+        return item_type
+    return precision or item_type
 
 
 def empty_counts() -> dict:
@@ -166,6 +181,9 @@ def counts_from_grading(data: dict) -> dict:
 
     if isinstance(data.get("expectations"), list):
         return counts_from_expectations(data["expectations"])
+
+    if isinstance(data.get("assertions"), list):
+        return counts_from_expectations(data["assertions"])
 
     if isinstance(data.get("runs"), dict):
         counts = empty_counts()
@@ -412,10 +430,58 @@ def print_text(result: dict) -> None:
         print(f"- {reason}")
 
 
+def value_at(data: dict, dotted: str):
+    value = data
+    for part in dotted.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value
+
+
+def compare_expected(result: dict, expect_path: Path, tolerance: float) -> tuple[bool, list[str]]:
+    expected = load_json(expect_path)
+    if not isinstance(expected, dict):
+        return False, [f"expected fixture is not a JSON object: {expect_path}"]
+
+    checks = {
+        "verdict": result.get("verdict"),
+        "grade": result.get("grade"),
+        "authoritative_pass_rate": result.get("authoritative_pass_rate"),
+        "delta.status": value_at(result, "delta.status"),
+    }
+    if "exact_pass_rate" in expected:
+        checks["exact_pass_rate"] = result.get("exact_pass_rate")
+    if "overall_pass_rate" in expected:
+        checks["overall_pass_rate"] = result.get("overall_pass_rate")
+
+    errors = []
+    for key, actual in checks.items():
+        if key not in expected:
+            continue
+        wanted = expected[key]
+        if isinstance(wanted, (int, float)) and not isinstance(wanted, bool):
+            if actual is None or abs(float(actual) - float(wanted)) > tolerance:
+                errors.append(f"{key}: expected {wanted}, got {actual}")
+        elif actual != wanted:
+            errors.append(f"{key}: expected {wanted!r}, got {actual!r}")
+
+    return not errors, errors
+
+
 def main() -> int:
     args = parse_args()
     session_dir = Path(args.session_dir).expanduser().resolve()
     result = build_gate(session_dir)
+    expect_ok = True
+    expect_errors: list[str] = []
+    if args.expect:
+        expect_ok, expect_errors = compare_expected(result, Path(args.expect).expanduser(), args.tolerance)
+        result["expectation"] = {
+            "status": "PASS" if expect_ok else "FAIL",
+            "fixture": args.expect,
+            "errors": expect_errors,
+        }
     if args.output:
         output = Path(args.output).expanduser()
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -424,6 +490,12 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print_text(result)
+        if args.expect:
+            print(f"expectation: {'PASS' if expect_ok else 'FAIL'}")
+            for error in expect_errors:
+                print(f"- {error}")
+    if args.expect:
+        return 0 if expect_ok else 1
     return 0 if result.get("verdict") in ("PASS", "CONDITIONAL PASS") else 1
 
 

@@ -111,10 +111,21 @@ EXPECTED_ACTIVE_TOOLS = {
 }
 
 EXPECTED_CORE_SCRIPTS = {
+    "sentry_pipeline.py",
     "sentry_preflight.py",
     "sentry_state.py",
     "sentry_gate.py",
+    "sentry_sync.py",
+    "sentry_publish.py",
     "sentry_contract_lint.py",
+}
+
+CURRENT_PIPELINES = {
+    "smoke": ["cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
+    "quick": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
+    "regression": ["sync-pull", "executor-with", "grader-report", "sync-push-results", "publish"],
+    "standard": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"],
+    "full": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"],
 }
 
 
@@ -345,6 +356,78 @@ def structural_findings(root: Path) -> list[Finding]:
                 "Main pipeline must use grader-report and must not include a standalone report step.",
                 '"report"',
             )
+
+    pipeline_script = root / "scripts" / "sentry_pipeline.py"
+    if pipeline_script.exists():
+        try:
+            import importlib.util
+
+            spec = importlib.util.spec_from_file_location("sentry_pipeline_lint_target", pipeline_script)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            actual = getattr(module, "PIPELINES", {})
+            if actual != CURRENT_PIPELINES:
+                add_finding(
+                    findings,
+                    "ERROR",
+                    "pipeline_core_mismatch",
+                    pipeline_script,
+                    root,
+                    0,
+                    "sentry_pipeline.py PIPELINES must match current-contract pipeline.",
+                    json.dumps(actual, ensure_ascii=False),
+                )
+        except Exception as exc:
+            add_finding(
+                findings,
+                "ERROR",
+                "pipeline_core_unreadable",
+                pipeline_script,
+                root,
+                0,
+                f"Could not import sentry_pipeline.py: {exc}",
+                "",
+            )
+
+    ci_script = root / "scripts" / "sentry_ci.py"
+    if ci_script.exists():
+        text = ci_script.read_text(encoding="utf-8")
+        old_patterns = [
+            (r"return\s+\[\s*[\"']check[\"']", "old_check_pipeline"),
+            (r"return\s+\[[^\]]*[\"']executor[\"'][^\]]*[\"']grader[\"']", "old_executor_grader_pipeline"),
+            (r"def\s+get_pipeline\s*\(", "local_pipeline_function"),
+        ]
+        for pattern, rule in old_patterns:
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                add_finding(
+                    findings,
+                    "ERROR",
+                    rule,
+                    ci_script,
+                    root,
+                    0,
+                    "sentry_ci.py must use sentry_pipeline.py current step names, not local legacy pipeline definitions.",
+                    match.group(0),
+                )
+
+    validator = root / "scripts" / "validate_step.py"
+    if validator.exists():
+        text = validator.read_text(encoding="utf-8")
+        for legacy in ("'grader'", '"grader"', "'report'", '"report"', "step-7", "step-7.5"):
+            if legacy in text:
+                add_finding(
+                    findings,
+                    "ERROR",
+                    "legacy_validate_step",
+                    validator,
+                    root,
+                    0,
+                    "validate_step.py must validate current pipeline steps through sentry_pipeline.py.",
+                    legacy,
+                )
     return findings
 
 

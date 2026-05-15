@@ -10,8 +10,9 @@ SkillSentry CI 编排入口
 退出码：0=PASS, 1=FAIL, 2=ERROR
 
 架构：
-  cases/grader → Anthropic SDK 直调（纯文本推理）
-  executor → claude CLI subprocess（需要 tool use）
+  static/cases/grader-report → Anthropic SDK 直调（纯文本推理）
+  executor-with → claude CLI subprocess（需要 tool use）
+  pipeline/state/gate → 复用 Tool-as-Code 确定性内核
 """
 
 import argparse
@@ -27,6 +28,10 @@ from pathlib import Path
 # 本地模块
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
+
+import sentry_state
+from sentry_gate import build_gate
+from sentry_pipeline import PIPELINES, pipeline_for_mode, step_definition
 
 
 def parse_args():
@@ -48,7 +53,7 @@ def parse_args():
     parser.add_argument("--skill", required=True, help="被测 Skill 名称或 SKILL.md 路径")
     parser.add_argument(
         "--mode",
-        choices=["smoke", "quick", "regression"],
+        choices=sorted(PIPELINES),
         default="smoke",
         help="测评模式（默认 smoke）",
     )
@@ -137,31 +142,18 @@ def init_session(skill_name: str, skill_hash: str, skill_type: str, mode: str) -
         "runtime": "ci",
         "mcp_backend": "unavailable",
         "started_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
         "last_step": "init",
+        "pipeline": pipeline_for_mode(mode),
+        "completed_steps": [],
+        "milestones": {},
+        "sync": {"pull": None, "push_cases": None, "push_results": None, "push_run": None},
         "ci": True,
     }
 
-    with open(session_dir / "session.json", "w", encoding="utf-8") as f:
-        json.dump(session_data, f, ensure_ascii=False, indent=2)
+    sentry_state.save_session(session_dir, session_data)
 
     return session_dir
-
-
-def get_pipeline(mode: str, skill_type: str) -> list[str]:
-    """根据 mode 和 skill_type 返回 pipeline 步骤"""
-    if skill_type == "mcp_based":
-        # MCP Skill: 跳过 executor，只做静态分析 + 用例设计
-        if mode == "regression":
-            return []  # regression 无意义（无法执行）
-        return ["cases"]  # smoke/quick: 只生成用例验证覆盖度
-
-    if mode == "smoke":
-        return ["cases", "executor", "grader"]
-    elif mode == "quick":
-        return ["check", "cases", "executor", "grader"]
-    elif mode == "regression":
-        return ["executor", "grader"]
-    return ["cases", "executor", "grader"]
 
 
 def find_existing_cases(skill_name: str) -> Path | None:
@@ -177,31 +169,53 @@ def find_existing_cases(skill_name: str) -> Path | None:
     return None
 
 
-def update_session(session_dir: Path, step: str, data: dict):
-    """更新 session.json"""
-    session_file = session_dir / "session.json"
-    with open(session_file, encoding="utf-8") as f:
-        session = json.load(f)
-    session["last_step"] = step
+def merge_session(session_dir: Path, data: dict):
+    """Merge step data into session.json without advancing last_step."""
+    session = sentry_state.load_session(session_dir)
     session.update(data)
-    with open(session_file, "w", encoding="utf-8") as f:
-        json.dump(session, f, ensure_ascii=False, indent=2)
+    session["updated_at"] = datetime.now(timezone.utc).isoformat()
+    sentry_state.save_session(session_dir, session)
+
+
+def transition_session(session_dir: Path, step: str):
+    """Advance session through sentry_state transition rules."""
+    args = argparse.Namespace(session_dir=str(session_dir), step=step, allow_skip=False)
+    result = sentry_state.transition(args)
+    if result.get("status") != "OK":
+        raise RuntimeError(f"illegal pipeline transition: {result}")
 
 
 def run_step(step: str, session_dir: Path, skill_path: Path, args, **kwargs) -> bool:
     """执行单个 pipeline 步骤，返回 True=成功"""
-    log(f"🔧 执行: {step}")
+    definition = step_definition(step)
+    log(f"🔧 执行: {step} ({definition.tool})")
     start = time.time()
 
     try:
-        if step == "check":
-            success = run_check(session_dir, skill_path, args)
+        if step == "static":
+            success = run_static(session_dir, skill_path, args)
         elif step == "cases":
             success = run_cases(session_dir, skill_path, args, **kwargs)
-        elif step == "executor":
-            success = run_executor(session_dir, skill_path, args)
-        elif step == "grader":
-            success = run_grader(session_dir, skill_path, args)
+        elif step == "sync-pull":
+            success = run_sync_step(session_dir, "pull")
+        elif step == "sync-push-cases":
+            success = run_sync_step(session_dir, "push_cases")
+        elif step == "sync-push-results":
+            success = run_sync_step(session_dir, "push_results")
+        elif step == "executor-with":
+            success = run_executor_with(session_dir, skill_path, args)
+        elif step == "executor-without":
+            success = run_executor_without(session_dir, skill_path, args)
+        elif step == "comparator":
+            success = run_comparator(session_dir)
+        elif step == "analyzer":
+            success = run_analyzer(session_dir)
+        elif step == "grader-report":
+            success = run_grader_report(session_dir, skill_path, args)
+        elif step == "gate":
+            success = run_gate(session_dir)
+        elif step == "publish":
+            success = run_publish(session_dir)
         else:
             log(f"  ❌ 未知步骤: {step}")
             return False
@@ -217,7 +231,7 @@ def run_step(step: str, session_dir: Path, skill_path: Path, args, **kwargs) -> 
         return False
 
 
-def run_check(session_dir: Path, skill_path: Path, args) -> bool:
+def run_static(session_dir: Path, skill_path: Path, args) -> bool:
     """静态检查（lint + trigger）— 用 SDK"""
     from ci_grader import call_llm
 
@@ -256,7 +270,7 @@ SKILL.md 内容：
         json_match = re.search(r"\{[\s\S]*\}", result)
         if json_match:
             check_data = json.loads(json_match.group())
-            update_session(session_dir, "check", {
+            merge_session(session_dir, {
                 "lint": check_data.get("lint", {}),
                 "trigger": check_data.get("trigger", {}),
             })
@@ -267,7 +281,7 @@ SKILL.md 内容：
                 log(f"  ⚠️ 发现 {p0_count} 个 P0 问题")
             return True
     except json.JSONDecodeError:
-        log("  ⚠️ check 结果 JSON 解析失败，继续")
+        log("  ⚠️ static 结果 JSON 解析失败，继续")
 
     return True  # check 不阻断 pipeline
 
@@ -281,6 +295,12 @@ def run_cases(session_dir: Path, skill_path: Path, args, existing_cases: Path = 
         import shutil
         shutil.copy2(existing_cases, session_dir / "evals.json")
         log(f"  ⚡ 复用已有用例: {existing_cases}")
+        try:
+            cases = json.loads((session_dir / "evals.json").read_text(encoding="utf-8"))
+            total = len(cases) if isinstance(cases, list) else 0
+        except json.JSONDecodeError:
+            total = 0
+        merge_session(session_dir, {"cases": {"total": total, "types": {}, "reused": True}})
         return True
 
     skill_content = skill_path.read_text(encoding="utf-8")
@@ -322,7 +342,7 @@ SKILL.md 内容：
             with open(session_dir / "evals.json", "w", encoding="utf-8") as f:
                 json.dump(cases, f, ensure_ascii=False, indent=2)
             log(f"  📋 生成 {len(cases)} 个用例")
-            update_session(session_dir, "cases", {
+            merge_session(session_dir, {
                 "cases": {"total": len(cases), "types": {}}
             })
             return True
@@ -332,7 +352,21 @@ SKILL.md 内容：
     return False
 
 
-def run_executor(session_dir: Path, skill_path: Path, args) -> bool:
+def run_sync_step(session_dir: Path, sync_key: str) -> bool:
+    """Run the stable sync wrapper; skipped_no_config is a valid CI outcome."""
+    from sentry_sync import execute_sync_step
+
+    step_by_key = {
+        "pull": "sync-pull",
+        "push_cases": "sync-push-cases",
+        "push_results": "sync-push-results",
+    }
+    payload = execute_sync_step(step_by_key[sync_key], session_dir=session_dir)
+    log(f"  ⏭️ sync.{sync_key}: {payload['status']}")
+    return payload["status"] != "ERROR"
+
+
+def run_executor_with(session_dir: Path, skill_path: Path, args) -> bool:
     """执行测试用例 — 用 claude CLI"""
     from ci_executor import execute_all_evals
 
@@ -349,12 +383,131 @@ def run_executor(session_dir: Path, skill_path: Path, args) -> bool:
         model=model,
         timeout_per_eval=120,
         verbose=args.verbose,
+        variant="with_skill",
     )
 
+    summary_file = session_dir / "executor_results.json"
+    summary = {}
+    if summary_file.exists():
+        summary = json.loads(summary_file.read_text(encoding="utf-8"))
+    merge_session(session_dir, {
+        "executor": {
+            "with_skill": summary,
+            "success": summary.get("success", 0),
+            "total": summary.get("total", 0),
+        }
+    })
     return success
 
 
-def run_grader(session_dir: Path, skill_path: Path, args) -> bool:
+def run_executor_without(session_dir: Path, skill_path: Path, args) -> bool:
+    """Run no-skill baseline when safe; otherwise record explicit partial."""
+    session = sentry_state.load_session(session_dir)
+    if session.get("skill_type") == "mcp_based":
+        merge_session(session_dir, {
+            "without_skill": {
+                "status": "partial",
+                "reason": "mcp_based baseline is not executed in CI until MCP sandbox parity is available",
+            }
+        })
+        log("  ⏭️ executor-without: partial (mcp_based baseline not executed in CI)")
+        return True
+
+    from ci_executor import execute_all_evals
+
+    evals_file = session_dir / "evals.json"
+    if not evals_file.exists():
+        log("  ❌ evals.json 不存在，无法执行 without_skill")
+        return False
+
+    model = args.executor_model or args.model
+    success = execute_all_evals(
+        evals_file=evals_file,
+        skill_path=skill_path,
+        session_dir=session_dir,
+        model=model,
+        timeout_per_eval=120,
+        verbose=args.verbose,
+        variant="without_skill",
+    )
+
+    summary_file = session_dir / "executor_without_skill_results.json"
+    summary = {}
+    if summary_file.exists():
+        summary = json.loads(summary_file.read_text(encoding="utf-8"))
+    merge_session(session_dir, {
+        "without_skill": {
+            "status": "completed" if success else "failed",
+            "summary": summary,
+        }
+    })
+    return success
+
+
+def run_comparator(session_dir: Path) -> bool:
+    eval_items = []
+    missing_without = []
+    missing_with = []
+
+    for eval_dir in sorted(p for p in session_dir.glob("eval-*") if p.is_dir()):
+        with_response = eval_dir / "with_skill" / "outputs" / "response.md"
+        without_response = eval_dir / "without_skill" / "outputs" / "response.md"
+        if not with_response.exists():
+            missing_with.append(eval_dir.name)
+            continue
+        if not without_response.exists():
+            missing_without.append(eval_dir.name)
+            continue
+        with_text = with_response.read_text(encoding="utf-8", errors="replace")
+        without_text = without_response.read_text(encoding="utf-8", errors="replace")
+        eval_items.append({
+            "eval_id": eval_dir.name,
+            "status": "available",
+            "with_skill_response_chars": len(with_text),
+            "without_skill_response_chars": len(without_text),
+            "note": "CI comparator only verifies paired outputs. Quality comparison remains an LLM comparator responsibility.",
+        })
+
+    if eval_items:
+        status = "partial" if missing_with or missing_without else "computed_structural"
+        payload = {
+            "status": status,
+            "comparable_evals": len(eval_items),
+            "missing_with_skill": missing_with,
+            "missing_without_skill": missing_without,
+            "items": eval_items,
+        }
+    else:
+        payload = {
+            "status": "N/A",
+            "reason": "without_skill baseline unavailable in CI",
+            "missing_with_skill": missing_with,
+            "missing_without_skill": missing_without,
+        }
+    (session_dir / "comparator-results.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    merge_session(session_dir, {"comparator": payload})
+    log(f"  📊 comparator: {payload['status']}")
+    return True
+
+
+def run_analyzer(session_dir: Path) -> bool:
+    payload = {
+        "status": "N/A",
+        "reason": "comparator result unavailable in CI",
+    }
+    (session_dir / "analyzer-recommendations.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    merge_session(session_dir, {"analyzer": payload})
+    log("  ⏭️ analyzer: N/A")
+    return True
+
+
+def run_grader_report(session_dir: Path, skill_path: Path, args) -> bool:
     """评审断言 — 用 SDK"""
     from ci_grader import grade_all_evals
 
@@ -370,21 +523,101 @@ def run_grader(session_dir: Path, skill_path: Path, args) -> bool:
         verbose=args.verbose,
     )
 
+    merge_session(session_dir, {"grader_report": {"status": "completed" if success else "failed"}})
+    if success:
+        gate_preview = build_gate(session_dir)
+        summary_payload = {
+            "status": "generated_by_ci",
+            "note": "CI compatibility summary. Per-eval grading.json files remain the source for deterministic gate counts.",
+            "authoritative_pass_rate": gate_preview.get("authoritative_pass_rate"),
+            "grade": gate_preview.get("grade"),
+            "verdict": gate_preview.get("verdict"),
+            "sources": gate_preview.get("sources", []),
+        }
+        (session_dir / "grading-summary.json").write_text(
+            json.dumps(summary_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        write_minimal_report(session_dir, gate_preview)
     return success
 
 
+def write_minimal_report(session_dir: Path, gate_result: dict) -> None:
+    rate = gate_result.get("authoritative_pass_rate")
+    rate_text = "N/A" if rate is None else f"{rate:.1%}"
+    html = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>SkillSentry CI Report</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; margin: 32px; line-height: 1.5; }}
+    code {{ background: #f4f4f4; padding: 2px 4px; }}
+  </style>
+</head>
+<body>
+  <h1>SkillSentry CI Report</h1>
+  <p><strong>Verdict:</strong> {gate_result.get("verdict", "UNKNOWN")}</p>
+  <p><strong>Grade:</strong> {gate_result.get("grade", "N/A")}</p>
+  <p><strong>Authoritative pass rate:</strong> {rate_text}</p>
+  <p><strong>Delta:</strong> {gate_result.get("delta", {}).get("status", "N/A")}</p>
+  <p>Generated by <code>sentry_ci.py</code>. Full interactive reports are produced by <code>sentry-grader</code>.</p>
+</body>
+</html>
+"""
+    (session_dir / "report.html").write_text(html, encoding="utf-8")
+
+
+def run_gate(session_dir: Path) -> bool:
+    result = build_gate(session_dir)
+    (session_dir / "gate-result.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    merge_session(session_dir, {
+        "verdict": {
+            "status": result.get("verdict"),
+            "grade": result.get("grade"),
+            "authoritative_pass_rate": result.get("authoritative_pass_rate"),
+            "delta": result.get("delta"),
+            "ifr": result.get("ifr"),
+            "vetoes": result.get("vetoes", []),
+            "reasons": result.get("decision_reasons", []),
+        }
+    })
+    return True
+
+
+def run_publish(session_dir: Path) -> bool:
+    from sentry_publish import execute_publish
+
+    payload = execute_publish(session_dir)
+    log(f"  📣 publish: {payload['status']}")
+    return payload["status"] != "ERROR"
+
+
 def collect_results(session_dir: Path, args) -> dict:
-    """收集所有 grading 结果，计算汇总"""
-    from ci_eval import collect_grading_results, compute_summary, determine_verdict
+    """Collect deterministic gate output."""
+    gate_file = session_dir / "gate-result.json"
+    if gate_file.exists():
+        gate = json.loads(gate_file.read_text(encoding="utf-8"))
+    else:
+        gate = build_gate(session_dir)
+        gate_file.write_text(json.dumps(gate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    grading_results = collect_grading_results(session_dir)
-    if not grading_results:
-        return {"verdict": "ERROR", "reasons": ["无 grading 结果"], "summary": {}}
-
-    summary = compute_summary(grading_results)
-    verdict, reasons = determine_verdict(summary, args.threshold, True)
-
-    return {"verdict": verdict, "reasons": reasons, "summary": summary}
+    summary = {
+        "authoritative_pass_rate": gate.get("authoritative_pass_rate"),
+        "grade": gate.get("grade"),
+        "delta": gate.get("delta"),
+        "ifr": gate.get("ifr"),
+        "vetoes": gate.get("vetoes", []),
+    }
+    return {
+        "verdict": gate.get("verdict", "ERROR"),
+        "reasons": gate.get("decision_reasons", []),
+        "summary": summary,
+        "gate": gate,
+    }
 
 
 def write_ci_output(output_dir: Path, results: dict, args):
@@ -415,10 +648,10 @@ def write_ci_output(output_dir: Path, results: dict, args):
 | Verdict | **{results['verdict']}** |
 """
     s = results.get("summary", {})
-    if s.get("exact_pass_rate") is not None:
-        summary_md += f"| Exact Pass Rate | {s['exact_pass_rate']:.1%} |\n"
-    if s.get("eval_count"):
-        summary_md += f"| Eval Count | {s['eval_count']} |\n"
+    if s.get("authoritative_pass_rate") is not None:
+        summary_md += f"| Authoritative Pass Rate | {s['authoritative_pass_rate']:.1%} |\n"
+    if s.get("grade"):
+        summary_md += f"| Grade | {s['grade']} |\n"
 
     if results["reasons"]:
         summary_md += "\n### Reasons\n"
@@ -440,15 +673,15 @@ def write_ci_output(output_dir: Path, results: dict, args):
         if github_output:
             with open(github_output, "a", encoding="utf-8") as f:
                 f.write(f"verdict={results['verdict']}\n")
-                rate = s.get("exact_pass_rate")
-                f.write(f"exact_pass_rate={rate:.4f}\n" if rate else "exact_pass_rate=N/A\n")
+                rate = s.get("authoritative_pass_rate")
+                f.write(f"authoritative_pass_rate={rate:.4f}\n" if rate is not None else "authoritative_pass_rate=N/A\n")
 
 
 def main():
     args = parse_args()
     log._verbose = args.verbose
 
-    log(f"🦞 SkillSentry CI v8.4.0 — mode={args.mode}, threshold={args.threshold:.0%}")
+    log(f"SkillSentry CI current-contract — mode={args.mode}, threshold={args.threshold:.0%}")
 
     # 1. 定位 Skill
     skill_path = find_skill(args.skill)
@@ -470,14 +703,8 @@ def main():
     log(f"📁 Session: {session_dir}")
 
     # 4. 确定 pipeline
-    pipeline = get_pipeline(args.mode, skill_type)
-    if not pipeline:
-        log("⚠️ 无可执行步骤（mcp_based + regression 组合无意义）")
-        sys.exit(2)
+    pipeline = pipeline_for_mode(args.mode)
     log(f"🔗 Pipeline: {' → '.join(pipeline)}")
-
-    if skill_type == "mcp_based":
-        log("⚠️ MCP Skill: 跳过 executor，只做静态分析 + 用例设计")
 
     # 5. 查找已有 cases（regression 模式或缓存命中）
     existing_cases = None
@@ -514,23 +741,23 @@ def main():
                     break
             if not success:
                 failed_steps.append(step)
-                if step in ("cases", "executor"):
+                if step in ("cases", "executor-with", "grader-report"):
                     log(f"  ⛔ {step} 失败，后续步骤无法执行，终止 pipeline")
                     break
+        else:
+            try:
+                transition_session(session_dir, step)
+            except RuntimeError as exc:
+                log(f"  ❌ 状态流转失败: {exc}")
+                failed_steps.append(f"{step}(transition)")
+                break
 
     total_time = time.time() - start_time
     log(f"⏱️ Pipeline 完成 ({total_time:.1f}s)")
 
     # 7. 收集结果
-    if "grader" not in failed_steps and "grader" in pipeline:
+    if not failed_steps:
         results = collect_results(session_dir, args)
-    elif skill_type == "mcp_based":
-        # MCP Skill: 只有 cases 步骤，给 DEGRADED 判决
-        results = {
-            "verdict": "DEGRADED",
-            "reasons": ["mcp_based Skill: CI 模式下跳过 executor，仅验证用例覆盖度"],
-            "summary": {"eval_count": 0, "note": "skipped_no_mcp"},
-        }
     else:
         results = {
             "verdict": "ERROR",
@@ -559,8 +786,6 @@ def main():
     # 10. 退出码
     if verdict == "PASS":
         sys.exit(0)
-    elif verdict == "DEGRADED":
-        sys.exit(0)  # DEGRADED 不 block CI
     elif verdict == "ERROR":
         sys.exit(2)
     else:
