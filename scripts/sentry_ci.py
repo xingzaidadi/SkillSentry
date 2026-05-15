@@ -63,6 +63,12 @@ def parse_args():
     parser.add_argument("--model", default="claude-sonnet-4-6", help="LLM model（SDK 调用用）")
     parser.add_argument("--executor-model", default=None, help="executor 使用的 claude CLI model（默认同 --model）")
     parser.add_argument("--timeout", type=int, default=1800, help="总超时秒数（默认 30 分钟）")
+    parser.add_argument(
+        "--timeout-per-eval",
+        type=int,
+        default=int(os.environ.get("SKILLSENTRY_CI_TIMEOUT_PER_EVAL", "120")),
+        help="executor 单个 eval 超时秒数（默认 120，可用 SKILLSENTRY_CI_TIMEOUT_PER_EVAL 覆盖）",
+    )
     parser.add_argument("--max-retries", type=int, default=1, help="每步失败后重试次数")
     parser.add_argument("--github-output", action="store_true", help="输出 GitHub Actions 变量")
     parser.add_argument("--verbose", "-v", action="store_true", help="详细输出")
@@ -167,6 +173,37 @@ def find_existing_cases(skill_name: str) -> Path | None:
         if c.exists():
             return c
     return None
+
+
+def inspect_case_feasibility(cases: list) -> list[dict]:
+    """Return deterministic warnings for generated cases that cannot run as-is."""
+    warnings = []
+    path_pattern = re.compile(r"[A-Za-z]:\\[^\s，。；,;`\"']+")
+
+    for case in cases if isinstance(cases, list) else []:
+        if not isinstance(case, dict):
+            continue
+        case_id = case.get("id", "unknown")
+        prompt = case.get("prompt", "") or ""
+        for raw_path in path_pattern.findall(prompt):
+            normalized = raw_path.rstrip(".,;，。；)")
+            if not Path(normalized).exists():
+                warnings.append({
+                    "case_id": case_id,
+                    "type": "missing_local_path",
+                    "path": normalized,
+                    "message": "Generated case references a local path that does not exist in this environment.",
+                })
+    return warnings
+
+
+def record_case_feasibility(session_dir: Path, cases: list) -> None:
+    warnings = inspect_case_feasibility(cases)
+    if warnings:
+        log(f"  ⚠️ case feasibility warnings: {len(warnings)}")
+        for item in warnings:
+            log(f"    - {item['case_id']}: missing path {item['path']}", verbose_only=True)
+    merge_session(session_dir, {"case_warnings": warnings})
 
 
 def merge_session(session_dir: Path, data: dict):
@@ -298,6 +335,7 @@ def run_cases(session_dir: Path, skill_path: Path, args, existing_cases: Path = 
         try:
             cases = json.loads((session_dir / "evals.json").read_text(encoding="utf-8"))
             total = len(cases) if isinstance(cases, list) else 0
+            record_case_feasibility(session_dir, cases)
         except json.JSONDecodeError:
             total = 0
         merge_session(session_dir, {"cases": {"total": total, "types": {}, "reused": True}})
@@ -324,6 +362,13 @@ def run_cases(session_dir: Path, skill_path: Path, args, existing_cases: Path = 
 请以 JSON 数组格式返回（直接返回 JSON，不要 markdown 包裹）：
 [{{"id": "eval-1", "type": "happy_path", "name": "...", "prompt": "...", "assertions": [...]}}]
 
+Additional hard constraints for generated cases:
+- Cases must be executable in a fresh CI session directory.
+- Do not invent absolute local file paths such as C:\\Users\\... unless the case is explicitly testing missing-file handling and the assertions expect a graceful missing-file response.
+- Smoke mode cases should be bounded enough to finish under the executor timeout. Avoid requiring a full real project compile unless the prompt provides an accessible target project.
+- Assertions must match the material actually provided in the prompt. Do not expect Word extraction, screenshot OCR, project reads, or Maven compile when no accessible file/project exists.
+- Prefer one small happy path, one routing/negative case, and one incomplete-input case over multiple heavy end-to-end code-generation cases.
+
 SKILL.md 内容：
 ```
 {skill_content}
@@ -342,6 +387,7 @@ SKILL.md 内容：
             with open(session_dir / "evals.json", "w", encoding="utf-8") as f:
                 json.dump(cases, f, ensure_ascii=False, indent=2)
             log(f"  📋 生成 {len(cases)} 个用例")
+            record_case_feasibility(session_dir, cases)
             merge_session(session_dir, {
                 "cases": {"total": len(cases), "types": {}}
             })
@@ -381,7 +427,7 @@ def run_executor_with(session_dir: Path, skill_path: Path, args) -> bool:
         skill_path=skill_path,
         session_dir=session_dir,
         model=model,
-        timeout_per_eval=120,
+        timeout_per_eval=args.timeout_per_eval,
         verbose=args.verbose,
         variant="with_skill",
     )
@@ -426,7 +472,7 @@ def run_executor_without(session_dir: Path, skill_path: Path, args) -> bool:
         skill_path=skill_path,
         session_dir=session_dir,
         model=model,
-        timeout_per_eval=120,
+        timeout_per_eval=args.timeout_per_eval,
         verbose=args.verbose,
         variant="without_skill",
     )

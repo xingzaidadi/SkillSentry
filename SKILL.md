@@ -124,6 +124,7 @@ message(action=send, msg_type="text", message="✅ Step 1 初始化 (Initializat
 | `scripts/sentry_pipeline.py` | 输出当前稳定口径 pipeline、下一步、步骤类型、工具和 required artifacts | `python scripts/sentry_pipeline.py plan --mode quick` |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence | `python scripts/sentry_state.py transition <session_dir> grader-report` |
 | `scripts/sentry_gate.py` | 聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | `python scripts/sentry_gate.py <session_dir>` |
+| `scripts/sentry_ci.py` | CI 编排入口;支持 `--timeout-per-eval`,并将不可执行用例风险写入 `session.json.case_warnings` | `python scripts/sentry_ci.py --skill <Skill名> --mode smoke --timeout-per-eval 180` |
 | `scripts/sentry_sync.py` | 为 `sync-pull`/`sync-push-*` 输出稳定 JSON,无飞书配置时显式记录 `skipped_no_config` | `python scripts/sentry_sync.py sync-pull --skill <Skill名> --session-dir <session_dir>` |
 | `scripts/sentry_publish.py` | 为发布步骤输出稳定 JSON,生成本地报告兜底并保留 legacy `publish.py` 入口 | `python scripts/sentry_publish.py --session-dir <session_dir>` |
 | `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体是否混入旧工具名、旧指标、旧 pipeline 口径 | `python scripts/sentry_contract_lint.py --format text` |
