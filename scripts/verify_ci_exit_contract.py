@@ -52,6 +52,7 @@ def make_results(verdict: str) -> dict:
         "diagnostics": {
             "categories": ["quality_failure"] if verdict == "FAIL" else ([] if verdict == "PASS" else ["fixture"]),
             "notes": ["fixture"],
+            "timing_hints": ["fixture timing hint"],
         },
     }
 
@@ -101,9 +102,11 @@ def verify() -> tuple[bool, list[str]]:
                 for key, expected in expected_outputs.items():
                     if outputs.get(key) != expected:
                         errors.append(f"{verdict}: GITHUB_OUTPUT {key} expected {expected!r}, got {outputs.get(key)!r}")
-                for key in ("diagnostic_categories", "authoritative_pass_rate", "grade"):
+                for key in ("diagnostic_categories", "timing_hints", "authoritative_pass_rate", "grade"):
                     if key not in outputs:
                         errors.append(f"{verdict}: GITHUB_OUTPUT missing {key}")
+                if outputs.get("timing_hints") != '["fixture timing hint"]':
+                    errors.append(f"{verdict}: GITHUB_OUTPUT timing_hints was {outputs.get('timing_hints')!r}")
         finally:
             if old_github_output is None:
                 os.environ.pop("GITHUB_OUTPUT", None)

@@ -673,6 +673,8 @@ def github_output_fields(results: dict, artifacts: dict) -> dict[str, str]:
     summary = results.get("summary", {})
     diagnostics = results.get("diagnostics", {})
     categories = diagnostics.get("categories", []) if isinstance(diagnostics, dict) else []
+    timing_hints = diagnostics.get("timing_hints", []) if isinstance(diagnostics, dict) else []
+    timing_hints_json = json.dumps([str(item) for item in timing_hints], ensure_ascii=False, separators=(",", ":"))
     rate = summary.get("authoritative_pass_rate") if isinstance(summary, dict) else None
     verdict = results.get("verdict", "ERROR")
     exit_code = exit_code_for_verdict(verdict)
@@ -685,6 +687,7 @@ def github_output_fields(results: dict, artifacts: dict) -> dict[str, str]:
         "report_html": single_line(artifacts.get("output_report_html", "")),
         "session_report_html": single_line(artifacts.get("session_report_html", "")),
         "diagnostic_categories": single_line(",".join(str(item) for item in categories)),
+        "timing_hints": single_line(timing_hints_json),
         "authoritative_pass_rate": f"{rate:.4f}" if rate is not None else "N/A",
         "grade": single_line(summary.get("grade", "N/A") if isinstance(summary, dict) else "N/A"),
     }

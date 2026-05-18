@@ -38,7 +38,7 @@ python scripts/sentry_ci.py --skill my-skill --mode smoke \
 | 1 | CONDITIONAL PASS 或 FAIL（需要人工确认或不允许发布） |
 | 2 | ERROR（pipeline 步骤失败、找不到 Skill 等） |
 
-`--github-output` 会写入 `verdict/status/release_status/exit_code/report_html/session_report_html/diagnostic_categories/authoritative_pass_rate/grade`。其中 `status`/`release_status` 取值为 `pass`、`conditional`、`fail` 或 `error`。
+`--github-output` 会写入 `verdict/status/release_status/exit_code/report_html/session_report_html/diagnostic_categories/timing_hints/authoritative_pass_rate/grade`。其中 `status`/`release_status` 取值为 `pass`、`conditional`、`fail` 或 `error`。
 
 GitHub Checks 结论映射:
 
