@@ -88,6 +88,7 @@ def run_profile(
     output_dir: Path | None = None,
     force_executor: bool = False,
     force_grader: bool = False,
+    output_format: str = "json",
 ):
     cmd = [
         sys.executable,
@@ -95,7 +96,7 @@ def run_profile(
         "--profile",
         profile,
         "--format",
-        "json",
+        output_format,
     ]
     if skill is not None:
         cmd.extend(["--skill", str(skill)])
@@ -232,6 +233,11 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     session = load_json(session_dir / "session.json")
     if session.get("cases", {}).get("reused") is not True:
         errors.append("local reuse should write session.cases.reused=true")
+    text_completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir, output_format="text")
+    if text_completed.returncode != 0:
+        errors.append(f"local reuse text exited {text_completed.returncode}: {text_completed.stderr.strip()} {text_completed.stdout.strip()}")
+    elif "reuse:" not in text_completed.stdout or "prepare_cases: reused (matched)" not in text_completed.stdout:
+        errors.append(f"local reuse text output missing reuse summary: {text_completed.stdout!r}")
 
     # Missing executor response artifacts must invalidate executor reuse.
     response_file = session_dir / "eval-1" / "with_skill" / "outputs" / "response.md"
