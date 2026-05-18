@@ -241,10 +241,12 @@ def verify() -> tuple[bool, list[str]]:
             errors.append("timings.executor_cases.slowest_cases[0]: expected eval-2")
         if diagnostics.get("timings", {}).get("grader_cases", {}).get("duration_ms", {}).get("p50") != 250.0:
             errors.append("timings.grader_cases.duration_ms.p50: expected 250.0")
+        if not any("executor is the slowest CI step" in hint for hint in diagnostics.get("timing_hints", [])):
+            errors.append("timing_hints: expected executor slowest hint")
 
         sentry_ci.write_minimal_report(session_dir, gate)
         report_text = (session_dir / "report.html").read_text(encoding="utf-8")
-        for marker in ("Execution Diagnostics", "runner_timeout", "LLM grader call failed", "skipped_no_config", "Step timings", "Phase timings", "Executor case timings", "Grader case timings", "p50=250.0ms", "p95=250.0ms"):
+        for marker in ("Execution Diagnostics", "runner_timeout", "LLM grader call failed", "skipped_no_config", "Step timings", "Phase timings", "Executor case timings", "Grader case timings", "p50=250.0ms", "p95=250.0ms", "Timing hints", "executor is the slowest CI step"):
             assert_contains(report_text, marker, "ci report.html", errors)
 
         args = SimpleNamespace(skill="diagnostic-fixture", mode="standard", threshold=0.8, github_output=False)
@@ -257,7 +259,7 @@ def verify() -> tuple[bool, list[str]]:
             errors.append("eval_result.json: missing diagnostics")
         if output_json.get("timings", {}).get("total_ms") != 100.0:
             errors.append("eval_result.json: missing top-level timings")
-        for marker in ("Execution Diagnostics", "runner_timeout", "skipped_no_config", "CI timing", "CI phases", "Executor case timing", "Grader case timing", "p50=250.0ms", "p95=250.0ms"):
+        for marker in ("Execution Diagnostics", "runner_timeout", "skipped_no_config", "CI timing", "CI phases", "Executor case timing", "Grader case timing", "p50=250.0ms", "p95=250.0ms", "executor is the slowest CI step"):
             assert_contains(summary_md, marker, "summary.md", errors)
 
         sentry_publish.ensure_report(session_dir, gate)

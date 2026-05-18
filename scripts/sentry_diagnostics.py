@@ -381,6 +381,40 @@ def collect_timing(session: dict, session_dir: Path | None = None) -> dict:
     return payload
 
 
+def collect_timing_hints(timings: dict) -> list[str]:
+    hints = []
+    slowest = _as_list(timings.get("slowest_steps"))
+    if slowest:
+        step = _as_dict(slowest[0])
+        name = str(step.get("step") or "")
+        if name.startswith("executor-"):
+            hints.append("Timing hint: executor is the slowest CI step; inspect executor case timing before changing cache or skip behavior.")
+        elif name == "grader-report":
+            hints.append("Timing hint: grader-report is the slowest CI step; inspect grader case timing and assertion count before changing scoring.")
+        elif name == "cases":
+            hints.append("Timing hint: case generation is the slowest CI step; prefer cached cases or lint/preflight profiles when case design is unchanged.")
+        elif name.startswith("sync-"):
+            hints.append("Timing hint: sync is the slowest CI step; check Feishu/network configuration before changing pipeline steps.")
+        elif name == "publish":
+            hints.append("Timing hint: publish is the slowest CI step; use local report regeneration when external publishing is not needed.")
+
+    executor_cases = _as_dict(timings.get("executor_cases"))
+    executor_duration = _as_dict(executor_cases.get("duration_ms"))
+    executor_p50 = _number(executor_duration.get("p50"))
+    executor_max = _number(executor_duration.get("max"))
+    if executor_p50 and executor_max and executor_max >= executor_p50 * 2:
+        hints.append("Timing hint: executor case timing is skewed; inspect the slowest executor case before reducing total eval count.")
+
+    grader_cases = _as_dict(timings.get("grader_cases"))
+    grader_duration = _as_dict(grader_cases.get("duration_ms"))
+    grader_p50 = _number(grader_duration.get("p50"))
+    grader_max = _number(grader_duration.get("max"))
+    if grader_p50 and grader_max and grader_max >= grader_p50 * 2:
+        hints.append("Timing hint: grader case timing is skewed; inspect the slowest grader case and assertion count before changing grader behavior.")
+
+    return hints
+
+
 def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> dict:
     session_path = Path(session_dir)
     session = _as_dict(load_json(session_path / "session.json"))
@@ -393,6 +427,7 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
     publish = collect_publish(session_path, session)
     preflight = collect_preflight(session)
     timings = collect_timing(session, session_path)
+    timing_hints = collect_timing_hints(timings)
     delta = _as_dict(gate_data.get("delta"))
 
     categories = []
@@ -486,6 +521,7 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
         },
         "publish": publish,
         "timings": timings,
+        "timing_hints": timing_hints,
         "categories": categories,
         "notes": notes,
     }
@@ -498,6 +534,7 @@ def render_markdown(diagnostics: dict) -> str:
     delta = _as_dict(diagnostics.get("delta"))
     publish = _as_dict(diagnostics.get("publish"))
     timings = _as_dict(diagnostics.get("timings"))
+    timing_hints = _as_list(diagnostics.get("timing_hints"))
     total_ms = timings.get("total_ms")
     total_text = str(total_ms) if total_ms is not None else "N/A"
     slowest = _as_list(timings.get("slowest_steps"))
@@ -558,6 +595,8 @@ def render_markdown(diagnostics: dict) -> str:
 
     for note in _as_list(diagnostics.get("notes")):
         lines.append(f"- {note}")
+    for hint in timing_hints:
+        lines.append(f"- {hint}")
     return "\n".join(lines) + "\n"
 
 
@@ -568,6 +607,7 @@ def render_html_section(diagnostics: dict) -> str:
     delta = _as_dict(diagnostics.get("delta"))
     publish = _as_dict(diagnostics.get("publish"))
     timings = _as_dict(diagnostics.get("timings"))
+    timing_hints = _as_list(diagnostics.get("timing_hints"))
     total_ms = timings.get("total_ms")
     total_text = str(total_ms) if total_ms is not None else "N/A"
     executor_cases = _as_dict(timings.get("executor_cases"))
@@ -576,6 +616,9 @@ def render_html_section(diagnostics: dict) -> str:
     grader_stats = _duration_stats_text(grader_cases)
     categories = ", ".join(diagnostics.get("categories") or ["none"])
     notes = "".join(f"<li>{html.escape(str(note))}</li>" for note in _as_list(diagnostics.get("notes")))
+    hint_items = "".join(f"<li>{html.escape(str(hint))}</li>" for hint in timing_hints)
+    if not hint_items:
+        hint_items = "<li>none</li>"
     grader_errors = _as_list(diagnostics.get("grader_errors"))
     grader_items = "".join(
         "<li>"
@@ -657,6 +700,8 @@ def render_html_section(diagnostics: dict) -> str:
   </table>
   <h3>Notes</h3>
   <ul>{notes}</ul>
+  <h3>Timing hints</h3>
+  <ul>{hint_items}</ul>
   <h3>Grader errors</h3>
   <ul>{grader_items}</ul>
   <h3>Step timings</h3>
