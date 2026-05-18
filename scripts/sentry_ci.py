@@ -735,7 +735,7 @@ def collect_results(session_dir: Path, args) -> dict:
     """Collect deterministic gate output."""
     gate_file = session_dir / "gate-result.json"
     if gate_file.exists():
-        gate = json.loads(gate_file.read_text(encoding="utf-8"))
+        gate = json.loads(gate_file.read_text(encoding="utf-8-sig"))
     else:
         gate = build_gate(session_dir)
         gate_file.write_text(json.dumps(gate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

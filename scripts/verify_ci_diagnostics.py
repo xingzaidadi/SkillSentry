@@ -249,6 +249,8 @@ def verify() -> tuple[bool, list[str]]:
         for marker in ("Execution Diagnostics", "runner_timeout", "LLM grader call failed", "skipped_no_config", "Step timings", "Phase timings", "Executor case timings", "Grader case timings", "p50=250.0ms", "p95=250.0ms", "Timing hints", "executor is the slowest CI step"):
             assert_contains(report_text, marker, "ci report.html", errors)
 
+        gate_file = session_dir / "gate-result.json"
+        gate_file.write_text(gate_file.read_text(encoding="utf-8"), encoding="utf-8-sig")
         args = SimpleNamespace(skill="diagnostic-fixture", mode="standard", threshold=0.8, github_output=False)
         results = sentry_ci.collect_results(session_dir, args)
         output_dir = root / "out"
