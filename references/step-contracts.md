@@ -39,7 +39,7 @@ python scripts/sentry_run.py --skill <skill> --profile local --cases evals.json 
 - `local --reuse-session`:必须读取 `manifest.json`;cases 输入 hash 未变时复用已准备的 `evals.json`/case_lint,executor/grader 输入 hash 未变时跳过重步骤。`--force-executor` / `--force-grader` 可显式重跑。
 - `--format json`:必须输出 `timings.total_ms` 与 `timings.phases_ms`;timings 只做耗时观测,不得影响评分、gate 或退出码。
 - CI pipeline step 执行后必须写 `session.json.ci_step_timings`;非 pipeline 阶段写 `session.json.ci_phase_timings`;最终输出必须包含 `eval_result.json.timings`。timings 不得影响状态流转、评分、gate 或退出码。
-- diagnostics、summary Markdown 和 HTML 报告会展示 executor/grader 单用例耗时最慢项;这些观测字段不得影响状态流转、评分、gate 或退出码。
+- diagnostics、summary Markdown 和 HTML 报告会展示 executor/grader 单用例耗时 avg/p50/p95/max 和最慢项;这些观测字段不得影响状态流转、评分、gate 或退出码。
 
 ---
 

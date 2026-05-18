@@ -116,6 +116,19 @@ def _duration_summary(rows: list[dict], total: int) -> dict:
     }
 
 
+def _duration_stats_text(payload: dict) -> str:
+    if not isinstance(payload, dict) or not payload.get("timed"):
+        return "N/A"
+    duration = _as_dict(payload.get("duration_ms"))
+    return (
+        f"timed={payload.get('timed')}/{payload.get('total')}; "
+        f"avg={duration.get('avg')}ms; "
+        f"p50={duration.get('p50')}ms; "
+        f"p95={duration.get('p95')}ms; "
+        f"max={duration.get('max')}ms"
+    )
+
+
 def collect_executor(session_dir: Path, session: dict) -> dict:
     summary = load_json(session_dir / "executor_results.json")
     if not isinstance(summary, dict):
@@ -491,6 +504,8 @@ def render_markdown(diagnostics: dict) -> str:
     phases = _as_list(timings.get("phases"))
     executor_cases = _as_dict(timings.get("executor_cases"))
     grader_cases = _as_dict(timings.get("grader_cases"))
+    executor_stats = _duration_stats_text(executor_cases)
+    grader_stats = _duration_stats_text(grader_cases)
     slowest_text = ", ".join(
         f"{item.get('step')}={item.get('duration_ms')}ms" for item in slowest[:3] if isinstance(item, dict)
     ) or "N/A"
@@ -536,8 +551,8 @@ def render_markdown(diagnostics: dict) -> str:
         f"| Publish | {publish.get('status') or 'N/A'} |",
         f"| CI timing | total={total_text}ms; slowest={slowest_text} |",
         f"| CI phases | {phases_text} |",
-        f"| Executor case timing | {executor_text} |",
-        f"| Grader case timing | {grader_text} |",
+        f"| Executor case timing | {executor_stats}; slowest={executor_text} |",
+        f"| Grader case timing | {grader_stats}; slowest={grader_text} |",
         "",
     ]
 
@@ -557,6 +572,8 @@ def render_html_section(diagnostics: dict) -> str:
     total_text = str(total_ms) if total_ms is not None else "N/A"
     executor_cases = _as_dict(timings.get("executor_cases"))
     grader_cases = _as_dict(timings.get("grader_cases"))
+    executor_stats = _duration_stats_text(executor_cases)
+    grader_stats = _duration_stats_text(grader_cases)
     categories = ", ".join(diagnostics.get("categories") or ["none"])
     notes = "".join(f"<li>{html.escape(str(note))}</li>" for note in _as_list(diagnostics.get("notes")))
     grader_errors = _as_list(diagnostics.get("grader_errors"))
@@ -647,7 +664,9 @@ def render_html_section(diagnostics: dict) -> str:
   <h3>Phase timings</h3>
   <ul>{phase_items}</ul>
   <h3>Executor case timings</h3>
+  <p>{html.escape(executor_stats)}</p>
   <ul>{executor_case_items}</ul>
   <h3>Grader case timings</h3>
+  <p>{html.escape(grader_stats)}</p>
   <ul>{grader_case_items}</ul>
 """
