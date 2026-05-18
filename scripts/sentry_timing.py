@@ -274,10 +274,30 @@ def load_executor_summary(session_dir: Path, variant: str) -> dict:
     return payload
 
 
-def summarize_executor_variant(summary: dict, variant: str, top: int) -> dict:
+def current_case_ids(session_dir: Path) -> list[str]:
+    evals_file = session_dir / "evals.json"
+    if not evals_file.exists():
+        return []
+    try:
+        payload = load_json(evals_file)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+    case_ids = []
+    for idx, case in enumerate(sentry_case_lint.extract_cases(payload), 1):
+        if not isinstance(case, dict):
+            continue
+        case_ids.append(str(case.get("id", f"eval-{idx}")))
+    return case_ids
+
+
+def summarize_executor_variant(summary: dict, variant: str, top: int, case_ids: list[str] | None = None) -> dict:
+    current_cases = set(case_ids or [])
     rows = []
     for item in _as_list(summary.get("results")):
         if not isinstance(item, dict):
+            continue
+        eval_id = item.get("eval_id")
+        if current_cases and str(eval_id) not in current_cases:
             continue
         duration_ms = _duration_ms(item.get("duration"))
         if duration_ms is None:
@@ -285,7 +305,7 @@ def summarize_executor_variant(summary: dict, variant: str, top: int) -> dict:
         rows.append(
             {
                 "variant": variant,
-                "eval_id": item.get("eval_id"),
+                "eval_id": eval_id,
                 "name": item.get("name"),
                 "status": item.get("status"),
                 "duration_ms": duration_ms,
@@ -294,9 +314,14 @@ def summarize_executor_variant(summary: dict, variant: str, top: int) -> dict:
 
     durations = [item["duration_ms"] for item in rows]
     slowest = sorted(rows, key=lambda item: item.get("duration_ms", 0), reverse=True)
-    total = _number(summary.get("total"), len(_as_list(summary.get("results"))))
-    success = _number(summary.get("success"), 0)
-    failed = _number(summary.get("failed"), max(total - success, 0))
+    if current_cases:
+        total = len(current_cases)
+        success = sum(1 for item in rows if item.get("status") == "success")
+        failed = sum(1 for item in rows if item.get("status") == "failed")
+    else:
+        total = _number(summary.get("total"), len(_as_list(summary.get("results"))))
+        success = _number(summary.get("success"), 0)
+        failed = _number(summary.get("failed"), max(total - success, 0))
     duration_total = sum(durations)
     return {
         "variant": variant,
@@ -337,6 +362,7 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
     if session_dir is None:
         return {"available": False, "reason": "session_dir_unavailable"}
 
+    case_ids = current_case_ids(session_dir)
     variants = []
     for variant in ("with_skill", "without_skill"):
         try:
@@ -344,7 +370,7 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
         except (FileNotFoundError, json.JSONDecodeError):
             continue
         if summary:
-            variants.append(summarize_executor_variant(summary, variant, top))
+            variants.append(summarize_executor_variant(summary, variant, top, case_ids=case_ids))
 
     if not variants:
         return {"available": False, "reason": "executor_results_unavailable", "session_dir": str(session_dir)}
@@ -357,24 +383,9 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
         "available": True,
         "session_dir": str(session_dir),
         "variants": variants,
+        "expected_cases": len(case_ids) if case_ids else None,
         "slowest_cases": slowest_cases,
     }
-
-
-def current_case_ids(session_dir: Path) -> list[str]:
-    evals_file = session_dir / "evals.json"
-    if not evals_file.exists():
-        return []
-    try:
-        payload = load_json(evals_file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-    case_ids = []
-    for idx, case in enumerate(sentry_case_lint.extract_cases(payload), 1):
-        if not isinstance(case, dict):
-            continue
-        case_ids.append(str(case.get("id", f"eval-{idx}")))
-    return case_ids
 
 
 def find_grading_files(session_dir: Path) -> list[Path]:

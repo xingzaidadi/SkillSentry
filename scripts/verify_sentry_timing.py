@@ -138,8 +138,10 @@ def verify_session(root: Path, errors: list[str]) -> None:
         errors.append("session total_ms should be 150.0")
     executor = payload.get("executor_timing", {})
     variants = executor.get("variants", [])
-    if not variants or variants[0].get("duration_ms", {}).get("p95") != 4620.0:
-        errors.append("session executor timing p95 should be 4620.0ms")
+    if not variants or variants[0].get("duration_ms", {}).get("p95") != 4760.0:
+        errors.append("session executor timing p95 should ignore stale executor cases")
+    if executor.get("expected_cases") != 2 or variants[0].get("total") != 2:
+        errors.append("session executor timing total should reflect current evals.json case count")
     grader = payload.get("grader_timing", {})
     if grader.get("duration_ms", {}).get("p50") != 600.0:
         errors.append("session grader timing p50 should be 600.0ms")
