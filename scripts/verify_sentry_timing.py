@@ -162,6 +162,16 @@ def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
             "reused": False,
             "reuse": {"reusable": False, "reason": "missing_outputs"},
         },
+        "reuse_summary": {
+            "steps": [
+                {"step": "executor-with", "reused": True, "reusable": True, "reason": "matched"},
+                {"step": "grader-report", "reused": False, "reusable": False, "reason": "missing_outputs"},
+            ],
+            "reused_steps": ["executor-with"],
+            "rerun_steps": ["grader-report"],
+            "miss_reasons": {"missing_outputs": 1},
+            "all_reused": False,
+        },
     }
     save_json(result_file, run_result)
     save_json(session_dir / "sentry-run-result.json", run_result)
@@ -175,6 +185,8 @@ def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
     decisions = payload.get("reuse_decisions", [])
     if len(decisions) != 2 or decisions[0].get("reason") != "matched" or decisions[1].get("reason") != "missing_outputs":
         errors.append("sentry-run-result should include executor/grader reuse decisions")
+    if payload.get("reuse_summary", {}).get("rerun_steps") != ["grader-report"]:
+        errors.append("sentry-run-result should include reuse summary rerun steps")
     if not payload.get("executor_timing", {}).get("available"):
         errors.append("sentry-run-result should resolve executor timing from session_dir")
     if not payload.get("grader_timing", {}).get("available"):

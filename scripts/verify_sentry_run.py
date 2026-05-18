@@ -220,6 +220,11 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("local reuse did not explain grader reuse as matched")
     if reused_payload.get("cases", {}).get("reused") is not True:
         errors.append("local reuse did not mark cases.reused=true")
+    reuse_summary = reused_payload.get("reuse_summary", {})
+    if reuse_summary.get("all_reused") is not True:
+        errors.append("local reuse summary should mark all_reused=true")
+    if reuse_summary.get("rerun_steps") != []:
+        errors.append(f"local reuse summary should have no rerun_steps, got {reuse_summary.get('rerun_steps')!r}")
     session = load_json(session_dir / "session.json")
     if session.get("cases", {}).get("reused") is not True:
         errors.append("local reuse should write session.cases.reused=true")
@@ -241,6 +246,11 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("missing response incorrectly reused executor")
     if missing_response_payload.get("executor", {}).get("reuse", {}).get("reason") != "missing_outputs":
         errors.append("missing response did not explain executor reuse miss as missing_outputs")
+    reuse_summary = missing_response_payload.get("reuse_summary", {})
+    if "executor-with" not in reuse_summary.get("rerun_steps", []):
+        errors.append("missing response reuse summary should include executor-with rerun")
+    if reuse_summary.get("miss_reasons", {}).get("missing_outputs") != 1:
+        errors.append("missing response reuse summary should count one missing_outputs miss")
     if not response_file.exists():
         errors.append("missing response was not restored by executor rerun")
 
@@ -263,6 +273,11 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("missing grading incorrectly reused grader")
     if missing_grading_payload.get("grader", {}).get("reuse", {}).get("reason") != "missing_outputs":
         errors.append("missing grading did not explain grader reuse miss as missing_outputs")
+    reuse_summary = missing_grading_payload.get("reuse_summary", {})
+    if reuse_summary.get("reused_steps") != ["executor-with"]:
+        errors.append(f"missing grading reuse summary should reuse only executor-with, got {reuse_summary.get('reused_steps')!r}")
+    if reuse_summary.get("rerun_steps") != ["grader-report"]:
+        errors.append(f"missing grading reuse summary should rerun only grader-report, got {reuse_summary.get('rerun_steps')!r}")
     if not grading_file.exists():
         errors.append("missing grading was not restored by grader rerun")
 
@@ -346,6 +361,9 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("--force-grader incorrectly reused grader")
     if force_grader_payload.get("grader", {}).get("reuse", {}).get("reason") != "force_grader":
         errors.append("--force-grader did not explain grader reuse miss as force_grader")
+    reuse_summary = force_grader_payload.get("reuse_summary", {})
+    if reuse_summary.get("miss_reasons", {}).get("force_grader") != 1:
+        errors.append("--force-grader reuse summary should count force_grader miss")
 
 
 def verify_delegated_ci_json(root: Path, env: dict, errors: list[str]) -> None:

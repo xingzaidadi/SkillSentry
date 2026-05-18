@@ -159,6 +159,43 @@ def record_manifest_step(session_dir: Path, step: str, *, status: str, input_has
     return payload
 
 
+def summarize_reuse_decisions(*sections: dict) -> dict:
+    steps = []
+    miss_reasons: dict[str, int] = {}
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        reuse = section.get("reuse")
+        if not isinstance(reuse, dict):
+            reuse = {}
+        step = section.get("step") or reuse.get("step")
+        if not step:
+            continue
+        reused = bool(section.get("reused"))
+        reason = reuse.get("reason") or ("matched" if reused else "unknown")
+        entry = {
+            "step": step,
+            "reused": reused,
+            "reusable": reuse.get("reusable"),
+            "reason": reason,
+        }
+        missing_outputs = reuse.get("missing_outputs")
+        if isinstance(missing_outputs, list) and missing_outputs:
+            entry["missing_outputs_count"] = len(missing_outputs)
+            entry["missing_outputs_sample"] = missing_outputs[:5]
+        steps.append(entry)
+        if not reused:
+            miss_reasons[reason] = miss_reasons.get(reason, 0) + 1
+
+    return {
+        "steps": steps,
+        "reused_steps": [item["step"] for item in steps if item.get("reused")],
+        "rerun_steps": [item["step"] for item in steps if not item.get("reused")],
+        "miss_reasons": miss_reasons,
+        "all_reused": bool(steps) and all(item.get("reused") for item in steps),
+    }
+
+
 def unique_paths(paths: list[Path]) -> list[Path]:
     seen = set()
     unique = []
@@ -542,6 +579,7 @@ def run_profile_local(args) -> tuple[int, dict]:
             preflight=preflight,
             cases=prepared,
             executor=executor,
+            reuse_summary=summarize_reuse_decisions(executor),
             timings=timings.snapshot(),
         )
         save_json(session_dir / "sentry-run-result.json", payload)
@@ -597,6 +635,7 @@ def run_profile_local(args) -> tuple[int, dict]:
         cases=prepared,
         executor=executor,
         grader=grader,
+        reuse_summary=summarize_reuse_decisions(executor, grader),
         gate=gate,
         diagnostics=diagnostics,
         manifest=str(manifest_path(session_dir)),
@@ -721,6 +760,12 @@ def main() -> int:
             print(f"- {payload['error']}")
         if payload.get("warning"):
             print(f"- {payload['warning']}")
+        reuse_summary = payload.get("reuse_summary", {})
+        if isinstance(reuse_summary, dict) and reuse_summary.get("steps"):
+            print("reuse:")
+            for item in reuse_summary["steps"]:
+                action = "reused" if item.get("reused") else "reran"
+                print(f"- {item.get('step')}: {action} ({item.get('reason')})")
         artifacts = payload.get("artifacts", {})
         if isinstance(artifacts, dict) and artifacts.get("report_html"):
             print(f"report: {artifacts['report_html']}")

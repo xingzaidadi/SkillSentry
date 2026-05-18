@@ -127,12 +127,15 @@ def timing_from_sentry_run_result(path: Path, payload: dict) -> tuple[dict, dict
         for name, duration in phases_ms.items()
         if _milliseconds(duration) is not None
     ]
-    reuse_decisions = []
+    reuse_summary = _as_dict(payload.get("reuse_summary"))
+    reuse_decisions = _as_list(reuse_summary.get("steps"))
     for key in ("executor", "grader"):
         section = _as_dict(payload.get(key))
         if not section:
             continue
         reuse = _as_dict(section.get("reuse"))
+        if any(item.get("step") == (section.get("step") or key) for item in reuse_decisions):
+            continue
         reuse_decisions.append(
             {
                 "step": section.get("step") or key,
@@ -152,6 +155,7 @@ def timing_from_sentry_run_result(path: Path, payload: dict) -> tuple[dict, dict
         "profile": payload.get("profile"),
         "status": payload.get("status"),
         "session_dir": payload.get("session_dir"),
+        "reuse_summary": reuse_summary,
         "reuse_decisions": reuse_decisions,
     }
 
@@ -421,6 +425,7 @@ def analyze(path: Path, top: int = 5) -> dict:
         "top_steps": steps[:top],
         "top_phases": phases[:top],
         "failed_steps": timings.get("failed_steps", []),
+        "reuse_summary": _as_dict(meta.get("reuse_summary")),
         "reuse_decisions": _as_list(meta.get("reuse_decisions")),
         "executor_timing": executor_timing(session_dir, top),
         "grader_timing": grader_timing(session_dir, top),
@@ -467,6 +472,9 @@ def main() -> int:
             print("reuse decisions:")
             for item in reuse_decisions:
                 print(f"- {item.get('step')}: reused={item.get('reused')} reason={item.get('reason')}")
+        reuse_summary = _as_dict(payload.get("reuse_summary"))
+        if reuse_summary.get("rerun_steps"):
+            print(f"rerun steps: {', '.join(reuse_summary.get('rerun_steps'))}")
         executor = _as_dict(payload.get("executor_timing"))
         if executor.get("available"):
             print("executor timing:")
