@@ -22,7 +22,8 @@
 - `--github-output` 现在额外输出单行 JSON `timing_hints`,方便 workflow 后续步骤复用耗时建议;该输出不参与判定或退出码。
 - `sentry_run.py --profile local --reuse-session` 现在在 executor/grader payload 中输出复用命中/未命中原因,并要求 grader 复用时每个 `eval-*/grading.json` 都完整存在。
 - `sentry_run.py --profile ci|release --format json` 现在会捕获委托 CI 的 stdout/stderr 到 payload,避免子进程日志污染 JSON 输出。
-- 新增 `scripts/sentry_timing.py`: 独立分析 `eval_result.json` 或 session timing artifacts,输出最慢 step/phase、executor per-eval 耗时分布、grader per-eval 耗时分布和优化建议;`no-llm, no-network`。
+- `scripts/sentry_timing.py` 现在可直接读取 `sentry-run-result.json`,展示 local profile 阶段耗时和 executor/grader 复用决策。
+- 新增 `scripts/sentry_timing.py`: 独立分析 `eval_result.json`、`sentry-run-result.json` 或 session timing artifacts,输出最慢 step/phase、executor per-eval 耗时分布、grader per-eval 耗时分布、local 复用决策和优化建议;`no-llm, no-network`。
 - `evals.json` / `cases.cache.json` 读取兼容 UTF-8 BOM,避免 Windows/PowerShell 生成的用例文件解析失败。
 - `sentry_ci.py` 现在复用 `sentry_report.py`、`sentry_case_lint.py`、`sentry_executor.py`、`sentry_grader.py`,保留原有 pipeline、artifact、exit code、GitHub output 和 Checks 契约。
 - 新增确定性回归脚本:`verify_sentry_report.py`、`verify_sentry_executor.py`、`verify_sentry_grader.py`、`verify_sentry_run.py`;`verify_ci_feasibility.py` 改为覆盖 `sentry_case_lint.py` CLI。

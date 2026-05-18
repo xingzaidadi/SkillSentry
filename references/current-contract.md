@@ -52,7 +52,7 @@ v9.0 是契约收敛版,不是功能扩展版。
 | `scripts/sentry_run.py` | profile 组合器:`preflight/lint/debug/local/ci/release`;轻 profile 只读已有 artifact 或做确定性检查 | 不替代 `sentry_ci.py` 的完整 CI/release 契约 |
 | `scripts/sentry_ci.py` | 编排 CI pipeline、生成/复用 cases、调用 executor/grader/gate/publish;记录 `case_warnings` 并支持 `--timeout-per-eval` | 不把不可执行用例伪装成真实质量失败,不把总超时当作单用例超时 |
 | `scripts/sentry_diagnostics.py` | 聚合 CI/publish 诊断,区分 case warning、executor timeout/error、grader error、sync skipped、Delta 和 publish 状态 | 不参与评分、不改写 grading/gate 原始证据 |
-| `scripts/sentry_timing.py` | 读取 `eval_result.json` 或 session timing artifacts,排序慢 step/phase,汇总 executor per-eval 耗时和已有 grader per-eval 耗时并给出观测建议 | 不调 LLM、不联网、不改变 pipeline/gate/退出码 |
+| `scripts/sentry_timing.py` | 读取 `eval_result.json`、`sentry-run-result.json` 或 session timing artifacts,排序慢 step/phase,汇总 executor per-eval 耗时、已有 grader per-eval 耗时和 local 复用决策并给出观测建议 | 不调 LLM、不联网、不改变 pipeline/gate/退出码 |
 | `scripts/sentry_sync.py` | 包装 `sync_cases.py`,为 sync 步骤输出稳定 JSON,无飞书配置时显式 `skipped_no_config` | 不替代飞书 API 实现、不隐式跳过 sync 步骤 |
 | `scripts/sentry_publish.py` | 包装发布步骤,输出稳定 `publish-result.json` 并生成本地报告兜底 | 不替代交互式飞书上传、不改变报告视觉结构 |
 | `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体的当前口径漂移 | 不替代静态规则检查、不评价被测 Skill 质量 |

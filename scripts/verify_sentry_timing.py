@@ -136,6 +136,52 @@ def verify_session(root: Path, errors: list[str]) -> None:
         errors.append("session grader timing p50 should be 600.0ms")
 
 
+def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
+    session_dir = root / "run-result-session"
+    session_dir.mkdir()
+    sentry_state.save_session(session_dir, {"skill": "timing-fixture", "mode": "local"})
+    save_json(session_dir / "executor_results.json", make_executor_payload())
+    save_json(session_dir / "eval-1" / "grading.json", make_grading_payload("eval-1", 300.0))
+    save_json(session_dir / "eval-2" / "grading.json", make_grading_payload("eval-2", 900.0))
+    result_file = root / "sentry-run-result.json"
+    save_json(
+        result_file,
+        {
+            "status": "OK",
+            "profile": "local",
+            "session_dir": str(session_dir),
+            "timings": {
+                "total_ms": 1800.0,
+                "phases_ms": {"preflight": 10.0, "executor": 1200.0, "grader": 500.0, "diagnostics": 90.0},
+            },
+            "executor": {
+                "step": "executor-with",
+                "reused": True,
+                "reuse": {"reusable": True, "reason": "matched"},
+            },
+            "grader": {
+                "step": "grader-report",
+                "reused": False,
+                "reuse": {"reusable": False, "reason": "missing_outputs"},
+            },
+        },
+    )
+    payload = sentry_timing.analyze(result_file, top=2)
+    if payload.get("source", {}).get("kind") != "sentry_run_result":
+        errors.append("sentry-run-result source kind should be sentry_run_result")
+    if payload.get("top_phases", [{}])[0].get("phase") != "executor":
+        errors.append("sentry-run-result top phase should be executor")
+    if "Executor dominates" not in payload.get("recommendation", ""):
+        errors.append("sentry-run-result recommendation should mention executor")
+    decisions = payload.get("reuse_decisions", [])
+    if len(decisions) != 2 or decisions[0].get("reason") != "matched" or decisions[1].get("reason") != "missing_outputs":
+        errors.append("sentry-run-result should include executor/grader reuse decisions")
+    if not payload.get("executor_timing", {}).get("available"):
+        errors.append("sentry-run-result should resolve executor timing from session_dir")
+    if not payload.get("grader_timing", {}).get("available"):
+        errors.append("sentry-run-result should resolve grader timing from session_dir")
+
+
 def verify_cli(root: Path, errors: list[str]) -> None:
     result_file = root / "cli-eval-result.json"
     save_json(result_file, {"timings": make_timing_payload()})
@@ -185,6 +231,7 @@ def verify() -> tuple[bool, list[str]]:
         root = Path(tmp)
         verify_eval_result(root, errors)
         verify_session(root, errors)
+        verify_sentry_run_result(root, errors)
         verify_cli(root, errors)
     return not errors, errors
 

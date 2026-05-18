@@ -116,10 +116,49 @@ def timing_from_session(path: Path) -> tuple[dict, dict]:
     }
 
 
+def timing_from_sentry_run_result(path: Path, payload: dict) -> tuple[dict, dict]:
+    timings = _as_dict(payload.get("timings"))
+    phases_ms = _as_dict(timings.get("phases_ms"))
+    phases = [
+        {"phase": str(name), "status": "OK", "duration_ms": _milliseconds(duration)}
+        for name, duration in phases_ms.items()
+        if _milliseconds(duration) is not None
+    ]
+    reuse_decisions = []
+    for key in ("executor", "grader"):
+        section = _as_dict(payload.get(key))
+        if not section:
+            continue
+        reuse = _as_dict(section.get("reuse"))
+        reuse_decisions.append(
+            {
+                "step": section.get("step") or key,
+                "reused": section.get("reused"),
+                "reason": reuse.get("reason"),
+                "reusable": reuse.get("reusable"),
+            }
+        )
+    return {
+        "total_ms": timings.get("total_ms"),
+        "steps": [],
+        "phases": phases,
+        "failed_steps": [],
+    }, {
+        "source": str(path),
+        "kind": "sentry_run_result",
+        "profile": payload.get("profile"),
+        "status": payload.get("status"),
+        "session_dir": payload.get("session_dir"),
+        "reuse_decisions": reuse_decisions,
+    }
+
+
 def load_timing(path: Path) -> tuple[dict, dict]:
     if path.is_dir() or path.name == "session.json":
         return timing_from_session(path)
     payload = load_json(path)
+    if "profile" in payload and "timings" in payload:
+        return timing_from_sentry_run_result(path, payload)
     if "timings" in payload:
         return _as_dict(payload.get("timings")), {
             "source": str(path),
@@ -148,6 +187,14 @@ def resolve_session_dir(input_path: Path, meta: dict) -> Path | None:
         if source.name == "session.json":
             return source.parent
         return source if source.is_dir() else None
+    if meta.get("kind") == "sentry_run_result":
+        session_dir = meta.get("session_dir")
+        if isinstance(session_dir, str) and session_dir:
+            candidate = Path(session_dir)
+            if not candidate.is_absolute():
+                candidate = input_path.parent / candidate
+            if (candidate / "session.json").exists():
+                return candidate
 
     artifacts = _as_dict(meta.get("artifacts"))
     session_report = artifacts.get("session_report_html")
@@ -337,12 +384,14 @@ def recommendation(step: dict) -> str:
     duration = _number(step.get("duration_ms"))
     if not name:
         return "No timing data available."
-    if name == "executor-with" or name == "executor-without":
+    if name in {"executor-with", "executor-without", "executor"}:
         return "Executor dominates; reduce eval count, reuse local profile artifacts, or inspect per-eval runner time before adding cache."
-    if name == "grader-report":
+    if name in {"grader-report", "grader"}:
         return "Grader dominates; inspect assertion count and LLM fallback/API latency before changing scoring."
-    if name == "cases":
+    if name in {"cases", "prepare_cases"}:
         return "Cases dominate; prefer cached cases or lint/preflight profiles when case design is not being tested."
+    if name == "diagnostics":
+        return "Diagnostics dominates; inspect artifact size and report regeneration cost before changing pipeline behavior."
     if name.startswith("sync-"):
         return "Sync dominates; check Feishu/network configuration and keep skipped_no_config explicit when offline."
     if name == "publish":
@@ -365,6 +414,7 @@ def analyze(path: Path, top: int = 5) -> dict:
         "top_steps": steps[:top],
         "top_phases": phases[:top],
         "failed_steps": timings.get("failed_steps", []),
+        "reuse_decisions": _as_list(meta.get("reuse_decisions")),
         "executor_timing": executor_timing(session_dir, top),
         "grader_timing": grader_timing(session_dir, top),
         "recommendation": recommendation(slowest),
@@ -405,6 +455,11 @@ def main() -> int:
         print("top phases:")
         for item in payload["top_phases"]:
             print(f"- {item.get('phase')}: {item.get('duration_ms')}ms ({item.get('status', 'N/A')})")
+        reuse_decisions = _as_list(payload.get("reuse_decisions"))
+        if reuse_decisions:
+            print("reuse decisions:")
+            for item in reuse_decisions:
+                print(f"- {item.get('step')}: reused={item.get('reused')} reason={item.get('reason')}")
         executor = _as_dict(payload.get("executor_timing"))
         if executor.get("available"):
             print("executor timing:")
