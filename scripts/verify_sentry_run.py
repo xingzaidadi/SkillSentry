@@ -191,6 +191,12 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("local fresh prepare should write session.cases.reused=false")
     if not (session_dir / "manifest.json").exists():
         errors.append("local did not write manifest.json")
+    manifest = load_json(session_dir / "manifest.json")
+    grader_outputs = manifest.get("steps", {}).get("grader-report", {}).get("outputs", [])
+    if len(grader_outputs) != len(set(grader_outputs)):
+        errors.append("local manifest grader outputs should be unique")
+    if not any(str(output).endswith("eval-1\\grading.json") or str(output).endswith("eval-1/grading.json") for output in grader_outputs):
+        errors.append("local manifest grader outputs should include expected per-eval grading.json")
 
     count_file = Path(env["SKILLSENTRY_FAKE_CLAUDE_COUNT"])
     before = fake_count(count_file)

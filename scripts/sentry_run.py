@@ -149,7 +149,7 @@ def record_manifest_step(session_dir: Path, step: str, *, status: str, input_has
     payload = {
         "status": status,
         "input_hash": input_hash,
-        "outputs": [str(path) for path in outputs],
+        "outputs": [str(path) for path in unique_paths(outputs)],
         "updated_at": utc_now(),
     }
     if extra:
@@ -157,6 +157,18 @@ def record_manifest_step(session_dir: Path, step: str, *, status: str, input_has
     manifest.setdefault("steps", {})[step] = payload
     save_manifest(session_dir, manifest)
     return payload
+
+
+def unique_paths(paths: list[Path]) -> list[Path]:
+    seen = set()
+    unique = []
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
 
 
 def combine_hash(*parts) -> str:
@@ -558,7 +570,7 @@ def run_profile_local(args) -> tuple[int, dict]:
                 "grader-report",
                 status=grader.get("status", "ERROR"),
                 input_hash=grader_hash,
-                outputs=grader_outputs + sorted(session_dir.glob("eval-*/grading.json")),
+                outputs=grader_outputs,
                 extra={"model": args.model},
             )
     with timings.phase("diagnostics"):
