@@ -233,6 +233,27 @@ def verify_cli(root: Path, errors: list[str]) -> None:
     )
     if missing.returncode != 2:
         errors.append(f"sentry_timing.py missing input exit expected 2, got {missing.returncode}")
+    empty_session = root / "empty-session"
+    empty_session.mkdir()
+    sentry_state.save_session(empty_session, {"skill": "timing-fixture", "mode": "local"})
+    text = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "sentry_timing.py"),
+            "--input",
+            str(empty_session),
+            "--format",
+            "text",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if text.returncode != 0:
+        errors.append(f"sentry_timing.py text empty session exited {text.returncode}: {text.stderr.strip()} {text.stdout.strip()}")
+    if "executor timing: unavailable" not in text.stdout:
+        errors.append("text output should explain unavailable executor timing")
 
 
 def verify() -> tuple[bool, list[str]]:

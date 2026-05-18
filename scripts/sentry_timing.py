@@ -430,7 +430,7 @@ def analyze(path: Path, top: int = 5) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Analyze SkillSentry timing artifacts")
-    parser.add_argument("--input", required=True, help="Path to eval_result.json, session.json, or session directory")
+    parser.add_argument("--input", required=True, help="Path to eval_result.json, sentry-run-result.json, session.json, or session directory")
     parser.add_argument("--top", type=int, default=5, help="Number of slow steps/phases to show")
     parser.add_argument("--output", help="Optional JSON output path")
     parser.add_argument("--format", choices=["text", "json"], default="text")
@@ -483,6 +483,8 @@ def main() -> int:
                     f"- {item.get('variant')} {item.get('eval_id')}: "
                     f"{item.get('duration_ms')}ms ({item.get('status', 'N/A')})"
                 )
+        elif executor.get("session_dir"):
+            print(f"executor timing: unavailable ({executor.get('reason')})")
         grader = _as_dict(payload.get("grader_timing"))
         if grader.get("available"):
             duration = _as_dict(grader.get("duration_ms"))
