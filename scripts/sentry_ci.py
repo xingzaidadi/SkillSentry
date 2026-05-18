@@ -221,7 +221,7 @@ def prepare_existing_cases(session_dir: Path, existing_cases: Path | None) -> bo
     shutil.copy2(existing_cases, session_dir / "evals.json")
     log(f"  ⚡ 预置已有用例: {existing_cases}")
     try:
-        cases = json.loads((session_dir / "evals.json").read_text(encoding="utf-8"))
+        cases = json.loads((session_dir / "evals.json").read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         log(f"  ❌ 用例 JSON 解析失败: {exc}")
         return False
@@ -359,7 +359,7 @@ def run_cases(session_dir: Path, skill_path: Path, args, existing_cases: Path = 
         shutil.copy2(existing_cases, session_dir / "evals.json")
         log(f"  ⚡ 复用已有用例: {existing_cases}")
         try:
-            cases = json.loads((session_dir / "evals.json").read_text(encoding="utf-8"))
+            cases = json.loads((session_dir / "evals.json").read_text(encoding="utf-8-sig"))
             total = len(cases) if isinstance(cases, list) else 0
             record_case_feasibility(session_dir, cases)
         except json.JSONDecodeError:

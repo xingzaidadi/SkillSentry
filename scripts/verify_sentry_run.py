@@ -57,16 +57,21 @@ def make_fixture(root: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     cases = root / "evals.json"
-    save_json(
-        cases,
-        [
-            {
-                "id": "eval-1",
-                "name": "fixture",
-                "prompt": "Say ok",
-                "assertions": [{"name": "A1", "type": "exact_match", "expected": "ok"}],
-            }
-        ],
+    cases.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "eval-1",
+                    "name": "fixture",
+                    "prompt": "Say ok",
+                    "assertions": [{"name": "A1", "type": "exact_match", "expected": "ok"}],
+                }
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8-sig",
     )
     return skill, cases
 

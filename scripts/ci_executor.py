@@ -171,7 +171,7 @@ def execute_all_evals(
     variant: str = "with_skill",
 ) -> bool:
     """执行所有 evals，返回是否有至少 1 个成功"""
-    with open(evals_file, encoding="utf-8") as f:
+    with open(evals_file, encoding="utf-8-sig") as f:
         evals = json.load(f)
 
     if not evals:

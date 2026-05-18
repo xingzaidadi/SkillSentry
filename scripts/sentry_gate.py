@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
 
 def load_json(path: Path):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (FileNotFoundError, json.JSONDecodeError):
         return None
 

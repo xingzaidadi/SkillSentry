@@ -30,7 +30,7 @@ LINT_VERSION = 1
 
 
 def load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def save_json(path: Path, payload: dict) -> None:

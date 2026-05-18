@@ -74,7 +74,7 @@ def save_json(path: Path, payload: dict) -> None:
 
 
 def load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def file_hash(path: Path) -> str | None:

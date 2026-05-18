@@ -324,7 +324,7 @@ def grade_all_evals(
     verbose: bool = False,
 ) -> bool:
     """评审所有 evals，写入 grading.json，返回是否有至少 1 个成功"""
-    with open(evals_file, encoding="utf-8") as f:
+    with open(evals_file, encoding="utf-8-sig") as f:
         evals = json.load(f)
 
     if not evals:
