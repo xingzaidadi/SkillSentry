@@ -18,6 +18,7 @@
 - `ci_grader.py` 现在为每个实际写入的 `grading.json` 追加 `duration_ms` / `timing.grader_duration_ms`,只做耗时观测,不参与评分。
 - diagnostics、summary Markdown 和 HTML 报告现在展示 executor/grader 单用例耗时聚合统计和最慢项,用于定位慢 case。
 - diagnostics 现在新增确定性 `timing_hints`,summary Markdown 和 HTML 报告会展示下一步排查建议;该建议只读 timing artifact,不参与评分。
+- GitHub Checks summary 现在展示 `diagnostics.timing_hints`,便于在 PR/Actions 页面直接看到耗时排查建议;该字段不参与判定或退出码。
 - 新增 `scripts/sentry_timing.py`: 独立分析 `eval_result.json` 或 session timing artifacts,输出最慢 step/phase、executor per-eval 耗时分布、grader per-eval 耗时分布和优化建议;`no-llm, no-network`。
 - `evals.json` / `cases.cache.json` 读取兼容 UTF-8 BOM,避免 Windows/PowerShell 生成的用例文件解析失败。
 - `sentry_ci.py` 现在复用 `sentry_report.py`、`sentry_case_lint.py`、`sentry_executor.py`、`sentry_grader.py`,保留原有 pipeline、artifact、exit code、GitHub output 和 Checks 契约。

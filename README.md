@@ -220,7 +220,7 @@ python scripts/sentry_report.py --result ci-eval-results/<skill>/eval_result.jso
 ```
 
 CI 退出码固定为: `PASS=0`, `CONDITIONAL PASS=1`, `FAIL=1`, `ERROR=2`。开启 `--github-output` 时会输出 `verdict/status/release_status/exit_code/report_html/session_report_html/diagnostic_categories/authoritative_pass_rate/grade`。
-GitHub Checks 使用同一份 `eval_result.json`: `PASS` 映射为 `success`, `CONDITIONAL PASS` 映射为 `action_required`, `FAIL/ERROR` 映射为 `failure`,并在 Check summary 里展示 report 路径和诊断分类。
+GitHub Checks 使用同一份 `eval_result.json`: `PASS` 映射为 `success`, `CONDITIONAL PASS` 映射为 `action_required`, `FAIL/ERROR` 映射为 `failure`,并在 Check summary 里展示 report 路径、诊断分类和 `diagnostics.timing_hints`。
 
 | 等级 | 精确通过率 | 含义 |
 |------|----------|------|

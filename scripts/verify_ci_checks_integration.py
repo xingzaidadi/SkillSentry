@@ -37,6 +37,7 @@ def make_result(verdict: str, status: str, exit_code: int) -> dict:
         "diagnostics": {
             "categories": [] if status == "pass" else ["fixture_category"],
             "notes": ["fixture diagnostic note"],
+            "timing_hints": ["fixture timing hint"],
             "executor": {"total": 1, "success": 1 if status == "pass" else 0, "failed": 0, "timeouts": 0},
         },
         "artifacts": {
@@ -60,7 +61,7 @@ def verify_payloads(errors: list[str]) -> None:
             errors.append(f"{verdict}: expected conclusion {conclusion}, got {payload.get('conclusion')}")
         output = payload.get("output", {})
         summary = output.get("summary", "")
-        for marker in (status, "Report", "fixture diagnostic note", "Authoritative pass rate"):
+        for marker in (status, "Report", "fixture diagnostic note", "fixture timing hint", "Authoritative pass rate"):
             if marker not in summary:
                 errors.append(f"{verdict}: check summary missing {marker!r}")
         if "SkillSentry / fixture" != payload.get("name"):

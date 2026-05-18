@@ -91,6 +91,7 @@ def build_check_payload(result: dict, check_name: str, sha: str) -> dict:
     grade = summary.get("grade", "N/A")
     categories = diagnostics.get("categories", []) if isinstance(diagnostics, dict) else []
     notes = diagnostics.get("notes", []) if isinstance(diagnostics, dict) else []
+    timing_hints = diagnostics.get("timing_hints", []) if isinstance(diagnostics, dict) else []
     report_html = artifacts.get("output_report_html") or artifacts.get("session_report_html") or "N/A"
 
     conclusion = check_conclusion(status, verdict)
@@ -129,6 +130,12 @@ def build_check_payload(result: dict, check_name: str, sha: str) -> dict:
         lines.append("### 诊断说明")
         for note in notes:
             lines.append(f"- {note}")
+        lines.append("")
+
+    if timing_hints:
+        lines.append("### Timing hints")
+        for hint in timing_hints:
+            lines.append(f"- {hint}")
         lines.append("")
 
     if isinstance(diagnostics, dict):
