@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import sentry_ci
+import sentry_preflight
 import sentry_state
 from sentry_diagnostics import collect_diagnostics, render_markdown
 
@@ -41,15 +42,33 @@ def verify() -> tuple[bool, list[str]]:
     with tempfile.TemporaryDirectory(prefix="skillsentry-ci-preflight-") as tmp:
         root = Path(tmp)
         skill_path = make_skill(root)
-        config_path = root / "missing-config.json"
-        args = SimpleNamespace(
-            skill=str(skill_path),
-            mode="regression",
-            runtime="auto",
-            config=str(config_path),
+        config_path = root / "config.json"
+        config_path.write_text(
+            json.dumps({"feishu": {"app_id": "id", "app_secret": "secret", "app_token": "token"}}, ensure_ascii=False)
+            + "\n",
+            encoding="utf-8-sig",
         )
+        old_inputs_root = sentry_preflight.INPUTS_ROOT
+        sentry_preflight.INPUTS_ROOT = root / "inputs"
+        try:
+            cache_dir = sentry_preflight.INPUTS_ROOT / skill_path.parent.name
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            args = SimpleNamespace(
+                skill=str(skill_path),
+                mode="regression",
+                runtime="auto",
+                config=str(config_path),
+            )
 
-        code, preflight = sentry_ci.run_preflight(args)
+            code, preflight = sentry_ci.run_preflight(args)
+            cache_file = cache_dir / "cases.cache.json"
+            cache_file.write_text(
+                json.dumps({"skill_hash": preflight.get("skill_hash"), "evals": []}, ensure_ascii=False) + "\n",
+                encoding="utf-8-sig",
+            )
+            code, preflight = sentry_ci.run_preflight(args)
+        finally:
+            sentry_preflight.INPUTS_ROOT = old_inputs_root
         if code != 0:
             errors.append(f"run_preflight returned {code}: {preflight}")
             return False, errors
@@ -59,6 +78,10 @@ def verify() -> tuple[bool, list[str]]:
             errors.append(f"preflight.skill_type expected text_generation, got {preflight.get('skill_type')!r}")
         if "runtime_tools" not in preflight:
             errors.append("preflight.runtime_tools missing")
+        if preflight.get("config", {}).get("feishu_configured") is not True:
+            errors.append("preflight should read UTF-8 BOM config.json")
+        if preflight.get("cases_cache", {}).get("hash_matched") is not True:
+            errors.append("preflight should read UTF-8 BOM cases.cache.json")
 
         session_dir = root / "session"
         session_dir.mkdir()

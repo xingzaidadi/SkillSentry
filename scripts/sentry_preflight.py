@@ -130,7 +130,7 @@ def config_status(config_path: Path) -> dict:
     if not config_path.exists():
         return {"exists": False, "feishu_configured": False, "path": str(config_path)}
     try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
+        data = json.loads(config_path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         return {
             "exists": True,
@@ -205,7 +205,7 @@ def cache_status(skill_name: str, skill_hash: str) -> dict:
     cache_file = inputs_dir / "cases.cache.json"
     if cache_file.exists():
         try:
-            data = json.loads(cache_file.read_text(encoding="utf-8"))
+            data = json.loads(cache_file.read_text(encoding="utf-8-sig"))
             cache_hash = data.get("skill_hash") or data.get("hash")
             hash_matched = cache_hash == skill_hash
         except json.JSONDecodeError:
