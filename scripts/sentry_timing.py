@@ -102,6 +102,9 @@ def timing_from_session(path: Path) -> tuple[dict, dict]:
     timing = _as_dict(session.get("ci_timing"))
     steps = _as_list(session.get("ci_step_timings"))
     phases = _as_list(session.get("ci_phase_timings"))
+    run_result = session_file.parent / "sentry-run-result.json"
+    if not timing and not steps and not phases and run_result.exists():
+        return timing_from_sentry_run_result(run_result, load_json(run_result))
     return {
         "total_ms": timing.get("total_ms"),
         "steps": steps,
