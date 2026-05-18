@@ -65,6 +65,13 @@ def make_grading_payload(eval_id: str, duration_ms: float, total: int = 2) -> di
     }
 
 
+def make_cases() -> list[dict]:
+    return [
+        {"id": "eval-1", "prompt": "fast"},
+        {"id": "eval-2", "prompt": "slow"},
+    ]
+
+
 def verify_eval_result(root: Path, errors: list[str]) -> None:
     session_dir = root / "eval-result-session"
     session_dir.mkdir()
@@ -119,9 +126,11 @@ def verify_session(root: Path, errors: list[str]) -> None:
             "ci_timing": {"total_ms": timing["total_ms"], "failed_steps": []},
         },
     )
+    save_json(session_dir / "evals.json", make_cases())
     save_json(session_dir / "executor_results.json", make_executor_payload())
     save_json(session_dir / "eval-1" / "grading.json", make_grading_payload("eval-1", 300.0))
     save_json(session_dir / "eval-2" / "grading.json", make_grading_payload("eval-2", 900.0))
+    save_json(session_dir / "eval-stale" / "grading.json", make_grading_payload("eval-stale", 9999.0))
     payload = sentry_timing.analyze(session_dir, top=5)
     if payload.get("source", {}).get("kind") != "session":
         errors.append("session analysis source kind should be session")
@@ -134,6 +143,8 @@ def verify_session(root: Path, errors: list[str]) -> None:
     grader = payload.get("grader_timing", {})
     if grader.get("duration_ms", {}).get("p50") != 600.0:
         errors.append("session grader timing p50 should be 600.0ms")
+    if grader.get("grading_files") != 2:
+        errors.append("session grader timing should ignore stale grading files outside evals.json")
 
 
 def verify_sentry_run_result(root: Path, errors: list[str]) -> None:

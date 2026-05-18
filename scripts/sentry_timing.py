@@ -12,6 +12,7 @@ import json
 import sys
 from pathlib import Path
 
+import sentry_case_lint
 import sentry_reuse
 
 
@@ -360,7 +361,28 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
     }
 
 
+def current_case_ids(session_dir: Path) -> list[str]:
+    evals_file = session_dir / "evals.json"
+    if not evals_file.exists():
+        return []
+    try:
+        payload = load_json(evals_file)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+    case_ids = []
+    for idx, case in enumerate(sentry_case_lint.extract_cases(payload), 1):
+        if not isinstance(case, dict):
+            continue
+        case_ids.append(str(case.get("id", f"eval-{idx}")))
+    return case_ids
+
+
 def find_grading_files(session_dir: Path) -> list[Path]:
+    case_ids = current_case_ids(session_dir)
+    if case_ids:
+        files = [session_dir / eval_id / "grading.json" for eval_id in case_ids]
+        return sorted(path for path in files if path.exists())
+
     files = []
     for path in session_dir.rglob("grading.json"):
         if "without_skill" in set(path.parts):
