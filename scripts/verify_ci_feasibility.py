@@ -24,7 +24,7 @@ def assert_equal(actual, expected, message: str) -> None:
 
 
 def load_session(session_dir: Path) -> dict:
-    return json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
+    return json.loads((session_dir / "session.json").read_text(encoding="utf-8-sig"))
 
 
 def main() -> int:
@@ -43,6 +43,8 @@ def main() -> int:
         session_dir = Path(tmp) / "session"
         session_dir.mkdir()
         sentry_state.save_session(session_dir, {"skill": "fixture", "case_warnings": [{"stale": True}]})
+        session_file = session_dir / "session.json"
+        session_file.write_text(session_file.read_text(encoding="utf-8"), encoding="utf-8-sig")
 
         record_case_feasibility(session_dir, missing_cases)
         session = load_session(session_dir)

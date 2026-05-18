@@ -70,7 +70,7 @@ def load_session(session_dir: str | Path) -> dict:
     path = session_file(session_dir)
     if not path.exists():
         raise FileNotFoundError(f"session.json not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def backup(path: Path) -> None:
