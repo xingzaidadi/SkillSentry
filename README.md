@@ -132,6 +132,7 @@ bash install.sh
 | `scripts/sentry_executor.py` | executor 稳定 wrapper,调用 `ci_executor.py` 执行 with/without_skill,输出 JSON 并更新 session。 |
 | `scripts/sentry_grader.py` | grader-report 稳定 wrapper,调用 `ci_grader.py` 评审已有 response,写 summary/report 并更新 session。 |
 | `scripts/sentry_run.py` | profile 组合器;`preflight/lint/debug` 跑轻路径,`local` 跑已有 cases 的本地单边测评,`ci/release` 委托完整 CI。 |
+| `scripts/sentry_reuse.py` | 复用 miss reason 到排查 hint 的共享映射,供 run/timing 输出使用。 |
 | `scripts/sentry_diagnostics.py` | 聚合 CI 诊断:用例可执行性、executor 失败/超时、grader 错误、sync 降级、Delta 状态和 publish 状态。 |
 | `scripts/sentry_timing.py` | 独立轻量耗时分析器,读取 `eval_result.json`、`sentry-run-result.json` 或 session,输出最慢 step/phase、executor per-eval 耗时分布、grader per-eval 耗时分布、local 复用决策和优化建议;不调 LLM、不联网。 |
 | `scripts/sentry_report.py` | 独立轻量报告生成器,只读取已有 session/result artifact 并生成 HTML,不调 LLM、不联网。 |
@@ -267,6 +268,7 @@ SkillSentry/
 │   ├── sentry_grader.py        # Anthropic SDK/LLM grader-report wrapper
 │   ├── sentry_run.py           # profile 组合器
 │   ├── sentry_diagnostics.py   # CI/publish 执行诊断聚合
+│   ├── sentry_reuse.py         # local 复用诊断 hint 共享模块
 │   ├── sentry_report.py        # no-LLM/no-network HTML 报告生成器
 │   ├── sentry_sync.py          # sync 步骤稳定 JSON wrapper
 │   ├── sentry_publish.py       # publish 步骤稳定 JSON wrapper
