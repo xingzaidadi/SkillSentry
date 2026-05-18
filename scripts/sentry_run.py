@@ -15,6 +15,8 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +46,26 @@ PROFILES = sorted(LIGHT_PROFILES | HEAVY_PROFILES)
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class ProfileTimings:
+    def __init__(self) -> None:
+        self.started = time.perf_counter()
+        self.phases: dict[str, float] = {}
+
+    @contextmanager
+    def phase(self, name: str):
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.phases[name] = round((time.perf_counter() - started) * 1000, 1)
+
+    def snapshot(self) -> dict:
+        return {
+            "total_ms": round((time.perf_counter() - self.started) * 1000, 1),
+            "phases_ms": dict(self.phases),
+        }
 
 
 def save_json(path: Path, payload: dict) -> None:
@@ -303,23 +325,28 @@ def expected_response_outputs(evals_file: Path, session_dir: Path, variant: str 
 
 
 def run_profile_preflight(args) -> tuple[int, dict]:
-    code, preflight = run_preflight(args)
-    return code, profile_payload("preflight", "OK" if code == 0 else "ERROR", preflight=preflight)
+    timings = ProfileTimings()
+    with timings.phase("preflight"):
+        code, preflight = run_preflight(args)
+    return code, profile_payload("preflight", "OK" if code == 0 else "ERROR", preflight=preflight, timings=timings.snapshot())
 
 
 def run_profile_lint(args) -> tuple[int, dict]:
-    code, preflight = run_preflight(args)
+    timings = ProfileTimings()
+    with timings.phase("preflight"):
+        code, preflight = run_preflight(args)
     if code != 0:
-        return code, profile_payload("lint", "ERROR", preflight=preflight)
+        return code, profile_payload("lint", "ERROR", preflight=preflight, timings=timings.snapshot())
 
-    session_dir = init_session(
-        preflight["skill_dir_name"],
-        preflight["skill_hash"],
-        preflight["skill_type"],
-        args.mode,
-        preflight,
-        preflight.get("runtime", args.runtime),
-    )
+    with timings.phase("session"):
+        session_dir = init_session(
+            preflight["skill_dir_name"],
+            preflight["skill_hash"],
+            preflight["skill_type"],
+            args.mode,
+            preflight,
+            preflight.get("runtime", args.runtime),
+        )
     cases_file = resolve_cases(args, preflight)
     if not cases_file:
         payload = profile_payload(
@@ -328,36 +355,42 @@ def run_profile_lint(args) -> tuple[int, dict]:
             session_dir=str(session_dir),
             preflight=preflight,
             warning="No evals.json/cases.cache.json found; only preflight completed.",
+            timings=timings.snapshot(),
         )
         save_json(session_dir / "sentry-run-result.json", payload)
         return 0, payload
 
-    prepared = prepare_cases(session_dir, cases_file)
+    with timings.phase("prepare_cases"):
+        prepared = prepare_cases(session_dir, cases_file)
     status = "OK" if prepared.get("status") == "OK" and prepared.get("case_lint", {}).get("warning_count", 0) == 0 else "WARN"
-    payload = profile_payload("lint", status, session_dir=str(session_dir), preflight=preflight, cases=prepared)
+    payload = profile_payload("lint", status, session_dir=str(session_dir), preflight=preflight, cases=prepared, timings=timings.snapshot())
     save_json(session_dir / "sentry-run-result.json", payload)
     return 0 if prepared.get("status") == "OK" else 1, payload
 
 
 def run_profile_debug(args) -> tuple[int, dict]:
+    timings = ProfileTimings()
     if not args.session_dir:
-        return 2, profile_payload("debug", "ERROR", error="--session-dir is required for profile=debug")
+        return 2, profile_payload("debug", "ERROR", error="--session-dir is required for profile=debug", timings=timings.snapshot())
     session_dir = Path(args.session_dir).expanduser()
     if not session_dir.exists():
-        return 2, profile_payload("debug", "ERROR", error=f"session dir not found: {session_dir}")
+        return 2, profile_payload("debug", "ERROR", error=f"session dir not found: {session_dir}", timings=timings.snapshot())
 
-    gate = build_gate(session_dir)
+    with timings.phase("gate"):
+        gate = build_gate(session_dir)
     save_json(session_dir / "gate-result.json", gate)
-    diagnostics = sentry_diagnostics.collect_diagnostics(session_dir, gate)
+    with timings.phase("diagnostics"):
+        diagnostics = sentry_diagnostics.collect_diagnostics(session_dir, gate)
     save_json(session_dir / "diagnostics.json", diagnostics)
-    report = sentry_report.ensure_session_report(
-        session_dir,
-        gate,
-        title="SkillSentry Debug Report",
-        generated_by="sentry_run.py",
-        footer="Debug profile recalculates gate, diagnostics, and report from existing artifacts.",
-        replace_generated_only=False,
-    )
+    with timings.phase("report"):
+        report = sentry_report.ensure_session_report(
+            session_dir,
+            gate,
+            title="SkillSentry Debug Report",
+            generated_by="sentry_run.py",
+            footer="Debug profile recalculates gate, diagnostics, and report from existing artifacts.",
+            replace_generated_only=False,
+        )
     payload = profile_payload(
         "debug",
         "OK",
@@ -365,70 +398,77 @@ def run_profile_debug(args) -> tuple[int, dict]:
         gate=gate,
         diagnostics=diagnostics,
         artifacts={"report_html": str(report), "diagnostics_json": str(session_dir / "diagnostics.json")},
+        timings=timings.snapshot(),
     )
     save_json(session_dir / "sentry-run-result.json", payload)
     return 0, payload
 
 
 def run_profile_local(args) -> tuple[int, dict]:
-    code, preflight = run_preflight(args)
+    timings = ProfileTimings()
+    with timings.phase("preflight"):
+        code, preflight = run_preflight(args)
     if code != 0:
-        return code, profile_payload("local", "ERROR", preflight=preflight)
+        return code, profile_payload("local", "ERROR", preflight=preflight, timings=timings.snapshot())
     cases_file = resolve_cases(args, preflight)
     if not cases_file:
-        return 2, profile_payload("local", "ERROR", preflight=preflight, error="profile=local requires --cases or cached evals")
+        return 2, profile_payload("local", "ERROR", preflight=preflight, error="profile=local requires --cases or cached evals", timings=timings.snapshot())
 
     try:
-        session_dir = resolve_local_session(args, preflight)
+        with timings.phase("session"):
+            session_dir = resolve_local_session(args, preflight)
     except FileNotFoundError as exc:
-        return 2, profile_payload("local", "ERROR", preflight=preflight, error=str(exc))
-    refresh_session_metadata(session_dir, args, preflight)
+        return 2, profile_payload("local", "ERROR", preflight=preflight, error=str(exc), timings=timings.snapshot())
+    with timings.phase("session_metadata"):
+        refresh_session_metadata(session_dir, args, preflight)
 
-    prepared = prepare_cases(session_dir, cases_file)
+    with timings.phase("prepare_cases"):
+        prepared = prepare_cases(session_dir, cases_file)
     if prepared.get("status") != "OK":
-        payload = profile_payload("local", "ERROR", session_dir=str(session_dir), preflight=preflight, cases=prepared)
+        payload = profile_payload("local", "ERROR", session_dir=str(session_dir), preflight=preflight, cases=prepared, timings=timings.snapshot())
         save_json(session_dir / "sentry-run-result.json", payload)
         return 1, payload
 
-    model = args.executor_model or args.model
-    evals_file = session_dir / "evals.json"
-    skill_path = Path(preflight["skill_path"])
-    executor_hash = combine_hash(
-        "executor-with",
-        file_hash(evals_file),
-        file_hash(skill_path),
-        model,
-        args.timeout_per_eval,
-    )
-    executor_outputs = [session_dir / "executor_results.json"] + expected_response_outputs(evals_file, session_dir)
-    if not args.force_executor and step_reusable(session_dir, "executor-with", executor_hash, executor_outputs):
-        executor = {
-            "status": "OK",
-            "step": "executor-with",
-            "variant": "with_skill",
-            "reused": True,
-            "summary_file": str(session_dir / "executor_results.json"),
-            "summary": load_json(session_dir / "executor_results.json"),
-        }
-    else:
-        executor = execute_executor_step(
-            evals_file=evals_file,
-            skill_path=skill_path,
-            session_dir=session_dir,
-            model=model,
-            timeout_per_eval=args.timeout_per_eval,
-            variant="with_skill",
-            verbose=args.verbose,
-            update_session=True,
-        )
-        record_manifest_step(
-            session_dir,
+    with timings.phase("executor"):
+        model = args.executor_model or args.model
+        evals_file = session_dir / "evals.json"
+        skill_path = Path(preflight["skill_path"])
+        executor_hash = combine_hash(
             "executor-with",
-            status=executor.get("status", "ERROR"),
-            input_hash=executor_hash,
-            outputs=executor_outputs,
-            extra={"model": model, "timeout_per_eval": args.timeout_per_eval},
+            file_hash(evals_file),
+            file_hash(skill_path),
+            model,
+            args.timeout_per_eval,
         )
+        executor_outputs = [session_dir / "executor_results.json"] + expected_response_outputs(evals_file, session_dir)
+        if not args.force_executor and step_reusable(session_dir, "executor-with", executor_hash, executor_outputs):
+            executor = {
+                "status": "OK",
+                "step": "executor-with",
+                "variant": "with_skill",
+                "reused": True,
+                "summary_file": str(session_dir / "executor_results.json"),
+                "summary": load_json(session_dir / "executor_results.json"),
+            }
+        else:
+            executor = execute_executor_step(
+                evals_file=evals_file,
+                skill_path=skill_path,
+                session_dir=session_dir,
+                model=model,
+                timeout_per_eval=args.timeout_per_eval,
+                variant="with_skill",
+                verbose=args.verbose,
+                update_session=True,
+            )
+            record_manifest_step(
+                session_dir,
+                "executor-with",
+                status=executor.get("status", "ERROR"),
+                input_hash=executor_hash,
+                outputs=executor_outputs,
+                extra={"model": model, "timeout_per_eval": args.timeout_per_eval},
+            )
     if executor.get("status") != "OK":
         payload = profile_payload(
             "local",
@@ -437,46 +477,49 @@ def run_profile_local(args) -> tuple[int, dict]:
             preflight=preflight,
             cases=prepared,
             executor=executor,
+            timings=timings.snapshot(),
         )
         save_json(session_dir / "sentry-run-result.json", payload)
         return 1, payload
 
-    grading_files = sorted(session_dir.glob("eval-*/grading.json"))
-    response_hashes = [(str(path), file_hash(path)) for path in sorted(session_dir.glob("eval-*/with_skill/outputs/response.md"))]
-    grader_hash = combine_hash("grader-report", file_hash(evals_file), response_hashes, args.model)
-    grader_outputs = [session_dir / "grading-summary.json", session_dir / "report.html"]
-    if not args.force_grader and step_reusable(session_dir, "grader-report", grader_hash, grader_outputs) and grading_files:
-        gate = build_gate(session_dir)
-        grader = {
-            "status": "OK",
-            "step": "grader-report",
-            "model": args.model,
-            "reused": True,
-            "artifacts": {
-                "grading_summary": str(session_dir / "grading-summary.json"),
-                "report_html": str(session_dir / "report.html"),
-            },
-            "gate": gate,
-        }
-    else:
-        grader = sentry_grader.execute_grader_report(
-            evals_file=evals_file,
-            session_dir=session_dir,
-            model=args.model,
-            verbose=args.verbose,
-            update_session=True,
-            write_report=True,
-        )
-        record_manifest_step(
-            session_dir,
-            "grader-report",
-            status=grader.get("status", "ERROR"),
-            input_hash=grader_hash,
-            outputs=grader_outputs + sorted(session_dir.glob("eval-*/grading.json")),
-            extra={"model": args.model},
-        )
-    gate = grader.get("gate") or build_gate(session_dir)
-    diagnostics = sentry_diagnostics.collect_diagnostics(session_dir, gate)
+    with timings.phase("grader"):
+        grading_files = sorted(session_dir.glob("eval-*/grading.json"))
+        response_hashes = [(str(path), file_hash(path)) for path in sorted(session_dir.glob("eval-*/with_skill/outputs/response.md"))]
+        grader_hash = combine_hash("grader-report", file_hash(evals_file), response_hashes, args.model)
+        grader_outputs = [session_dir / "grading-summary.json", session_dir / "report.html"]
+        if not args.force_grader and step_reusable(session_dir, "grader-report", grader_hash, grader_outputs) and grading_files:
+            gate = build_gate(session_dir)
+            grader = {
+                "status": "OK",
+                "step": "grader-report",
+                "model": args.model,
+                "reused": True,
+                "artifacts": {
+                    "grading_summary": str(session_dir / "grading-summary.json"),
+                    "report_html": str(session_dir / "report.html"),
+                },
+                "gate": gate,
+            }
+        else:
+            grader = sentry_grader.execute_grader_report(
+                evals_file=evals_file,
+                session_dir=session_dir,
+                model=args.model,
+                verbose=args.verbose,
+                update_session=True,
+                write_report=True,
+            )
+            record_manifest_step(
+                session_dir,
+                "grader-report",
+                status=grader.get("status", "ERROR"),
+                input_hash=grader_hash,
+                outputs=grader_outputs + sorted(session_dir.glob("eval-*/grading.json")),
+                extra={"model": args.model},
+            )
+    with timings.phase("diagnostics"):
+        gate = grader.get("gate") or build_gate(session_dir)
+        diagnostics = sentry_diagnostics.collect_diagnostics(session_dir, gate)
     save_json(session_dir / "diagnostics.json", diagnostics)
     payload = profile_payload(
         "local",
@@ -489,12 +532,14 @@ def run_profile_local(args) -> tuple[int, dict]:
         gate=gate,
         diagnostics=diagnostics,
         manifest=str(manifest_path(session_dir)),
+        timings=timings.snapshot(),
     )
     save_json(session_dir / "sentry-run-result.json", payload)
     return 0 if payload["status"] == "OK" else 1, payload
 
 
 def run_delegated_ci(args, release: bool = False) -> tuple[int, dict]:
+    timings = ProfileTimings()
     mode = "standard" if release and args.mode == "smoke" else args.mode
     cmd = [
         sys.executable,
@@ -526,12 +571,14 @@ def run_delegated_ci(args, release: bool = False) -> tuple[int, dict]:
         cmd.append("--github-output")
     if args.verbose:
         cmd.append("--verbose")
-    completed = subprocess.run(cmd, text=True)
+    with timings.phase("delegated_ci"):
+        completed = subprocess.run(cmd, text=True)
     return completed.returncode, profile_payload(
         "release" if release else "ci",
         "OK" if completed.returncode == 0 else "ERROR",
         delegated_command=cmd,
         exit_code=completed.returncode,
+        timings=timings.snapshot(),
     )
 
 
@@ -562,7 +609,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     if args.profile != "debug" and not args.skill:
-        payload = profile_payload(args.profile, "ERROR", error="--skill is required unless --profile debug")
+        timings = ProfileTimings()
+        payload = profile_payload(args.profile, "ERROR", error="--skill is required unless --profile debug", timings=timings.snapshot())
         print(json.dumps(payload, ensure_ascii=False, indent=2) if args.format == "json" else payload["error"])
         return 2
 
@@ -587,6 +635,9 @@ def main() -> int:
         print(f"sentry run: {payload['status']} | profile: {payload['profile']}")
         if payload.get("session_dir"):
             print(f"session: {payload['session_dir']}")
+        timings = payload.get("timings", {})
+        if isinstance(timings, dict) and timings.get("total_ms") is not None:
+            print(f"duration_ms: {timings['total_ms']}")
         if payload.get("error"):
             print(f"- {payload['error']}")
         if payload.get("warning"):

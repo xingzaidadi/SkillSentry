@@ -179,6 +179,8 @@ python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json
 
 `local` 会写 `manifest.json`,记录 executor/grader 的输入 hash 和产物路径。再次传入 `--reuse-session` 且输入未变时,会复用已准备的 `evals.json`/case lint 摘要以及已有 `executor_results.json`、`grading-summary.json`、`report.html` 和 `eval-*/grading.json`,跳过重复准备、executor、grader。需要强制重跑重步骤时使用 `--force-executor` 或 `--force-grader`。
 
+所有 `sentry_run.py --format json` profile 都会输出 `timings.total_ms` 与 `timings.phases_ms`,用于比较 preflight、prepare_cases、executor、grader、diagnostics 等阶段耗时;这些字段只做观测,不参与评分或退出码判断。
+
 ---
 
 ## 工作流一览

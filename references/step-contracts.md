@@ -37,6 +37,7 @@ python scripts/sentry_run.py --skill <skill> --profile local --cases evals.json 
 - `local`:只跑 with_skill executor + grader/report,不得跑 without_skill/publish。
 - `ci/release`:委托 `sentry_ci.py`,保持完整 CI/release 契约。
 - `local --reuse-session`:必须读取 `manifest.json`;cases 输入 hash 未变时复用已准备的 `evals.json`/case_lint,executor/grader 输入 hash 未变时跳过重步骤。`--force-executor` / `--force-grader` 可显式重跑。
+- `--format json`:必须输出 `timings.total_ms` 与 `timings.phases_ms`;timings 只做耗时观测,不得影响评分、gate 或退出码。
 
 ---
 

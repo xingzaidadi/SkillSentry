@@ -163,3 +163,4 @@ python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json
 
 `preflight/lint/debug` 不触发 executor/grader;`local` 只跑 with_skill + grader/report;`ci/release` 委托 `sentry_ci.py`。
 `local` 会写 `manifest.json`;复用同一 session 且输入 hash 未变时,会复用已准备的 `evals.json`/case lint 摘要并跳过 executor/grader。需要重跑重步骤时使用 `--force-executor` 或 `--force-grader`。
+`--format json` 输出包含 `timings.total_ms` 和 `timings.phases_ms`;这些耗时字段用于定位慢阶段,不参与评分或退出码判断。

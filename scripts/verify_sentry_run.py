@@ -115,6 +115,7 @@ def verify_lint(root: Path, env: dict, skill: Path, cases: Path, errors: list[st
     payload = json.loads(completed.stdout)
     if payload.get("status") != "OK":
         errors.append(f"lint expected OK, got {payload.get('status')}")
+    assert_timings(payload, "lint", ("preflight", "session", "prepare_cases"), errors)
     session_dir = Path(payload.get("session_dir", ""))
     if not (session_dir / "evals.json").exists():
         errors.append("lint did not prepare evals.json")
@@ -132,6 +133,7 @@ def verify_debug(root: Path, env: dict, session_dir: Path, errors: list[str]) ->
     payload = json.loads(completed.stdout)
     if payload.get("status") != "OK":
         errors.append(f"debug expected OK, got {payload.get('status')}")
+    assert_timings(payload, "debug", ("gate", "diagnostics", "report"), errors)
     for required in ("gate-result.json", "diagnostics.json", "report.html", "sentry-run-result.json"):
         if not (session_dir / required).exists():
             errors.append(f"debug missing {required}")
@@ -143,6 +145,22 @@ def fake_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
 
 
+def assert_timings(payload: dict, profile: str, required_phases: tuple[str, ...], errors: list[str]) -> None:
+    timings = payload.get("timings")
+    if not isinstance(timings, dict):
+        errors.append(f"{profile} missing timings")
+        return
+    if not isinstance(timings.get("total_ms"), (int, float)):
+        errors.append(f"{profile} missing timings.total_ms")
+    phases = timings.get("phases_ms")
+    if not isinstance(phases, dict):
+        errors.append(f"{profile} missing timings.phases_ms")
+        return
+    for phase in required_phases:
+        if not isinstance(phases.get(phase), (int, float)):
+            errors.append(f"{profile} missing timing phase: {phase}")
+
+
 def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[str]) -> None:
     completed = run_profile(root, env, "local", skill=skill, cases=cases)
     if completed.returncode != 0:
@@ -151,6 +169,7 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     payload = json.loads(completed.stdout)
     if payload.get("status") != "OK":
         errors.append(f"local expected OK, got {payload.get('status')}")
+    assert_timings(payload, "local", ("preflight", "session", "prepare_cases", "executor", "grader", "diagnostics"), errors)
     session_dir = Path(payload.get("session_dir", ""))
     for required in ("executor_results.json", "grading-summary.json", "diagnostics.json", "report.html", "sentry-run-result.json"):
         if not (session_dir / required).exists():
@@ -173,6 +192,7 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     if after != before:
         errors.append(f"local reuse should not call fake claude again: before={before}, after={after}")
     reused_payload = json.loads(completed.stdout)
+    assert_timings(reused_payload, "local reuse", ("prepare_cases", "executor", "grader", "diagnostics"), errors)
     if reused_payload.get("executor", {}).get("reused") is not True:
         errors.append("local reuse did not mark executor.reused=true")
     if reused_payload.get("grader", {}).get("reused") is not True:
