@@ -382,8 +382,12 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     changed_cases_payload = json.loads(completed.stdout)
     if changed_cases_payload.get("executor", {}).get("reused") is True:
         errors.append("changed cases incorrectly reused executor")
+    if changed_cases_payload.get("executor", {}).get("reuse", {}).get("reason") != "input_hash_changed":
+        errors.append("changed cases should explain executor reuse miss as input_hash_changed")
     if changed_cases_payload.get("grader", {}).get("reused") is True:
         errors.append("changed cases incorrectly reused grader")
+    if changed_cases_payload.get("grader", {}).get("reuse", {}).get("reason") != "input_hash_changed":
+        errors.append("changed cases should explain grader reuse miss as input_hash_changed")
     if changed_cases_payload.get("cases", {}).get("reused") is True:
         errors.append("changed cases incorrectly reused prepared cases")
     if changed_cases_payload.get("cases", {}).get("reuse", {}).get("reason") != "cases_hash_changed":
@@ -407,6 +411,10 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     changed_skill_payload = json.loads(completed.stdout)
     if changed_skill_payload.get("executor", {}).get("reused") is True:
         errors.append("changed skill incorrectly reused executor")
+    if changed_skill_payload.get("executor", {}).get("reuse", {}).get("reason") != "input_hash_changed":
+        errors.append("changed skill should explain executor reuse miss as input_hash_changed")
+    if not any("Inputs changed" in hint for hint in changed_skill_payload.get("reuse_summary", {}).get("hints", [])):
+        errors.append("changed skill reuse summary should include inputs changed hint")
     session = load_json(session_dir / "session.json")
     preflight_hash = changed_skill_payload.get("preflight", {}).get("skill_hash")
     if preflight_hash and session.get("skill_hash") != preflight_hash:
