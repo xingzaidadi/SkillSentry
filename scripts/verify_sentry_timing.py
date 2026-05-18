@@ -184,6 +184,12 @@ def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
         errors.append("local session dir should fall back to sentry-run-result.json timing")
     if session_payload.get("top_phases", [{}])[0].get("phase") != "executor":
         errors.append("local session dir fallback should preserve profile phase timings")
+    run_result_without_session_dir = dict(run_result)
+    run_result_without_session_dir.pop("session_dir", None)
+    save_json(session_dir / "sentry-run-result.json", run_result_without_session_dir)
+    inferred_payload = sentry_timing.analyze(session_dir / "sentry-run-result.json", top=2)
+    if not inferred_payload.get("executor_timing", {}).get("available"):
+        errors.append("sentry-run-result next to session.json should infer session_dir")
 
 
 def verify_cli(root: Path, errors: list[str]) -> None:

@@ -193,11 +193,15 @@ def resolve_session_dir(input_path: Path, meta: dict) -> Path | None:
     if meta.get("kind") == "sentry_run_result":
         session_dir = meta.get("session_dir")
         if isinstance(session_dir, str) and session_dir:
-            candidate = Path(session_dir)
-            if not candidate.is_absolute():
-                candidate = input_path.parent / candidate
-            if (candidate / "session.json").exists():
-                return candidate
+            raw_candidate = Path(session_dir)
+            candidates = [raw_candidate]
+            if not raw_candidate.is_absolute():
+                candidates.extend([input_path.parent / raw_candidate, Path.cwd() / raw_candidate])
+            for candidate in candidates:
+                if (candidate / "session.json").exists():
+                    return candidate
+        if (input_path.parent / "session.json").exists():
+            return input_path.parent
 
     artifacts = _as_dict(meta.get("artifacts"))
     session_report = artifacts.get("session_report_html")
