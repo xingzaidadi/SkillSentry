@@ -23,6 +23,11 @@ def save_json(path: Path, payload) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def save_json_bom(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
+
+
 def load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -51,7 +56,7 @@ def make_session(root: Path) -> Path:
 
 def verify_success_path(root: Path, errors: list[str]) -> None:
     evals_file = root / "evals.json"
-    save_json(
+    save_json_bom(
         evals_file,
         [
             {
