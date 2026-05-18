@@ -47,6 +47,16 @@ def first_present(*values):
     return None
 
 
+def as_list(value) -> list:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
 def format_rate(value) -> str:
     if isinstance(value, (int, float)):
         return f"{value:.1%}"
@@ -89,9 +99,9 @@ def build_check_payload(result: dict, check_name: str, sha: str) -> dict:
     rate = first_present(summary.get("authoritative_pass_rate"), summary.get("exact_pass_rate"))
     delta = first_present(summary.get("delta"), summary.get("avg_delta"))
     grade = summary.get("grade", "N/A")
-    categories = diagnostics.get("categories", []) if isinstance(diagnostics, dict) else []
-    notes = diagnostics.get("notes", []) if isinstance(diagnostics, dict) else []
-    timing_hints = diagnostics.get("timing_hints", []) if isinstance(diagnostics, dict) else []
+    categories = as_list(diagnostics.get("categories")) if isinstance(diagnostics, dict) else []
+    notes = as_list(diagnostics.get("notes")) if isinstance(diagnostics, dict) else []
+    timing_hints = as_list(diagnostics.get("timing_hints")) if isinstance(diagnostics, dict) else []
     report_html = artifacts.get("output_report_html") or artifacts.get("session_report_html") or "N/A"
 
     conclusion = check_conclusion(status, verdict)

@@ -66,6 +66,11 @@ def verify_payloads(errors: list[str]) -> None:
                 errors.append(f"{verdict}: check summary missing {marker!r}")
         if "SkillSentry / fixture" != payload.get("name"):
             errors.append(f"{verdict}: check name was not preserved")
+    malformed = make_result("PASS", "pass", 0)
+    malformed["diagnostics"]["timing_hints"] = "single timing hint"
+    payload = report_to_checks.build_check_payload(malformed, "SkillSentry / fixture", "abc123")
+    if "single timing hint" not in payload.get("output", {}).get("summary", ""):
+        errors.append("single-string timing_hints was not rendered as one hint")
 
 
 def verify_workflow(errors: list[str]) -> None:

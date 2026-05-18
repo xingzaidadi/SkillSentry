@@ -669,11 +669,21 @@ def single_line(value) -> str:
     return str(value).replace("\r", " ").replace("\n", " ")
 
 
+def as_list(value) -> list:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
 def github_output_fields(results: dict, artifacts: dict) -> dict[str, str]:
     summary = results.get("summary", {})
     diagnostics = results.get("diagnostics", {})
-    categories = diagnostics.get("categories", []) if isinstance(diagnostics, dict) else []
-    timing_hints = diagnostics.get("timing_hints", []) if isinstance(diagnostics, dict) else []
+    categories = as_list(diagnostics.get("categories")) if isinstance(diagnostics, dict) else []
+    timing_hints = as_list(diagnostics.get("timing_hints")) if isinstance(diagnostics, dict) else []
     timing_hints_json = json.dumps([str(item) for item in timing_hints], ensure_ascii=False, separators=(",", ":"))
     rate = summary.get("authoritative_pass_rate") if isinstance(summary, dict) else None
     verdict = results.get("verdict", "ERROR")

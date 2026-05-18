@@ -52,7 +52,7 @@ def make_results(verdict: str) -> dict:
         "diagnostics": {
             "categories": ["quality_failure"] if verdict == "FAIL" else ([] if verdict == "PASS" else ["fixture"]),
             "notes": ["fixture"],
-            "timing_hints": ["fixture timing hint"],
+            "timing_hints": "fixture timing hint",
         },
     }
 
