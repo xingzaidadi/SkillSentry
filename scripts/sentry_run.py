@@ -235,11 +235,44 @@ def resolve_cases(args, preflight: dict) -> Path | None:
     return cached_cases_from_preflight(preflight)
 
 
+def same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return False
+
+
+def reusable_prepared_cases(session_dir: Path, cases_file: Path, target: Path, cases_hash: str | None) -> dict | None:
+    if cases_hash is None or not target.exists() or file_hash(target) != cases_hash:
+        return None
+    session = sentry_state.load_session(session_dir)
+    case_lint = session.get("case_lint")
+    if not isinstance(case_lint, dict) or case_lint.get("version") != sentry_case_lint.LINT_VERSION:
+        return None
+    case_lint = dict(case_lint)
+    case_lint["cases_file"] = str(target)
+    case_lint["warnings"] = session.get("case_warnings", [])
+    return {
+        "status": "OK",
+        "cases_file": str(target),
+        "source": str(cases_file),
+        "cases_hash": cases_hash,
+        "case_lint": case_lint,
+        "reused": True,
+    }
+
+
 def prepare_cases(session_dir: Path, cases_file: Path) -> dict:
     if not cases_file.exists():
         return {"status": "ERROR", "error": f"cases file not found: {cases_file}"}
     target = session_dir / "evals.json"
-    shutil.copy2(cases_file, target)
+    cases_hash = file_hash(cases_file)
+    reused = reusable_prepared_cases(session_dir, cases_file, target, cases_hash)
+    if reused is not None:
+        return reused
+
+    if not (target.exists() and same_path(cases_file, target)):
+        shutil.copy2(cases_file, target)
     lint = sentry_case_lint.lint_cases_file(target)
     sentry_case_lint.record_case_lint_result(session_dir, lint)
     cases_total = lint.get("total", 0)
@@ -251,8 +284,9 @@ def prepare_cases(session_dir: Path, cases_file: Path) -> dict:
         "status": "OK",
         "cases_file": str(target),
         "source": str(cases_file),
-        "cases_hash": file_hash(target),
+        "cases_hash": cases_hash,
         "case_lint": lint,
+        "reused": False,
     }
 
 

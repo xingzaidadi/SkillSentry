@@ -26,6 +26,7 @@ import sentry_state
 
 
 WINDOWS_PATH_PATTERN = re.compile(r"[A-Za-z]:\\[^\s，。；,;`\"']+")
+LINT_VERSION = 1
 
 
 def load_json(path: Path):
@@ -79,6 +80,7 @@ def lint_cases_file(cases_file: Path) -> dict:
     return {
         "status": "WARN" if warnings else "OK",
         "step": "case-lint",
+        "version": LINT_VERSION,
         "cases_file": str(cases_file),
         "total": len(cases),
         "warnings": warnings,
@@ -102,6 +104,7 @@ def record_case_lint_result(session_dir: Path, result: dict) -> None:
     session["case_warnings"] = result.get("warnings", [])
     session["case_lint"] = {
         "status": result.get("status"),
+        "version": result.get("version", LINT_VERSION),
         "total": result.get("total", 0),
         "warning_count": result.get("warning_count", 0),
         "cases_file": result.get("cases_file"),

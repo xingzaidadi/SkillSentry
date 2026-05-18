@@ -68,7 +68,7 @@ v9.0 是契约收敛版,不是功能扩展版。
 - executor 步骤优先通过 `sentry_executor.py` 调用;它是重工具 wrapper,会调用 Claude CLI,但只负责执行、写 summary 和更新 session,不负责评分或报告。
 - grader-report 步骤优先通过 `sentry_grader.py` 调用;它是重工具 wrapper,会调用 SDK/LLM,但只负责评审已有 response、写 summary/report 和更新 session,不重跑 executor。
 - 日常入口优先使用 `sentry_run.py` profile:`preflight/lint/debug` 不得触发 executor/grader;`local` 只跑 with_skill + grader/report,不得跑 without_skill/publish;`ci/release` 必须委托 `sentry_ci.py`。
-- `sentry_run.py --profile local --reuse-session <session>` 必须使用 `manifest.json` 判断 executor/grader 是否可复用;输入 hash 未变时跳过重步骤,显式 `--force-executor`/`--force-grader` 才可重跑。
+- `sentry_run.py --profile local --reuse-session <session>` 必须使用 `manifest.json` 判断 executor/grader 是否可复用;输入 hash 未变时复用已准备 cases/case_lint 并跳过重步骤,显式 `--force-executor`/`--force-grader` 才可重跑。
 - CI 启动前必须运行 preflight,并把结果写入 `session.json.preflight`;CI 所有结果路径都必须写 `--output-dir/report.html`,有 session 的失败路径也必须补 `session/report.html`;CI JSON、summary Markdown 和最小 HTML 报告必须带 `Execution Diagnostics`,把 `preflight_error`、`runner_unavailable`、`llm_unavailable`、`case_unusable`、`runner_timeout`、`grader_error`、`environment_skipped` 和 `quality_failure` 分开呈现。
 - CI 退出码是稳定契约:`PASS=0`,`CONDITIONAL PASS=1`,`FAIL=1`,`ERROR=2`;`--github-output` 必须输出 `verdict/status/release_status/exit_code/report_html/session_report_html/diagnostic_categories/authoritative_pass_rate/grade`。
 - GitHub Actions workflow 必须直接调用 `sentry_ci.py`,不得先让 LLM 交互式“测评”再用旧 `ci_eval.py` 汇总;GitHub Checks 必须读取 `eval_result.json` 的 `status/exit_code/artifacts/diagnostics`,并将 `CONDITIONAL PASS` 映射为 `action_required`。

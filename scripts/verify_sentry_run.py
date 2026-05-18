@@ -177,6 +177,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("local reuse did not mark executor.reused=true")
     if reused_payload.get("grader", {}).get("reused") is not True:
         errors.append("local reuse did not mark grader.reused=true")
+    if reused_payload.get("cases", {}).get("reused") is not True:
+        errors.append("local reuse did not mark cases.reused=true")
 
     # Changing cases must invalidate both executor and grader.
     before = fake_count(count_file)
@@ -203,6 +205,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("changed cases incorrectly reused executor")
     if changed_cases_payload.get("grader", {}).get("reused") is True:
         errors.append("changed cases incorrectly reused grader")
+    if changed_cases_payload.get("cases", {}).get("reused") is True:
+        errors.append("changed cases incorrectly reused prepared cases")
 
     # Changing SKILL.md must invalidate executor and refresh session metadata.
     before = fake_count(count_file)
