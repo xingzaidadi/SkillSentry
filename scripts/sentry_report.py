@@ -36,7 +36,7 @@ GENERATED_REPORT_MARKERS = (
 
 
 def load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def save_json(path: Path, payload: dict) -> None:

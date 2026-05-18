@@ -100,7 +100,7 @@ def verify_ci_result_report(root: Path, errors: list[str]) -> None:
         },
     }
     result_file = root / "eval_result.json"
-    save_json(result_file, result)
+    result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
 
     output = root / "from-result.html"
     completed = subprocess.run(
