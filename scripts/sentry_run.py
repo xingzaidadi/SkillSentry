@@ -840,6 +840,8 @@ def main() -> int:
         if isinstance(reuse_summary, dict) and reuse_summary.get("steps"):
             print("reuse:")
             for item in reuse_summary["steps"]:
+                if not isinstance(item, dict):
+                    continue
                 action = "reused" if item.get("reused") else "reran"
                 print(f"- {item.get('step')}: {action} ({item.get('reason')})")
         artifacts = payload.get("artifacts", {})

@@ -502,7 +502,8 @@ def main() -> int:
                 print(f"- {item.get('step')}: reused={item.get('reused')} reason={item.get('reason')}")
         reuse_summary = _as_dict(payload.get("reuse_summary"))
         if reuse_summary.get("rerun_steps"):
-            print(f"rerun steps: {', '.join(reuse_summary.get('rerun_steps'))}")
+            rerun_steps = [str(item) for item in _as_list(reuse_summary.get("rerun_steps"))]
+            print(f"rerun steps: {', '.join(rerun_steps)}")
         reuse_hints_text = _as_list(payload.get("reuse_hints"))
         if reuse_hints_text:
             print("reuse hints:")
