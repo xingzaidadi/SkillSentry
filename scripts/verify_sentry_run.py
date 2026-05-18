@@ -202,8 +202,12 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     assert_timings(reused_payload, "local reuse", ("prepare_cases", "executor", "grader", "diagnostics"), errors)
     if reused_payload.get("executor", {}).get("reused") is not True:
         errors.append("local reuse did not mark executor.reused=true")
+    if reused_payload.get("executor", {}).get("reuse", {}).get("reason") != "matched":
+        errors.append("local reuse did not explain executor reuse as matched")
     if reused_payload.get("grader", {}).get("reused") is not True:
         errors.append("local reuse did not mark grader.reused=true")
+    if reused_payload.get("grader", {}).get("reuse", {}).get("reason") != "matched":
+        errors.append("local reuse did not explain grader reuse as matched")
     if reused_payload.get("cases", {}).get("reused") is not True:
         errors.append("local reuse did not mark cases.reused=true")
 
@@ -222,8 +226,32 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     missing_response_payload = json.loads(completed.stdout)
     if missing_response_payload.get("executor", {}).get("reused") is True:
         errors.append("missing response incorrectly reused executor")
+    if missing_response_payload.get("executor", {}).get("reuse", {}).get("reason") != "missing_outputs":
+        errors.append("missing response did not explain executor reuse miss as missing_outputs")
     if not response_file.exists():
         errors.append("missing response was not restored by executor rerun")
+
+    # Missing per-eval grading artifacts must invalidate grader reuse.
+    grading_file = session_dir / "eval-1" / "grading.json"
+    if grading_file.exists():
+        grading_file.unlink()
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir)
+    if completed.returncode != 0:
+        errors.append(f"local missing grading exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before:
+        errors.append(f"missing grading should not rerun executor: before={before}, after={after}")
+    missing_grading_payload = json.loads(completed.stdout)
+    if missing_grading_payload.get("executor", {}).get("reused") is not True:
+        errors.append("missing grading should still reuse executor")
+    if missing_grading_payload.get("grader", {}).get("reused") is True:
+        errors.append("missing grading incorrectly reused grader")
+    if missing_grading_payload.get("grader", {}).get("reuse", {}).get("reason") != "missing_outputs":
+        errors.append("missing grading did not explain grader reuse miss as missing_outputs")
+    if not grading_file.exists():
+        errors.append("missing grading was not restored by grader rerun")
 
     # Changing cases must invalidate both executor and grader.
     before = fake_count(count_file)
@@ -286,6 +314,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     force_executor_payload = json.loads(completed.stdout)
     if force_executor_payload.get("executor", {}).get("reused") is True:
         errors.append("--force-executor incorrectly reused executor")
+    if force_executor_payload.get("executor", {}).get("reuse", {}).get("reason") != "force_executor":
+        errors.append("--force-executor did not explain executor reuse miss as force_executor")
 
     # force-grader must rerun grader without rerunning executor when executor manifest matches.
     before = fake_count(count_file)
@@ -301,6 +331,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("--force-grader should still reuse executor")
     if force_grader_payload.get("grader", {}).get("reused") is True:
         errors.append("--force-grader incorrectly reused grader")
+    if force_grader_payload.get("grader", {}).get("reuse", {}).get("reason") != "force_grader":
+        errors.append("--force-grader did not explain grader reuse miss as force_grader")
 
 
 def verify() -> tuple[bool, list[str]]:

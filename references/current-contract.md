@@ -69,7 +69,7 @@ v9.0 是契约收敛版,不是功能扩展版。
 - executor 步骤优先通过 `sentry_executor.py` 调用;它是重工具 wrapper,会调用 Claude CLI,但只负责执行、写 summary 和更新 session,不负责评分或报告。
 - grader-report 步骤优先通过 `sentry_grader.py` 调用;它是重工具 wrapper,会调用 SDK/LLM,但只负责评审已有 response、写 summary/report 和更新 session,不重跑 executor。
 - 日常入口优先使用 `sentry_run.py` profile:`preflight/lint/debug` 不得触发 executor/grader;`local` 只跑 with_skill + grader/report,不得跑 without_skill/publish;`ci/release` 必须委托 `sentry_ci.py`。
-- `sentry_run.py --profile local --reuse-session <session>` 必须使用 `manifest.json` 判断 executor/grader 是否可复用;输入 hash 未变时复用已准备 cases/case_lint 并跳过重步骤,显式 `--force-executor`/`--force-grader` 才可重跑。
+- `sentry_run.py --profile local --reuse-session <session>` 必须使用 `manifest.json` 判断 executor/grader 是否可复用;输入 hash 未变且所需 artifacts 完整时复用已准备 cases/case_lint 并跳过重步骤,payload 必须说明复用命中/未命中原因,显式 `--force-executor`/`--force-grader` 才可重跑。
 - `sentry_run.py --format json` 必须输出 `timings.total_ms` 和 `timings.phases_ms`;timings 只用于执行耗时观测,不得参与评分、gate 或退出码判断。
 - `sentry_ci.py` 必须在 `session.json.ci_step_timings` / `ci_phase_timings` / `ci_timing` 记录 pipeline step 与非 pipeline phase 耗时,并在 `eval_result.json.timings` 和 diagnostics 中透出;timings 不得改变 pipeline 顺序、gate 或退出码。
 - `ci_grader.py` 写入的每个 `grading.json` 必须包含 `duration_ms` / `timing.grader_duration_ms`;该字段只用于耗时观测,不得参与评分、gate 或退出码判断。

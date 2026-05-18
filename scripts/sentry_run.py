@@ -111,12 +111,37 @@ def save_manifest(session_dir: Path, manifest: dict) -> None:
     save_json(manifest_path(session_dir), manifest)
 
 
-def step_reusable(session_dir: Path, step: str, input_hash: str, required: list[Path]) -> bool:
+def step_reuse_state(session_dir: Path, step: str, input_hash: str, required: list[Path]) -> dict:
     manifest = load_manifest(session_dir)
     step_data = manifest.get("steps", {}).get(step, {})
-    if step_data.get("status") != "OK" or step_data.get("input_hash") != input_hash:
-        return False
-    return all(path.exists() for path in required)
+    state = {
+        "step": step,
+        "reusable": False,
+        "reason": "missing_manifest_step",
+        "missing_outputs": [],
+    }
+    if not isinstance(step_data, dict) or not step_data:
+        return state
+    recorded_status = step_data.get("status")
+    if recorded_status != "OK":
+        state["reason"] = "manifest_status_not_ok"
+        state["recorded_status"] = recorded_status
+        return state
+    if step_data.get("input_hash") != input_hash:
+        state["reason"] = "input_hash_changed"
+        return state
+    missing = [str(path) for path in required if not path.exists()]
+    if missing:
+        state["reason"] = "missing_outputs"
+        state["missing_outputs"] = missing
+        return state
+    state["reusable"] = True
+    state["reason"] = "matched"
+    return state
+
+
+def step_reusable(session_dir: Path, step: str, input_hash: str, required: list[Path]) -> bool:
+    return bool(step_reuse_state(session_dir, step, input_hash, required).get("reusable"))
 
 
 def record_manifest_step(session_dir: Path, step: str, *, status: str, input_hash: str, outputs: list[Path], extra: dict | None = None) -> dict:
@@ -324,6 +349,18 @@ def expected_response_outputs(evals_file: Path, session_dir: Path, variant: str 
     return outputs
 
 
+def expected_grading_outputs(evals_file: Path, session_dir: Path) -> list[Path]:
+    payload = load_json(evals_file)
+    cases = sentry_case_lint.extract_cases(payload)
+    outputs: list[Path] = []
+    for idx, case in enumerate(cases, 1):
+        if not isinstance(case, dict):
+            continue
+        eval_id = case.get("id", f"eval-{idx}")
+        outputs.append(session_dir / str(eval_id) / "grading.json")
+    return outputs
+
+
 def run_profile_preflight(args) -> tuple[int, dict]:
     timings = ProfileTimings()
     with timings.phase("preflight"):
@@ -441,12 +478,14 @@ def run_profile_local(args) -> tuple[int, dict]:
             args.timeout_per_eval,
         )
         executor_outputs = [session_dir / "executor_results.json"] + expected_response_outputs(evals_file, session_dir)
-        if not args.force_executor and step_reusable(session_dir, "executor-with", executor_hash, executor_outputs):
+        executor_reuse = step_reuse_state(session_dir, "executor-with", executor_hash, executor_outputs)
+        if not args.force_executor and executor_reuse.get("reusable"):
             executor = {
                 "status": "OK",
                 "step": "executor-with",
                 "variant": "with_skill",
                 "reused": True,
+                "reuse": executor_reuse,
                 "summary_file": str(session_dir / "executor_results.json"),
                 "summary": load_json(session_dir / "executor_results.json"),
             }
@@ -461,6 +500,8 @@ def run_profile_local(args) -> tuple[int, dict]:
                 verbose=args.verbose,
                 update_session=True,
             )
+            executor["reused"] = False
+            executor["reuse"] = {"step": "executor-with", "reusable": False, "reason": "force_executor"} if args.force_executor else executor_reuse
             record_manifest_step(
                 session_dir,
                 "executor-with",
@@ -483,17 +524,18 @@ def run_profile_local(args) -> tuple[int, dict]:
         return 1, payload
 
     with timings.phase("grader"):
-        grading_files = sorted(session_dir.glob("eval-*/grading.json"))
         response_hashes = [(str(path), file_hash(path)) for path in sorted(session_dir.glob("eval-*/with_skill/outputs/response.md"))]
         grader_hash = combine_hash("grader-report", file_hash(evals_file), response_hashes, args.model)
-        grader_outputs = [session_dir / "grading-summary.json", session_dir / "report.html"]
-        if not args.force_grader and step_reusable(session_dir, "grader-report", grader_hash, grader_outputs) and grading_files:
+        grader_outputs = [session_dir / "grading-summary.json", session_dir / "report.html"] + expected_grading_outputs(evals_file, session_dir)
+        grader_reuse = step_reuse_state(session_dir, "grader-report", grader_hash, grader_outputs)
+        if not args.force_grader and grader_reuse.get("reusable"):
             gate = build_gate(session_dir)
             grader = {
                 "status": "OK",
                 "step": "grader-report",
                 "model": args.model,
                 "reused": True,
+                "reuse": grader_reuse,
                 "artifacts": {
                     "grading_summary": str(session_dir / "grading-summary.json"),
                     "report_html": str(session_dir / "report.html"),
@@ -509,6 +551,8 @@ def run_profile_local(args) -> tuple[int, dict]:
                 update_session=True,
                 write_report=True,
             )
+            grader["reused"] = False
+            grader["reuse"] = {"step": "grader-report", "reusable": False, "reason": "force_grader"} if args.force_grader else grader_reuse
             record_manifest_step(
                 session_dir,
                 "grader-report",
