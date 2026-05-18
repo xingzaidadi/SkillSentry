@@ -36,7 +36,7 @@ def parse_args():
 
 
 def load_result(path: str) -> dict:
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:
         return json.load(f)
 
 

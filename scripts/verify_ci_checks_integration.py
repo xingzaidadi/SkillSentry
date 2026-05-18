@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 import report_to_checks
@@ -71,6 +72,13 @@ def verify_payloads(errors: list[str]) -> None:
     payload = report_to_checks.build_check_payload(malformed, "SkillSentry / fixture", "abc123")
     if "single timing hint" not in payload.get("output", {}).get("summary", ""):
         errors.append("single-string timing_hints was not rendered as one hint")
+    with tempfile.TemporaryDirectory(prefix="skillsentry-checks-") as tmp:
+        result_file = Path(tmp) / "eval_result.json"
+        fixture = make_result("PASS", "pass", 0)
+        result_file.write_text(json.dumps(fixture, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
+        loaded = report_to_checks.load_result(str(result_file))
+        if loaded.get("verdict") != "PASS":
+            errors.append("load_result should read UTF-8 BOM eval_result.json")
 
 
 def verify_workflow(errors: list[str]) -> None:
