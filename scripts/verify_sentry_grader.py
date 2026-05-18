@@ -99,6 +99,11 @@ def verify_success_path(root: Path, errors: list[str]) -> None:
     grading = load_json(session_dir / "eval-1" / "grading.json")
     if grading.get("summary", {}).get("authoritative_pass_rate") != 0.0:
         errors.append("deterministic failed grading should have authoritative_pass_rate=0.0")
+    duration_ms = grading.get("duration_ms")
+    if not isinstance(duration_ms, (int, float)) or duration_ms < 0:
+        errors.append("grading.json should include non-negative duration_ms")
+    if grading.get("timing", {}).get("grader_duration_ms") != duration_ms:
+        errors.append("grading.json timing.grader_duration_ms should match duration_ms")
     summary = load_json(session_dir / "grading-summary.json")
     if summary.get("status") != "generated_by_ci":
         errors.append("grading-summary.json status expected generated_by_ci")

@@ -188,6 +188,8 @@ python scripts/sentry_grader.py --evals evals.json --session-dir <session>
 
 `sentry_grader.py` 是重工具 wrapper:会调用 SDK/LLM,但只读取已有 executor response,写 `grading.json`、`grading-summary.json`、`report.html` 和 session,不重跑 executor。
 
+每个实际写入的 `grading.json` 会包含 `duration_ms` / `timing.grader_duration_ms`,只做单用例 grader 耗时观测,不参与评分、gate 或退出码判断。
+
 ---
 
 ## report (sentry-report, 独立重出报告)

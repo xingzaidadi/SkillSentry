@@ -134,7 +134,7 @@ Session 目录下额外产物：
 - `evals.json` — 生成的测试用例
 - `eval-N/with_skill/outputs/response.md` — 每个用例的执行响应
 - `eval-N/with_skill/outputs/transcript.md` — 完整交互记录
-- `eval-N/grading.json` — 断言评审结果
+- `eval-N/grading.json` — 断言评审结果,包含 `duration_ms` / `timing.grader_duration_ms` 单用例 grader 耗时观测
 - `executor_results.json` — 执行器汇总
 - `report.html` — session 已创建时的 HTML 报告;pipeline 中途失败也会补最小兜底报告
 
@@ -165,4 +165,4 @@ python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json
 `local` 会写 `manifest.json`;复用同一 session 且输入 hash 未变时,会复用已准备的 `evals.json`/case lint 摘要并跳过 executor/grader。需要重跑重步骤时使用 `--force-executor` 或 `--force-grader`。
 `--format json` 输出包含 `timings.total_ms` 和 `timings.phases_ms`;这些耗时字段用于定位慢阶段,不参与评分或退出码判断。
 完整 CI 运行会在 `session.json.ci_step_timings` / `ci_phase_timings` 记录每个 pipeline step 和非 pipeline phase 的耗时,并在 `eval_result.json.timings`、`diagnostics.timings` 和 `summary.md` 中展示;这些字段只做观测,不改变 pipeline 步骤、gate 或退出码。
-可用 `python scripts/sentry_timing.py --input <eval_result.json|session_dir>` 单独分析最慢 step/phase;当能定位到 session 时,还会读取 `executor_results.json` 汇总 executor per-eval avg/p50/p95/max 和最慢用例,并在 `grading.json` 已含 grader duration 字段时汇总 grader per-eval 耗时。该工具只读 artifact,不调 LLM、不联网。
+可用 `python scripts/sentry_timing.py --input <eval_result.json|session_dir>` 单独分析最慢 step/phase;当能定位到 session 时,还会读取 `executor_results.json` 汇总 executor per-eval avg/p50/p95/max 和最慢用例,并读取 `grading.json` 的 `duration_ms` 汇总 grader per-eval 耗时。该工具只读 artifact,不调 LLM、不联网。

@@ -183,6 +183,16 @@ def build_failed_grading(eval_config: dict, reason: str) -> dict:
     }
 
 
+def attach_grader_timing(grading: dict, started: float) -> dict:
+    """Attach observational grader timing without changing scoring fields."""
+    duration_ms = round((time.time() - started) * 1000, 1)
+    grading["duration_ms"] = duration_ms
+    timing = grading.get("timing") if isinstance(grading.get("timing"), dict) else {}
+    timing["grader_duration_ms"] = duration_ms
+    grading["timing"] = timing
+    return grading
+
+
 def grade_single_eval(
     eval_config: dict,
     session_dir: Path,
@@ -191,6 +201,7 @@ def grade_single_eval(
 ) -> dict | None:
     """评审单个 eval，返回 grading 数据"""
     eval_id = eval_config.get("id", "eval-1")
+    started = time.time()
     name = eval_config.get("name", "unknown")
     assertions = eval_config.get("assertions", [])
 
@@ -216,7 +227,7 @@ def grade_single_eval(
     if response_text.startswith("[EXECUTION FAILED]") or response_text.startswith("[TIMEOUT"):
         if verbose:
             print(f"  ⏭️ {eval_id}: 执行失败，标记全部断言为 fail", file=sys.stderr)
-        return {
+        return attach_grader_timing({
             "eval_id": eval_id,
             "runs": {
                 "run-1": {
@@ -243,7 +254,7 @@ def grade_single_eval(
                 },
                 "authoritative_pass_rate": 0.0,
             },
-        }
+        }, started)
 
     # 调用 LLM 评审
     prompt = build_grading_prompt(eval_config, transcript, response_text)
@@ -252,7 +263,7 @@ def grade_single_eval(
     if not result:
         if verbose:
             print(f"  ❌ {eval_id}: LLM 评审调用失败", file=sys.stderr)
-        return build_failed_grading(eval_config, "LLM grader call failed")
+        return attach_grader_timing(build_failed_grading(eval_config, "LLM grader call failed"), started)
 
     # 解析 JSON 结果
     try:
@@ -260,7 +271,7 @@ def grade_single_eval(
         if not json_match:
             if verbose:
                 print(f"  ❌ {eval_id}: 评审结果无 JSON", file=sys.stderr)
-            return build_failed_grading(eval_config, "LLM grader returned no JSON")
+            return attach_grader_timing(build_failed_grading(eval_config, "LLM grader returned no JSON"), started)
 
         grading_data = json.loads(json_match.group())
         graded_assertions = grading_data.get("assertions", [])
@@ -309,12 +320,12 @@ def grade_single_eval(
         if verbose:
             print(f"  ✅ {eval_id} ({name}): {total_pass}/{total_count} 断言通过", file=sys.stderr)
 
-        return grading
+        return attach_grader_timing(grading, started)
 
     except json.JSONDecodeError as e:
         if verbose:
             print(f"  ❌ {eval_id}: JSON 解析失败: {e}", file=sys.stderr)
-        return build_failed_grading(eval_config, f"LLM grader returned invalid JSON: {e}")
+        return attach_grader_timing(build_failed_grading(eval_config, f"LLM grader returned invalid JSON: {e}"), started)
 
 
 def grade_all_evals(
