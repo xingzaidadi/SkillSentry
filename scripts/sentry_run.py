@@ -103,7 +103,9 @@ def load_manifest(session_dir: Path) -> dict:
     if not isinstance(data, dict):
         return {"version": 1, "steps": {}, "load_error": "manifest is not a JSON object"}
     data.setdefault("version", 1)
-    data.setdefault("steps", {})
+    if not isinstance(data.get("steps"), dict):
+        data["steps"] = {}
+        data["load_error"] = "manifest steps is not a JSON object"
     return data
 
 

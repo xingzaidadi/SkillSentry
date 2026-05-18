@@ -257,6 +257,20 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     if load_json(session_dir / "manifest.json").get("load_error"):
         errors.append("corrupt manifest rerun should not persist load_error in manifest")
 
+    # A structurally invalid manifest should also explain the miss without crashing.
+    save_json(session_dir / "manifest.json", {"version": 1, "steps": []})
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir)
+    if completed.returncode != 0:
+        errors.append(f"local invalid manifest steps exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before + 1:
+        errors.append(f"invalid manifest steps should rerun executor: before={before}, after={after}")
+    invalid_manifest_payload = json.loads(completed.stdout)
+    if invalid_manifest_payload.get("executor", {}).get("reuse", {}).get("reason") != "manifest_load_error":
+        errors.append("invalid manifest steps should explain executor reuse miss as manifest_load_error")
+
     # Missing executor response artifacts must invalidate executor reuse.
     response_file = session_dir / "eval-1" / "with_skill" / "outputs" / "response.md"
     if response_file.exists():
