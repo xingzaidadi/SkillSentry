@@ -290,6 +290,18 @@ def prepare_cases(session_dir: Path, cases_file: Path) -> dict:
     }
 
 
+def expected_response_outputs(evals_file: Path, session_dir: Path, variant: str = "with_skill") -> list[Path]:
+    payload = load_json(evals_file)
+    cases = sentry_case_lint.extract_cases(payload)
+    outputs: list[Path] = []
+    for idx, case in enumerate(cases, 1):
+        if not isinstance(case, dict):
+            continue
+        eval_id = case.get("id", f"eval-{idx}")
+        outputs.append(session_dir / str(eval_id) / variant / "outputs" / "response.md")
+    return outputs
+
+
 def run_profile_preflight(args) -> tuple[int, dict]:
     code, preflight = run_preflight(args)
     return code, profile_payload("preflight", "OK" if code == 0 else "ERROR", preflight=preflight)
@@ -388,7 +400,7 @@ def run_profile_local(args) -> tuple[int, dict]:
         model,
         args.timeout_per_eval,
     )
-    executor_outputs = [session_dir / "executor_results.json"]
+    executor_outputs = [session_dir / "executor_results.json"] + expected_response_outputs(evals_file, session_dir)
     if not args.force_executor and step_reusable(session_dir, "executor-with", executor_hash, executor_outputs):
         executor = {
             "status": "OK",

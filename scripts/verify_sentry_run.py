@@ -180,6 +180,24 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     if reused_payload.get("cases", {}).get("reused") is not True:
         errors.append("local reuse did not mark cases.reused=true")
 
+    # Missing executor response artifacts must invalidate executor reuse.
+    response_file = session_dir / "eval-1" / "with_skill" / "outputs" / "response.md"
+    if response_file.exists():
+        response_file.unlink()
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir)
+    if completed.returncode != 0:
+        errors.append(f"local missing response exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before + 1:
+        errors.append(f"missing response should rerun executor: before={before}, after={after}")
+    missing_response_payload = json.loads(completed.stdout)
+    if missing_response_payload.get("executor", {}).get("reused") is True:
+        errors.append("missing response incorrectly reused executor")
+    if not response_file.exists():
+        errors.append("missing response was not restored by executor rerun")
+
     # Changing cases must invalidate both executor and grader.
     before = fake_count(count_file)
     save_json(
