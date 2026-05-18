@@ -14,6 +14,7 @@
 - `--reuse-session` 在用例输入 hash 未变时复用已准备的 `evals.json` 与 case lint 摘要,减少本地重复运行的 I/O 和确定性检查成本。
 - executor 复用会同时校验每个用例的 `response.md` 产物,避免残缺 session 误跳过 executor。
 - `sentry_run.py --format json` 新增 `timings.total_ms` / `timings.phases_ms` 阶段耗时观测,用于比较轻量 profile 与复用路径成本。
+- `sentry_ci.py` 新增 `ci_step_timings` / `ci_timing` 结构化 step 耗时观测,并透出到 diagnostics、`eval_result.json.timings` 和 summary。
 - `evals.json` / `cases.cache.json` 读取兼容 UTF-8 BOM,避免 Windows/PowerShell 生成的用例文件解析失败。
 - `sentry_ci.py` 现在复用 `sentry_report.py`、`sentry_case_lint.py`、`sentry_executor.py`、`sentry_grader.py`,保留原有 pipeline、artifact、exit code、GitHub output 和 Checks 契约。
 - 新增确定性回归脚本:`verify_sentry_report.py`、`verify_sentry_executor.py`、`verify_sentry_grader.py`、`verify_sentry_run.py`;`verify_ci_feasibility.py` 改为覆盖 `sentry_case_lint.py` CLI。

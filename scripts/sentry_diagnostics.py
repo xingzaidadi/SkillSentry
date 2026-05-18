@@ -11,7 +11,7 @@ from typing import Any
 
 def load_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (FileNotFoundError, json.JSONDecodeError):
         return None
 
@@ -176,6 +176,38 @@ def collect_preflight(session: dict) -> dict:
     }
 
 
+def collect_timing(session: dict) -> dict:
+    steps = []
+    for item in _as_list(session.get("ci_step_timings")):
+        if not isinstance(item, dict):
+            continue
+        steps.append(
+            {
+                "step": item.get("step"),
+                "tool": item.get("tool"),
+                "status": item.get("status"),
+                "duration_ms": item.get("duration_ms"),
+                "completed_at": item.get("completed_at"),
+                "error": item.get("error"),
+            }
+        )
+    pipeline = _as_dict(session.get("ci_timing"))
+    total = pipeline.get("total_ms")
+    if total is None and steps:
+        total = round(sum(float(item.get("duration_ms") or 0) for item in steps), 1)
+    slowest = sorted(
+        [item for item in steps if isinstance(item.get("duration_ms"), (int, float))],
+        key=lambda item: item.get("duration_ms", 0),
+        reverse=True,
+    )[:5]
+    return {
+        "total_ms": total,
+        "steps": steps,
+        "slowest_steps": slowest,
+        "failed_steps": pipeline.get("failed_steps", []),
+    }
+
+
 def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> dict:
     session_path = Path(session_dir)
     session = _as_dict(load_json(session_path / "session.json"))
@@ -187,6 +219,7 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
     sync = collect_sync(session)
     publish = collect_publish(session_path, session)
     preflight = collect_preflight(session)
+    timings = collect_timing(session)
     delta = _as_dict(gate_data.get("delta"))
 
     categories = []
@@ -279,6 +312,7 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
             "reason": delta.get("reason"),
         },
         "publish": publish,
+        "timings": timings,
         "categories": categories,
         "notes": notes,
     }
@@ -290,6 +324,13 @@ def render_markdown(diagnostics: dict) -> str:
     sync = _as_dict(diagnostics.get("sync"))
     delta = _as_dict(diagnostics.get("delta"))
     publish = _as_dict(diagnostics.get("publish"))
+    timings = _as_dict(diagnostics.get("timings"))
+    total_ms = timings.get("total_ms")
+    total_text = str(total_ms) if total_ms is not None else "N/A"
+    slowest = _as_list(timings.get("slowest_steps"))
+    slowest_text = ", ".join(
+        f"{item.get('step')}={item.get('duration_ms')}ms" for item in slowest[:3] if isinstance(item, dict)
+    ) or "N/A"
     lines = [
         "### Execution Diagnostics",
         "",
@@ -317,6 +358,7 @@ def render_markdown(diagnostics: dict) -> str:
         ),
         f"| Delta | {delta.get('status') or 'N/A'} |",
         f"| Publish | {publish.get('status') or 'N/A'} |",
+        f"| CI timing | total={total_text}ms; slowest={slowest_text} |",
         "",
     ]
 
@@ -331,6 +373,9 @@ def render_html_section(diagnostics: dict) -> str:
     sync = _as_dict(diagnostics.get("sync"))
     delta = _as_dict(diagnostics.get("delta"))
     publish = _as_dict(diagnostics.get("publish"))
+    timings = _as_dict(diagnostics.get("timings"))
+    total_ms = timings.get("total_ms")
+    total_text = str(total_ms) if total_ms is not None else "N/A"
     categories = ", ".join(diagnostics.get("categories") or ["none"])
     notes = "".join(f"<li>{html.escape(str(note))}</li>" for note in _as_list(diagnostics.get("notes")))
     grader_errors = _as_list(diagnostics.get("grader_errors"))
@@ -345,6 +390,19 @@ def render_html_section(diagnostics: dict) -> str:
     )
     if not grader_items:
         grader_items = "<li>none</li>"
+    timing_items = "".join(
+        "<li>"
+        + html.escape(str(item.get("step", "unknown")))
+        + ": "
+        + html.escape(str(item.get("duration_ms", "N/A")))
+        + "ms ("
+        + html.escape(str(item.get("status", "N/A")))
+        + ")</li>"
+        for item in _as_list(timings.get("steps"))[:20]
+        if isinstance(item, dict)
+    )
+    if not timing_items:
+        timing_items = "<li>N/A</li>"
 
     return f"""
   <h2>Execution Diagnostics</h2>
@@ -356,9 +414,12 @@ def render_html_section(diagnostics: dict) -> str:
     <tr><th>Sync</th><td>pull={html.escape(str(sync.get("pull") or "N/A"))}, push_cases={html.escape(str(sync.get("push_cases") or "N/A"))}, push_results={html.escape(str(sync.get("push_results") or "N/A"))}</td></tr>
     <tr><th>Delta</th><td>{html.escape(str(delta.get("status") or "N/A"))}</td></tr>
     <tr><th>Publish</th><td>{html.escape(str(publish.get("status") or "N/A"))}</td></tr>
+    <tr><th>CI timing</th><td>{html.escape(total_text)}ms</td></tr>
   </table>
   <h3>Notes</h3>
   <ul>{notes}</ul>
   <h3>Grader errors</h3>
   <ul>{grader_items}</ul>
+  <h3>Step timings</h3>
+  <ul>{timing_items}</ul>
 """

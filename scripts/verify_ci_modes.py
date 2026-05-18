@@ -201,15 +201,22 @@ def verify_mode(mode: str, root: Path, skill_path: Path, cases_file: Path) -> di
     session = sentry_state.load_session(session_dir)
     expected = pipeline_for_mode(mode)
     missing = [step for step in expected if step not in session.get("completed_steps", [])]
+    timing_steps = [
+        item.get("step")
+        for item in session.get("ci_step_timings", [])
+        if isinstance(item, dict) and item.get("status") == "OK"
+    ]
+    missing_timings = [step for step in expected if step not in timing_steps]
     required_files = ["evals.json", "grading-summary.json", "report.html", "publish-result.json"]
     if "gate" in expected:
         required_files.append("gate-result.json")
     missing_files = [name for name in required_files if not (session_dir / name).exists()]
-    if missing or missing_files or session.get("last_step") != expected[-1]:
+    if missing or missing_timings or missing_files or session.get("last_step") != expected[-1]:
         return {
             "mode": mode,
             "status": "FAIL",
             "missing_steps": missing,
+            "missing_timings": missing_timings,
             "missing_files": missing_files,
             "last_step": session.get("last_step"),
         }
@@ -254,6 +261,8 @@ def main() -> int:
             for key in ("missing_steps", "missing_files"):
                 if item.get(key):
                     print(f"  {key}: {item[key]}")
+            if item.get("missing_timings"):
+                print(f"  missing_timings: {item['missing_timings']}")
     return 1 if failures else 0
 
 

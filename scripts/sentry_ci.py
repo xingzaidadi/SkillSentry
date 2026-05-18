@@ -248,6 +248,35 @@ def transition_session(session_dir: Path, step: str):
         raise RuntimeError(f"illegal pipeline transition: {result}")
 
 
+def record_step_timing(session_dir: Path, step: str, tool: str, success: bool, elapsed: float, error: str | None = None) -> None:
+    session = sentry_state.load_session(session_dir)
+    item = {
+        "step": step,
+        "tool": tool,
+        "status": "OK" if success else "ERROR",
+        "duration_ms": round(elapsed * 1000, 1),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if error:
+        item["error"] = str(error)
+    session.setdefault("ci_step_timings", []).append(item)
+    session["updated_at"] = datetime.now(timezone.utc).isoformat()
+    sentry_state.save_session(session_dir, session)
+
+
+def record_pipeline_timing(session_dir: Path, total_time: float, failed_steps: list[str]) -> None:
+    merge_session(
+        session_dir,
+        {
+            "ci_timing": {
+                "total_ms": round(total_time * 1000, 1),
+                "failed_steps": failed_steps,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+
+
 def run_step(step: str, session_dir: Path, skill_path: Path, args, **kwargs) -> bool:
     """执行单个 pipeline 步骤，返回 True=成功"""
     definition = step_definition(step)
@@ -286,11 +315,13 @@ def run_step(step: str, session_dir: Path, skill_path: Path, args, **kwargs) -> 
         elapsed = time.time() - start
         status = "✅" if success else "❌"
         log(f"  {status} {step} 完成 ({elapsed:.1f}s)")
+        record_step_timing(session_dir, step, definition.tool, success, elapsed)
         return success
 
     except Exception as e:
         elapsed = time.time() - start
         log(f"  ❌ {step} 异常 ({elapsed:.1f}s): {e}")
+        record_step_timing(session_dir, step, definition.tool, False, elapsed, error=str(e))
         return False
 
 
@@ -715,6 +746,7 @@ def write_ci_output(output_dir: Path, results: dict, args, session_dir: Path | N
         "reasons": results["reasons"],
         "summary": results["summary"],
         "diagnostics": results.get("diagnostics", {}),
+        "timings": results.get("diagnostics", {}).get("timings", {}) if isinstance(results.get("diagnostics"), dict) else {},
         "artifacts": artifacts,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -862,6 +894,7 @@ def main():
                 break
 
     total_time = time.time() - start_time
+    record_pipeline_timing(session_dir, total_time, failed_steps)
     log(f"⏱️ Pipeline 完成 ({total_time:.1f}s)")
 
     # 7. 收集结果
