@@ -184,6 +184,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("local did not update session.executor.success")
     if session.get("grader_report", {}).get("status") != "completed":
         errors.append("local did not update session.grader_report.status")
+    if session.get("cases", {}).get("reused") is not False:
+        errors.append("local fresh prepare should write session.cases.reused=false")
     if not (session_dir / "manifest.json").exists():
         errors.append("local did not write manifest.json")
 

@@ -299,7 +299,7 @@ def prepare_cases(session_dir: Path, cases_file: Path) -> dict:
     sentry_case_lint.record_case_lint_result(session_dir, lint)
     cases_total = lint.get("total", 0)
     session = sentry_state.load_session(session_dir)
-    session["cases"] = {"total": cases_total, "types": {}, "reused": True}
+    session["cases"] = {"total": cases_total, "types": {}, "reused": False}
     session["updated_at"] = utc_now()
     sentry_state.save_session(session_dir, session)
     return {
