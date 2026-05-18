@@ -187,6 +187,8 @@ def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
         errors.append("sentry-run-result should include executor/grader reuse decisions")
     if payload.get("reuse_summary", {}).get("rerun_steps") != ["grader-report"]:
         errors.append("sentry-run-result should include reuse summary rerun steps")
+    if not any("Required outputs are missing" in hint for hint in payload.get("reuse_hints", [])):
+        errors.append("sentry-run-result should derive reuse hints from miss reasons")
     if not payload.get("executor_timing", {}).get("available"):
         errors.append("sentry-run-result should resolve executor timing from session_dir")
     if not payload.get("grader_timing", {}).get("available"):

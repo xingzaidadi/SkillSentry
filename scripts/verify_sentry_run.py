@@ -255,6 +255,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("missing response reuse summary should include executor-with rerun")
     if reuse_summary.get("miss_reasons", {}).get("missing_outputs") != 1:
         errors.append("missing response reuse summary should count one missing_outputs miss")
+    if not any("Required outputs are missing" in hint for hint in reuse_summary.get("hints", [])):
+        errors.append("missing response reuse summary should include missing_outputs hint")
     if not response_file.exists():
         errors.append("missing response was not restored by executor rerun")
 
@@ -314,6 +316,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("changed cases incorrectly reused prepared cases")
     if changed_cases_payload.get("cases", {}).get("reuse", {}).get("reason") != "cases_hash_changed":
         errors.append("changed cases should explain prepared cases reuse miss as cases_hash_changed")
+    if not any("Cases changed" in hint for hint in changed_cases_payload.get("reuse_summary", {}).get("hints", [])):
+        errors.append("changed cases reuse summary should include cases changed hint")
 
     # Changing SKILL.md must invalidate executor and refresh session metadata.
     before = fake_count(count_file)

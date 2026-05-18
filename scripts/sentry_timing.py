@@ -85,6 +85,33 @@ def _milliseconds(value) -> float | None:
     return round(duration, 1)
 
 
+REUSE_REASON_HINTS = {
+    "missing_prepared_cases": "Prepared cases were unavailable; rerun creates evals.json and case lint state.",
+    "cases_hash_changed": "Cases changed; executor and grader reuse will usually miss until artifacts are regenerated.",
+    "case_lint_missing": "Case lint state is missing; rerun lint/local to refresh prepared cases.",
+    "case_lint_version_changed": "Case lint version changed; rerun lint/local to refresh prepared cases.",
+    "missing_manifest_step": "Manifest has no record for this step; run local once to seed reusable artifacts.",
+    "manifest_status_not_ok": "Manifest recorded a non-OK step; inspect the previous failure before expecting reuse.",
+    "input_hash_changed": "Inputs changed; compare cases, skill hash, model, timeout, and response artifacts.",
+    "missing_outputs": "Required outputs are missing; inspect the missing_outputs sample before rerunning all steps.",
+    "force_executor": "--force-executor requested an executor rerun.",
+    "force_grader": "--force-grader requested a grader rerun.",
+    "cases_file_not_found": "The requested cases file does not exist.",
+}
+
+
+def reuse_hints(reuse_summary: dict, reuse_decisions: list[dict]) -> list[str]:
+    existing = _as_list(reuse_summary.get("hints"))
+    hints = [str(item) for item in existing if isinstance(item, str)]
+    for item in reuse_decisions:
+        if not isinstance(item, dict) or item.get("reused"):
+            continue
+        hint = REUSE_REASON_HINTS.get(str(item.get("reason")))
+        if hint and hint not in hints:
+            hints.append(hint)
+    return hints
+
+
 def timing_from_eval_result(path: Path) -> tuple[dict, dict]:
     payload = load_json(path)
     return _as_dict(payload.get("timings")), {
@@ -427,6 +454,7 @@ def analyze(path: Path, top: int = 5) -> dict:
         "failed_steps": timings.get("failed_steps", []),
         "reuse_summary": _as_dict(meta.get("reuse_summary")),
         "reuse_decisions": _as_list(meta.get("reuse_decisions")),
+        "reuse_hints": reuse_hints(_as_dict(meta.get("reuse_summary")), _as_list(meta.get("reuse_decisions"))),
         "executor_timing": executor_timing(session_dir, top),
         "grader_timing": grader_timing(session_dir, top),
         "recommendation": recommendation(slowest),
@@ -475,6 +503,11 @@ def main() -> int:
         reuse_summary = _as_dict(payload.get("reuse_summary"))
         if reuse_summary.get("rerun_steps"):
             print(f"rerun steps: {', '.join(reuse_summary.get('rerun_steps'))}")
+        reuse_hints_text = _as_list(payload.get("reuse_hints"))
+        if reuse_hints_text:
+            print("reuse hints:")
+            for item in reuse_hints_text:
+                print(f"- {item}")
         executor = _as_dict(payload.get("executor_timing"))
         if executor.get("available"):
             print("executor timing:")
