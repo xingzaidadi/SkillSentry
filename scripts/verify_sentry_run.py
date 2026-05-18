@@ -230,6 +230,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("local reuse summary should mark all_reused=true")
     if reuse_summary.get("rerun_steps") != []:
         errors.append(f"local reuse summary should have no rerun_steps, got {reuse_summary.get('rerun_steps')!r}")
+    if reuse_summary.get("hints") != []:
+        errors.append(f"local reuse summary should not include miss hints, got {reuse_summary.get('hints')!r}")
     session = load_json(session_dir / "session.json")
     if session.get("cases", {}).get("reused") is not True:
         errors.append("local reuse should write session.cases.reused=true")

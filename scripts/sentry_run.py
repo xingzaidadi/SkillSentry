@@ -196,10 +196,10 @@ def summarize_reuse_decisions(*sections: dict) -> dict:
             entry["missing_outputs_count"] = len(missing_outputs)
             entry["missing_outputs_sample"] = missing_outputs[:5]
         steps.append(entry)
-        hint = sentry_reuse.hint_for_reason(reason)
-        if hint and hint not in hints:
-            hints.append(hint)
         if not reused:
+            hint = sentry_reuse.hint_for_reason(reason)
+            if hint and hint not in hints:
+                hints.append(hint)
             miss_reasons[reason] = miss_reasons.get(reason, 0) + 1
 
     return {
