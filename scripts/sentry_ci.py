@@ -17,10 +17,8 @@ SkillSentry CI 编排入口
 
 import argparse
 import hashlib
-import html
 import json
 import os
-import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -31,8 +29,12 @@ SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import sentry_state
+import sentry_case_lint
+import sentry_executor
+import sentry_grader
 import sentry_preflight
-from sentry_diagnostics import collect_diagnostics, render_html_section, render_markdown
+import sentry_report
+from sentry_diagnostics import collect_diagnostics, render_markdown
 from sentry_gate import build_gate
 from sentry_pipeline import PIPELINES, pipeline_for_mode, step_definition
 
@@ -194,33 +196,15 @@ def find_existing_cases(skill_name: str) -> Path | None:
 
 def inspect_case_feasibility(cases: list) -> list[dict]:
     """Return deterministic warnings for generated cases that cannot run as-is."""
-    warnings = []
-    path_pattern = re.compile(r"[A-Za-z]:\\[^\s，。；,;`\"']+")
-
-    for case in cases if isinstance(cases, list) else []:
-        if not isinstance(case, dict):
-            continue
-        case_id = case.get("id", "unknown")
-        prompt = case.get("prompt", "") or ""
-        for raw_path in path_pattern.findall(prompt):
-            normalized = raw_path.rstrip(".,;，。；)")
-            if not Path(normalized).exists():
-                warnings.append({
-                    "case_id": case_id,
-                    "type": "missing_local_path",
-                    "path": normalized,
-                    "message": "Generated case references a local path that does not exist in this environment.",
-                })
-    return warnings
+    return sentry_case_lint.inspect_case_feasibility(cases)
 
 
 def record_case_feasibility(session_dir: Path, cases: list) -> None:
-    warnings = inspect_case_feasibility(cases)
+    warnings = sentry_case_lint.record_case_feasibility(session_dir, cases)
     if warnings:
         log(f"  ⚠️ case feasibility warnings: {len(warnings)}")
         for item in warnings:
             log(f"    - {item['case_id']}: missing path {item['path']}", verbose_only=True)
-    merge_session(session_dir, {"case_warnings": warnings})
 
 
 def prepare_existing_cases(session_dir: Path, existing_cases: Path | None) -> bool:
@@ -456,80 +440,47 @@ def run_sync_step(session_dir: Path, sync_key: str, config: str | None = None) -
 
 def run_executor_with(session_dir: Path, skill_path: Path, args) -> bool:
     """执行测试用例 — 用 claude CLI"""
-    from ci_executor import execute_all_evals
-
     evals_file = session_dir / "evals.json"
     if not evals_file.exists():
         log("  ❌ evals.json 不存在，无法执行")
         return False
 
     model = args.executor_model or args.model
-    success = execute_all_evals(
+    payload = sentry_executor.execute_executor_step(
         evals_file=evals_file,
         skill_path=skill_path,
         session_dir=session_dir,
         model=model,
         timeout_per_eval=args.timeout_per_eval,
-        verbose=args.verbose,
         variant="with_skill",
+        verbose=args.verbose,
+        update_session=True,
     )
-
-    summary_file = session_dir / "executor_results.json"
-    summary = {}
-    if summary_file.exists():
-        summary = json.loads(summary_file.read_text(encoding="utf-8"))
-    merge_session(session_dir, {
-        "executor": {
-            "with_skill": summary,
-            "success": summary.get("success", 0),
-            "total": summary.get("total", 0),
-        }
-    })
-    return success
+    return payload["status"] == "OK"
 
 
 def run_executor_without(session_dir: Path, skill_path: Path, args) -> bool:
     """Run no-skill baseline when safe; otherwise record explicit partial."""
-    session = sentry_state.load_session(session_dir)
-    if session.get("skill_type") == "mcp_based":
-        merge_session(session_dir, {
-            "without_skill": {
-                "status": "partial",
-                "reason": "mcp_based baseline is not executed in CI until MCP sandbox parity is available",
-            }
-        })
-        log("  ⏭️ executor-without: partial (mcp_based baseline not executed in CI)")
-        return True
-
-    from ci_executor import execute_all_evals
-
     evals_file = session_dir / "evals.json"
     if not evals_file.exists():
         log("  ❌ evals.json 不存在，无法执行 without_skill")
         return False
 
     model = args.executor_model or args.model
-    success = execute_all_evals(
+    payload = sentry_executor.execute_executor_step(
         evals_file=evals_file,
         skill_path=skill_path,
         session_dir=session_dir,
         model=model,
         timeout_per_eval=args.timeout_per_eval,
-        verbose=args.verbose,
         variant="without_skill",
+        verbose=args.verbose,
+        update_session=True,
     )
-
-    summary_file = session_dir / "executor_without_skill_results.json"
-    summary = {}
-    if summary_file.exists():
-        summary = json.loads(summary_file.read_text(encoding="utf-8"))
-    merge_session(session_dir, {
-        "without_skill": {
-            "status": "completed" if success else "failed",
-            "summary": summary,
-        }
-    })
-    return success
+    if payload["status"] == "PARTIAL":
+        log("  ⏭️ executor-without: partial (mcp_based baseline not executed in CI)")
+        return True
+    return payload["status"] == "OK"
 
 
 def run_comparator(session_dir: Path) -> bool:
@@ -597,125 +548,53 @@ def run_analyzer(session_dir: Path) -> bool:
 
 def run_grader_report(session_dir: Path, skill_path: Path, args) -> bool:
     """评审断言 — 用 SDK"""
-    from ci_grader import grade_all_evals
-
     evals_file = session_dir / "evals.json"
     if not evals_file.exists():
         log("  ❌ evals.json 不存在，无法评审")
         return False
 
-    success = grade_all_evals(
+    payload = sentry_grader.execute_grader_report(
         evals_file=evals_file,
         session_dir=session_dir,
         model=args.model,
         verbose=args.verbose,
+        update_session=True,
+        write_report=True,
     )
-
-    merge_session(session_dir, {"grader_report": {"status": "completed" if success else "failed"}})
-    if success:
-        gate_preview = build_gate(session_dir)
-        summary_payload = {
-            "status": "generated_by_ci",
-            "note": "CI compatibility summary. Per-eval grading.json files remain the source for deterministic gate counts.",
-            "authoritative_pass_rate": gate_preview.get("authoritative_pass_rate"),
-            "grade": gate_preview.get("grade"),
-            "verdict": gate_preview.get("verdict"),
-            "sources": gate_preview.get("sources", []),
-        }
-        (session_dir / "grading-summary.json").write_text(
-            json.dumps(summary_payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        write_minimal_report(session_dir, gate_preview)
-    return success
+    return payload["status"] == "OK"
 
 
 def write_minimal_report(session_dir: Path, gate_result: dict) -> None:
-    rate = gate_result.get("authoritative_pass_rate")
-    rate_text = "N/A" if rate is None else f"{rate:.1%}"
-    diagnostics = collect_diagnostics(session_dir, gate_result)
-    diagnostics_html = render_html_section(diagnostics)
-    html = f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <title>SkillSentry CI Report</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; margin: 32px; line-height: 1.5; }}
-    code {{ background: #f4f4f4; padding: 2px 4px; }}
-    table {{ border-collapse: collapse; margin: 12px 0 20px; }}
-    th, td {{ border: 1px solid #ddd; padding: 6px 10px; text-align: left; }}
-    th {{ background: #f7f7f7; }}
-  </style>
-</head>
-<body>
-  <h1>SkillSentry CI Report</h1>
-  <p><strong>Verdict:</strong> {gate_result.get("verdict", "UNKNOWN")}</p>
-  <p><strong>Grade:</strong> {gate_result.get("grade", "N/A")}</p>
-  <p><strong>Authoritative pass rate:</strong> {rate_text}</p>
-  <p><strong>Delta:</strong> {gate_result.get("delta", {}).get("status", "N/A")}</p>
-{diagnostics_html}
-  <p>Generated by <code>sentry_ci.py</code>. Full interactive reports are produced by <code>sentry-grader</code>.</p>
-</body>
-</html>
-"""
-    (session_dir / "report.html").write_text(html, encoding="utf-8")
+    sentry_report.write_session_report(
+        session_dir,
+        gate_result,
+        title="SkillSentry CI Report",
+        generated_by="sentry_ci.py",
+        footer="Full interactive reports are produced by sentry-grader.",
+    )
 
 
 def write_ci_html_report(report_path: Path, results: dict, args, *, generated_by: str = "sentry_ci.py") -> None:
     """Write a deterministic HTML report for every CI outcome, including ERROR paths."""
-    summary = results.get("summary", {})
-    diagnostics = results.get("diagnostics", {})
-    rate = summary.get("authoritative_pass_rate")
-    rate_text = "N/A" if rate is None else f"{rate:.1%}"
-    reasons = "".join(f"<li>{html.escape(str(reason))}</li>" for reason in results.get("reasons", []))
-    if not reasons:
-        reasons = "<li>none</li>"
-    diagnostics_html = render_html_section(diagnostics)
-    html_text = f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <title>SkillSentry CI Result</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; margin: 32px; line-height: 1.5; }}
-    code {{ background: #f4f4f4; padding: 2px 4px; }}
-    table {{ border-collapse: collapse; margin: 12px 0 20px; }}
-    th, td {{ border: 1px solid #ddd; padding: 6px 10px; text-align: left; }}
-    th {{ background: #f7f7f7; }}
-  </style>
-</head>
-<body>
-  <h1>SkillSentry CI Result</h1>
-  <p><strong>Skill:</strong> {html.escape(str(args.skill))}</p>
-  <p><strong>Mode:</strong> {html.escape(str(args.mode))}</p>
-  <p><strong>Verdict:</strong> {html.escape(str(results.get("verdict", "UNKNOWN")))}</p>
-  <p><strong>Grade:</strong> {html.escape(str(summary.get("grade", "N/A")))}</p>
-  <p><strong>Authoritative pass rate:</strong> {rate_text}</p>
-  <h2>Reasons</h2>
-  <ul>{reasons}</ul>
-{diagnostics_html}
-  <p>Generated by <code>{html.escape(generated_by)}</code>.</p>
-</body>
-</html>
-"""
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(html_text, encoding="utf-8")
+    sentry_report.write_ci_result_report(
+        report_path,
+        results,
+        skill=args.skill,
+        mode=args.mode,
+        generated_by=generated_by,
+    )
 
 
 def ensure_ci_report_artifacts(output_dir: Path, results: dict, args, session_dir: Path | None = None) -> dict:
     """Ensure CI always exposes an HTML report artifact."""
-    output_report = output_dir / "report.html"
-    write_ci_html_report(output_report, results, args)
-    artifacts = {"output_report_html": str(output_report)}
-
-    if session_dir is not None:
-        session_report = session_dir / "report.html"
-        if not session_report.exists() or results.get("verdict") == "ERROR":
-            write_ci_html_report(session_report, results, args)
-        artifacts["session_report_html"] = str(session_report)
-
-    return artifacts
+    return sentry_report.ensure_ci_report_artifacts(
+        output_dir,
+        results,
+        skill=args.skill,
+        mode=args.mode,
+        session_dir=session_dir,
+        generated_by="sentry_ci.py",
+    )
 
 
 def release_status_for_verdict(verdict: str | None) -> str:

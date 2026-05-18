@@ -128,7 +128,12 @@ bash install.sh
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence。 |
 | `scripts/sentry_gate.py` | 原方案 `sentry-score` 的当前落地形态;聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict。 |
 | `scripts/sentry_ci.py` | CI 编排入口;用 `--timeout-per-eval` 控制单用例 executor 超时,并在 `session.json.case_warnings` 记录不可执行用例风险。 |
+| `scripts/sentry_case_lint.py` | 独立轻量用例可执行性检查,读取 `evals.json` 并输出 `case_warnings`,不调 LLM、不跑 executor。 |
+| `scripts/sentry_executor.py` | executor 稳定 wrapper,调用 `ci_executor.py` 执行 with/without_skill,输出 JSON 并更新 session。 |
+| `scripts/sentry_grader.py` | grader-report 稳定 wrapper,调用 `ci_grader.py` 评审已有 response,写 summary/report 并更新 session。 |
+| `scripts/sentry_run.py` | profile 组合器;`preflight/lint/debug` 跑轻路径,`local` 跑已有 cases 的本地单边测评,`ci/release` 委托完整 CI。 |
 | `scripts/sentry_diagnostics.py` | 聚合 CI 诊断:用例可执行性、executor 失败/超时、grader 错误、sync 降级、Delta 状态和 publish 状态。 |
+| `scripts/sentry_report.py` | 独立轻量报告生成器,只读取已有 session/result artifact 并生成 HTML,不调 LLM、不联网。 |
 | `scripts/sentry_sync.py` | 包装 `sync_cases.py`,为 `sync-pull`/`sync-push-*` 输出稳定 JSON,无配置时显式 `skipped_no_config`。 |
 | `scripts/sentry_publish.py` | 包装发布步骤,生成本地 `publish-result.json`/报告兜底,保留 `publish.py` 交互发布入口。 |
 | `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体是否混入旧工具名、旧指标或旧 pipeline 口径。 |
@@ -138,7 +143,7 @@ bash install.sh
 
 `scripts/verify_ci_modes.py` 会模拟 heavy LLM 步骤,并让真实 state/sync/comparator/analyzer/gate/publish 代码跑完 `smoke / quick / regression / standard / full` 五种模式,用于确认不是只支持 smoke。
 
-`scripts/verify_ci_preflight.py` 会验证 CI 启动前的环境事实被写入 session 和 diagnostics。`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。`scripts/verify_ci_failure_report.py` 会验证 preflight/pipeline 失败时仍会生成稳定 `report.html` artifact。`scripts/verify_ci_exit_contract.py` 会验证 `PASS=0`、`CONDITIONAL PASS=1`、`FAIL=1`、`ERROR=2` 和 GitHub output 字段。`scripts/verify_ci_checks_integration.py` 会验证 workflow/Checks 使用 `sentry_ci.py` 的新输出契约。
+`scripts/verify_ci_preflight.py` 会验证 CI 启动前的环境事实被写入 session 和 diagnostics。`scripts/verify_ci_feasibility.py` 会验证 `sentry_case_lint.py` 能独立检查 `evals.json` 并写入 `session.json.case_warnings`。`scripts/verify_sentry_executor.py` 用 fake `claude` 验证 `sentry_executor.py` 的 CLI、session 更新和 mcp_based without_skill skip。`scripts/verify_sentry_grader.py` 用确定性失败响应验证 `sentry_grader.py` 的 CLI、summary/report 产物和 session 更新。`scripts/verify_sentry_run.py` 用 fake `claude` 验证 `sentry_run.py` 的 `lint/debug/local` profiles。`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。`scripts/verify_ci_failure_report.py` 会验证 preflight/pipeline 失败时仍会生成稳定 `report.html` artifact。`scripts/verify_sentry_report.py` 会验证独立 report 工具可从 session 或 `eval_result.json` 重新生成 HTML,且不会覆盖真实交互报告。`scripts/verify_ci_exit_contract.py` 会验证 `PASS=0`、`CONDITIONAL PASS=1`、`FAIL=1`、`ERROR=2` 和 GitHub output 字段。`scripts/verify_ci_checks_integration.py` 会验证 workflow/Checks 使用 `sentry_ci.py` 的新输出契约。
 
 需要真实调用 executor/grader 时,可用内置 fixture 跑一次 regression:
 
@@ -148,6 +153,31 @@ python scripts/sentry_ci.py --skill tests/fixtures/ci_modes/fixture-skill/SKILL.
 ```
 
 这条命令会调用 Claude CLI,所以不放进默认确定性回归。
+
+---
+
+## 轻量 Profile
+
+日常使用优先从 `sentry_run.py` 进入,避免默认跑完整 CI:
+
+```bash
+python scripts/sentry_run.py --skill my-skill --profile preflight
+python scripts/sentry_run.py --skill my-skill --profile lint --cases evals.json
+python scripts/sentry_run.py --session-dir sessions/<skill>/<run> --profile debug
+python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json
+python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json --reuse-session sessions/<skill>/<run>
+```
+
+| profile | 行为 | 是否重步骤 |
+|---------|------|------------|
+| preflight | 只定位 Skill、hash、runtime/config/cache | 否 |
+| lint | preflight + `sentry_case_lint.py`;不生成 cases | 否 |
+| debug | 对已有 session 重算 gate/diagnostics/report | 否 |
+| local | 复用已有 cases,只跑 with_skill executor + grader/report | 是 |
+| ci | 委托 `sentry_ci.py` 当前模式 | 是 |
+| release | 委托 `sentry_ci.py`;默认把 smoke 升为 standard | 是 |
+
+`local` 会写 `manifest.json`,记录 executor/grader 的输入 hash 和产物路径。再次传入 `--reuse-session` 且输入未变时,会复用已有 `executor_results.json`、`grading-summary.json`、`report.html` 和 `eval-*/grading.json`,跳过 executor/grader。需要强制重跑时使用 `--force-executor` 或 `--force-grader`。
 
 ---
 
@@ -179,6 +209,13 @@ python scripts/sentry_ci.py --skill tests/fixtures/ci_modes/fixture-skill/SKILL.
 ## 报告怎么看
 
 CI 每次运行都会在 `--output-dir/report.html` 生成稳定 HTML artifact;如果已经创建 session,中途失败时也会补 `session/report.html`。报告包含 `Execution Diagnostics` 区块,用于区分 preflight 环境问题、用例不可执行、runner 超时/错误、grader 错误、`skipped_no_config` 这类环境降级,以及真正的 Skill 质量失败。
+稳定 HTML 报告由 `scripts/sentry_report.py` 统一生成;它是 `no-llm, no-network` 的轻工具,可单独重出报告:
+
+```bash
+python scripts/sentry_report.py --session-dir sessions/<skill>/<run>
+python scripts/sentry_report.py --result ci-eval-results/<skill>/eval_result.json --output report.html
+```
+
 CI 退出码固定为: `PASS=0`, `CONDITIONAL PASS=1`, `FAIL=1`, `ERROR=2`。开启 `--github-output` 时会输出 `verdict/status/release_status/exit_code/report_html/session_report_html/diagnostic_categories/authoritative_pass_rate/grade`。
 GitHub Checks 使用同一份 `eval_result.json`: `PASS` 映射为 `success`, `CONDITIONAL PASS` 映射为 `action_required`, `FAIL/ERROR` 映射为 `failure`,并在 Check summary 里展示 report 路径和诊断分类。
 
@@ -220,16 +257,25 @@ SkillSentry/
 │   ├── sentry_pipeline.py      # 当前 pipeline 单一事实来源
 │   ├── sentry_state.py         # session.json 状态管理
 │   ├── sentry_gate.py          # sentry-score + 发布门禁计算
+│   ├── sentry_case_lint.py     # no-LLM/no-network evals 可执行性检查
+│   ├── sentry_executor.py      # Claude CLI executor 稳定 wrapper
+│   ├── sentry_grader.py        # Anthropic SDK/LLM grader-report wrapper
+│   ├── sentry_run.py           # profile 组合器
 │   ├── sentry_diagnostics.py   # CI/publish 执行诊断聚合
+│   ├── sentry_report.py        # no-LLM/no-network HTML 报告生成器
 │   ├── sentry_sync.py          # sync 步骤稳定 JSON wrapper
 │   ├── sentry_publish.py       # publish 步骤稳定 JSON wrapper
 │   ├── sentry_contract_lint.py # SkillSentry 当前口径自检
 │   ├── sentry_article_lint.py  # 文章当前口径自检
 │   ├── verify_ci_preflight.py  # CI 预检证据回归
 │   ├── verify_ci_feasibility.py # CI 用例可执行性 warning 回归
+│   ├── verify_sentry_executor.py # executor wrapper 回归
+│   ├── verify_sentry_grader.py # grader wrapper 回归
+│   ├── verify_sentry_run.py    # profile 组合器回归
 │   ├── verify_ci_modes.py      # 五种 CI 模式编排回归
 │   ├── verify_ci_diagnostics.py # CI 诊断输出回归
 │   ├── verify_ci_failure_report.py # CI 失败报告 artifact 回归
+│   ├── verify_sentry_report.py # 独立 report 工具回归
 │   ├── verify_ci_exit_contract.py # CI 退出码/GitHub output 回归
 │   ├── verify_ci_checks_integration.py # Actions/Checks 集成回归
 │   ├── validate_step.py       # OpenClaw 步骤校验

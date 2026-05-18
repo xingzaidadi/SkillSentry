@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import sentry_state
-from sentry_ci import inspect_case_feasibility, record_case_feasibility
+from sentry_case_lint import inspect_case_feasibility, record_case_feasibility
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -55,6 +56,35 @@ def main() -> int:
         record_case_feasibility(session_dir, clean_cases)
         session = load_session(session_dir)
         assert_equal(session["case_warnings"], [], "clean cases clear stale warnings")
+
+        cases_file = Path(tmp) / "evals.json"
+        cases_file.write_text(json.dumps(missing_cases, ensure_ascii=False), encoding="utf-8")
+        lint_output = Path(tmp) / "case-lint.json"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parent / "sentry_case_lint.py"),
+                "--cases",
+                str(cases_file),
+                "--session-dir",
+                str(session_dir),
+                "--output",
+                str(lint_output),
+                "--format",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        assert_equal(completed.returncode, 0, "sentry_case_lint.py exit code")
+        lint_result = json.loads(lint_output.read_text(encoding="utf-8"))
+        assert_equal(lint_result["status"], "WARN", "case lint status")
+        assert_equal(lint_result["warning_count"], 1, "case lint warning count")
+        session = load_session(session_dir)
+        assert_equal(session["case_lint"]["warning_count"], 1, "session case_lint warning count")
+        assert_equal(len(session["case_warnings"]), 1, "session case_warnings warning count")
 
     print("ci feasibility: PASS")
     return 0

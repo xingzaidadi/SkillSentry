@@ -2,6 +2,18 @@
 
 > 主 SKILL.md 仅保留最近 3 个版本，旧版本记录于此。
 
+## v9.1.0 · 2026-05-18
+- **轻量可组合工具链**：将 `sentry_ci.py` 内的报告、用例可执行性检查、executor、grader 能力拆成独立脚本,完整 CI 契约保持不变。
+- 新增 `scripts/sentry_report.py`: 从已有 session 或 `eval_result.json` 重出稳定 HTML 报告;`no-llm, no-network`;默认不覆盖真实交互式 grader 报告。
+- 新增 `scripts/sentry_case_lint.py`: 独立检查 `evals.json` / `cases.cache.json` 的可执行性风险,写入 `case_warnings` / `case_lint`;不调 LLM、不跑 executor。
+- 新增 `scripts/sentry_executor.py`: 包装 `ci_executor.py`,提供 with_skill / without_skill 独立入口,输出稳定 JSON 并更新 session。
+- 新增 `scripts/sentry_grader.py`: 包装 `ci_grader.py`,对已有 executor response 单独执行 grader-report,写 `grading-summary.json`、`report.html` 和 session 状态。
+- 新增 `scripts/sentry_run.py`: profile 组合器,支持 `preflight / lint / debug / local / ci / release`;轻 profile 不触发 executor/grader,`ci/release` 委托完整 `sentry_ci.py`。
+- `sentry_run.py --profile local --reuse-session <session>` 新增 `manifest.json` 复用机制;输入 hash 未变时跳过 executor/grader,可用 `--force-executor` / `--force-grader` 显式重跑。
+- `sentry_ci.py` 现在复用 `sentry_report.py`、`sentry_case_lint.py`、`sentry_executor.py`、`sentry_grader.py`,保留原有 pipeline、artifact、exit code、GitHub output 和 Checks 契约。
+- 新增确定性回归脚本:`verify_sentry_report.py`、`verify_sentry_executor.py`、`verify_sentry_grader.py`、`verify_sentry_run.py`;`verify_ci_feasibility.py` 改为覆盖 `sentry_case_lint.py` CLI。
+- 文档同步: README、`references/current-contract.md`、`references/ci-guide.md`、`references/step-contracts.md` 明确轻 profile、wrapper 边界和 manifest 复用规则。
+
 ## v9.0.0 · 2026-05-14
 - **契约收敛版**：不新增测评维度，专注统一执行契约和文档口径。
 - 主 pipeline 将 `grader` + `report` 收敛为 `grader-report`，由 `sentry-grader` 同一 subagent 完成评分和 HTML 报告。

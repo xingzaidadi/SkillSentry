@@ -23,6 +23,21 @@
 
 主调度器每轮读 session.json.pipeline[current_index+1] 确定下一步。超出数组范围 = 测评结束。
 
+轻量 profile 入口:
+
+```bash
+python scripts/sentry_run.py --skill <skill> --profile preflight
+python scripts/sentry_run.py --skill <skill> --profile lint --cases evals.json
+python scripts/sentry_run.py --session-dir <session> --profile debug
+python scripts/sentry_run.py --skill <skill> --profile local --cases evals.json
+python scripts/sentry_run.py --skill <skill> --profile local --cases evals.json --reuse-session <session>
+```
+
+- `preflight/lint/debug`:不得触发 executor/grader。
+- `local`:只跑 with_skill executor + grader/report,不得跑 without_skill/publish。
+- `ci/release`:委托 `sentry_ci.py`,保持完整 CI/release 契约。
+- `local --reuse-session`:必须读取 `manifest.json`;executor/grader 输入 hash 未变时跳过重步骤。`--force-executor` / `--force-grader` 可显式重跑。
+
 ---
 
 ## Step 0: 环境预检
@@ -93,6 +108,14 @@
 | 幂等 | hash 一致 + cases.cache 存在 → 缓存复用(展示用例表) |
 | auto-exempt | real_data 数据采集 + 用例审核(standard/full) |
 
+生成或复用 `evals.json` 后,应运行轻量可执行性检查:
+
+```bash
+python scripts/sentry_case_lint.py --cases evals.json --session-dir <session>
+```
+
+该入口是 `no-llm, no-network`,只写 `case_warnings` / `case_lint`,不跑 executor,不把 warning 当作质量失败。
+
 **缓存复用展示规范**：
 ```
 ⚡ sentry-cases 缓存命中（上次 {date}）
@@ -118,6 +141,15 @@
 | 准出 | actual_transcripts ≥ expected_evals × 0.8 (80%+) |
 | 降级 | 通过率 < 20% → 询问继续/终止；全失败 → 终止 + 报告环境问题 |
 | 幂等 | 同 evals.json hash + 同 run 号 → 不重跑 |
+
+稳定脚本入口:
+
+```bash
+python scripts/sentry_executor.py --evals evals.json --skill SKILL.md --session-dir <session> --variant with_skill
+python scripts/sentry_executor.py --evals evals.json --skill SKILL.md --session-dir <session> --variant without_skill
+```
+
+`sentry_executor.py` 是重工具 wrapper:会调用 Claude CLI,但只负责执行、写 `executor_results.json` / `executor_without_skill_results.json` 和更新 session,不做 grader/report/gate。
 
 **产物验收公式**（主调度器执行）：
 ```bash
@@ -146,6 +178,14 @@ fi
 | - L3(异常降级) | L2 也超时 → 纯统计(文件存在+字数+关键词) → 标注 [DEGRADED-L3] |
 | 幂等 | 同 transcript hash + 同 evals.json hash → 复用 grading |
 
+稳定脚本入口:
+
+```bash
+python scripts/sentry_grader.py --evals evals.json --session-dir <session>
+```
+
+`sentry_grader.py` 是重工具 wrapper:会调用 SDK/LLM,但只读取已有 executor response,写 `grading.json`、`grading-summary.json`、`report.html` 和 session,不重跑 executor。
+
 ---
 
 ## report (sentry-report, 独立重出报告)
@@ -159,8 +199,17 @@ fi
 | 输入 | grading-summary.json + history.json(如有) + session.json |
 | 输出 | report.html + history.json 更新 |
 | 准出 | report.html 存在 + grading-summary.json 存在 |
-| 降级 | report 生成失败 → 纯文本摘要替代 |
+| 降级 | `scripts/sentry_report.py` 可从已有 session/result artifact 生成稳定 HTML;生成失败时再用纯文本摘要替代 |
 | 幂等 | 同 grading hash → 不重新生成 |
+
+脚本入口:
+
+```bash
+python scripts/sentry_report.py --session-dir <session>
+python scripts/sentry_report.py --result <eval_result.json> --output report.html
+```
+
+该入口是 `no-llm, no-network` 轻工具;默认不覆盖真实交互式 grader 报告,除非显式 `--force`。
 
 ---
 

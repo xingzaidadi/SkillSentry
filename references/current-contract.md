@@ -46,6 +46,10 @@ v9.0 是契约收敛版,不是功能扩展版。
 | `scripts/sentry_pipeline.py` | 输出当前稳定口径 pipeline、下一步、步骤类型、工具和 required artifacts | 不执行步骤、不生成产物 |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,记录 milestone evidence | 不跳过 auto-exempt 用户确认 |
 | `scripts/sentry_gate.py` | 原方案 `sentry-score` 的当前落地形态;聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | 不改写 grading 原始证据;不把门禁判断拆回 LLM 心算 |
+| `scripts/sentry_case_lint.py` | 读取 `evals.json`/`cases.cache.json`,检查本地路径等可执行性风险并输出 `case_warnings` | 不调 LLM、不跑 executor、不把 warning 当作质量失败 |
+| `scripts/sentry_executor.py` | 包装 `ci_executor.py`,执行 with_skill/without_skill,输出稳定 JSON 并更新 session | 不重新实现 CLI runner、不调 grader、不做质量判断 |
+| `scripts/sentry_grader.py` | 包装 `ci_grader.py`,评审已有 with_skill response,写 `grading-summary.json`/`report.html` 并更新 session | 不跑 executor、不改写 grading 原始证据、不做发布同步 |
+| `scripts/sentry_run.py` | profile 组合器:`preflight/lint/debug/local/ci/release`;轻 profile 只读已有 artifact 或做确定性检查 | 不替代 `sentry_ci.py` 的完整 CI/release 契约 |
 | `scripts/sentry_ci.py` | 编排 CI pipeline、生成/复用 cases、调用 executor/grader/gate/publish;记录 `case_warnings` 并支持 `--timeout-per-eval` | 不把不可执行用例伪装成真实质量失败,不把总超时当作单用例超时 |
 | `scripts/sentry_diagnostics.py` | 聚合 CI/publish 诊断,区分 case warning、executor timeout/error、grader error、sync skipped、Delta 和 publish 状态 | 不参与评分、不改写 grading/gate 原始证据 |
 | `scripts/sentry_sync.py` | 包装 `sync_cases.py`,为 sync 步骤输出稳定 JSON,无飞书配置时显式 `skipped_no_config` | 不替代飞书 API 实现、不隐式跳过 sync 步骤 |
@@ -58,7 +62,13 @@ v9.0 是契约收敛版,不是功能扩展版。
 - `sentry-score` 是方案名;当前代码名为 `sentry_gate.py`,同时覆盖 score 和 release gate。
 - pipeline 查询和下一步判断优先使用 `sentry_pipeline.py` 或复用其定义,不要在 CI、主 `SKILL.md` 和状态脚本中各自维护一套数组。
 - sync/publish 步骤优先使用 `sentry_sync.py`、`sentry_publish.py` 输出稳定 JSON;飞书配置缺失时必须留下结构化 `skipped_no_config` 或本地发布结果。
+- 稳定 HTML 报告优先使用 `sentry_report.py`;它是 no-LLM/no-network 轻工具,只读取已有 session/result artifact。`sentry_ci.py` 和 `sentry_publish.py` 不应各自维护 HTML 渲染逻辑。
 - CI 生成或复用 cases 后必须保留可执行性 warning;发现不存在的本地路径、不可访问项目或超出单用例预算的重型用例时,应记录到 `session.json.case_warnings` 并在解释结论时区分“用例不可执行”和“Skill 质量失败”。
+- 可执行性 warning 的确定性检查优先使用 `sentry_case_lint.py`;它是 no-LLM/no-network 轻工具,可独立运行 `python scripts/sentry_case_lint.py --cases <evals.json> --session-dir <session>`。
+- executor 步骤优先通过 `sentry_executor.py` 调用;它是重工具 wrapper,会调用 Claude CLI,但只负责执行、写 summary 和更新 session,不负责评分或报告。
+- grader-report 步骤优先通过 `sentry_grader.py` 调用;它是重工具 wrapper,会调用 SDK/LLM,但只负责评审已有 response、写 summary/report 和更新 session,不重跑 executor。
+- 日常入口优先使用 `sentry_run.py` profile:`preflight/lint/debug` 不得触发 executor/grader;`local` 只跑 with_skill + grader/report,不得跑 without_skill/publish;`ci/release` 必须委托 `sentry_ci.py`。
+- `sentry_run.py --profile local --reuse-session <session>` 必须使用 `manifest.json` 判断 executor/grader 是否可复用;输入 hash 未变时跳过重步骤,显式 `--force-executor`/`--force-grader` 才可重跑。
 - CI 启动前必须运行 preflight,并把结果写入 `session.json.preflight`;CI 所有结果路径都必须写 `--output-dir/report.html`,有 session 的失败路径也必须补 `session/report.html`;CI JSON、summary Markdown 和最小 HTML 报告必须带 `Execution Diagnostics`,把 `preflight_error`、`runner_unavailable`、`llm_unavailable`、`case_unusable`、`runner_timeout`、`grader_error`、`environment_skipped` 和 `quality_failure` 分开呈现。
 - CI 退出码是稳定契约:`PASS=0`,`CONDITIONAL PASS=1`,`FAIL=1`,`ERROR=2`;`--github-output` 必须输出 `verdict/status/release_status/exit_code/report_html/session_report_html/diagnostic_categories/authoritative_pass_rate/grade`。
 - GitHub Actions workflow 必须直接调用 `sentry_ci.py`,不得先让 LLM 交互式“测评”再用旧 `ci_eval.py` 汇总;GitHub Checks 必须读取 `eval_result.json` 的 `status/exit_code/artifacts/diagnostics`,并将 `CONDITIONAL PASS` 映射为 `action_required`。
@@ -80,6 +90,8 @@ v9.0 是契约收敛版,不是功能扩展版。
 `sentry-report` 保留,但只用于独立场景:
 - 用户说「出报告」「重新生成报告」「已有 grading 帮我重出 HTML」。
 - 已有 `grading-summary.json` 或各 eval 的 `grading.json`。
+- 脚本入口为 `scripts/sentry_report.py --session-dir <session>` 或 `scripts/sentry_report.py --result <eval_result.json>`。
+- 该脚本不得调 LLM、不得联网,也不得覆盖已有的真实交互式 grader 报告,除非显式 `--force`。
 - 不作为主 pipeline 的常规步骤。
 
 ---

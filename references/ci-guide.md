@@ -116,6 +116,20 @@ CI 运行后在 `--output-dir` 下生成：
 | `summary.md` | GitHub Step Summary 格式的结果摘要,包含 `Execution Diagnostics` |
 | `report.html` | 每次 CI 都生成的稳定 HTML artifact;preflight 失败也会生成 |
 
+`report.html` 由 `scripts/sentry_report.py` 统一生成。该工具是 `no-llm, no-network`,可单独从已有结果重出报告:
+
+```bash
+python scripts/sentry_report.py --result ci-eval-results/<skill>/eval_result.json --output report.html
+python scripts/sentry_report.py --session-dir sessions/<skill>/<run>
+```
+
+`evals.json` 可执行性 warning 由 `scripts/sentry_case_lint.py` 统一检查。该工具同样是 `no-llm, no-network`,可在不跑 executor/grader 的情况下提前检查用例:
+
+```bash
+python scripts/sentry_case_lint.py --cases evals.json --format json
+python scripts/sentry_case_lint.py --cases evals.json --session-dir sessions/<skill>/<run>
+```
+
 Session 目录下额外产物：
 - `evals.json` — 生成的测试用例
 - `eval-N/with_skill/outputs/response.md` — 每个用例的执行响应
@@ -123,3 +137,29 @@ Session 目录下额外产物：
 - `eval-N/grading.json` — 断言评审结果
 - `executor_results.json` — 执行器汇总
 - `report.html` — session 已创建时的 HTML 报告;pipeline 中途失败也会补最小兜底报告
+
+executor 可通过稳定 wrapper 单独运行。该入口会调用 Claude CLI,属于重步骤,但会输出稳定 JSON 并更新 session:
+
+```bash
+python scripts/sentry_executor.py --evals evals.json --skill SKILL.md --session-dir sessions/<skill>/<run> --variant with_skill
+python scripts/sentry_executor.py --evals evals.json --skill SKILL.md --session-dir sessions/<skill>/<run> --variant without_skill
+```
+
+grader-report 也可单独运行。该入口会调用 SDK/LLM,属于重步骤,但只读取已有 executor 输出,不会重跑 executor:
+
+```bash
+python scripts/sentry_grader.py --evals evals.json --session-dir sessions/<skill>/<run>
+```
+
+轻量 profile 由 `sentry_run.py` 统一组合:
+
+```bash
+python scripts/sentry_run.py --skill my-skill --profile preflight
+python scripts/sentry_run.py --skill my-skill --profile lint --cases evals.json
+python scripts/sentry_run.py --session-dir sessions/<skill>/<run> --profile debug
+python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json
+python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json --reuse-session sessions/<skill>/<run>
+```
+
+`preflight/lint/debug` 不触发 executor/grader;`local` 只跑 with_skill + grader/report;`ci/release` 委托 `sentry_ci.py`。
+`local` 会写 `manifest.json`;复用同一 session 且输入 hash 未变时,会跳过 executor/grader。需要重跑时使用 `--force-executor` 或 `--force-grader`。
