@@ -33,6 +33,7 @@ import sentry_diagnostics
 import sentry_grader
 import sentry_preflight
 import sentry_report
+import sentry_reuse
 import sentry_state
 from sentry_executor import execute_executor_step
 from sentry_gate import build_gate
@@ -42,21 +43,6 @@ from sentry_pipeline import PIPELINES
 LIGHT_PROFILES = {"preflight", "lint", "debug"}
 HEAVY_PROFILES = {"local", "ci", "release"}
 PROFILES = sorted(LIGHT_PROFILES | HEAVY_PROFILES)
-
-REUSE_REASON_HINTS = {
-    "matched": "Reuse matched; the step was skipped.",
-    "missing_prepared_cases": "Prepared cases were unavailable; rerun creates evals.json and case lint state.",
-    "cases_hash_changed": "Cases changed; executor and grader reuse will usually miss until artifacts are regenerated.",
-    "case_lint_missing": "Case lint state is missing; rerun lint/local to refresh prepared cases.",
-    "case_lint_version_changed": "Case lint version changed; rerun lint/local to refresh prepared cases.",
-    "missing_manifest_step": "Manifest has no record for this step; run local once to seed reusable artifacts.",
-    "manifest_status_not_ok": "Manifest recorded a non-OK step; inspect the previous failure before expecting reuse.",
-    "input_hash_changed": "Inputs changed; compare cases, skill hash, model, timeout, and response artifacts.",
-    "missing_outputs": "Required outputs are missing; inspect the missing_outputs sample before rerunning all steps.",
-    "force_executor": "--force-executor requested an executor rerun.",
-    "force_grader": "--force-grader requested a grader rerun.",
-    "cases_file_not_found": "The requested cases file does not exist.",
-}
 
 
 def utc_now() -> str:
@@ -200,7 +186,7 @@ def summarize_reuse_decisions(*sections: dict) -> dict:
             entry["missing_outputs_count"] = len(missing_outputs)
             entry["missing_outputs_sample"] = missing_outputs[:5]
         steps.append(entry)
-        hint = REUSE_REASON_HINTS.get(str(reason))
+        hint = sentry_reuse.hint_for_reason(reason)
         if hint and hint not in hints:
             hints.append(hint)
         if not reused:

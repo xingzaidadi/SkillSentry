@@ -12,6 +12,8 @@ import json
 import sys
 from pathlib import Path
 
+import sentry_reuse
+
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -85,28 +87,13 @@ def _milliseconds(value) -> float | None:
     return round(duration, 1)
 
 
-REUSE_REASON_HINTS = {
-    "missing_prepared_cases": "Prepared cases were unavailable; rerun creates evals.json and case lint state.",
-    "cases_hash_changed": "Cases changed; executor and grader reuse will usually miss until artifacts are regenerated.",
-    "case_lint_missing": "Case lint state is missing; rerun lint/local to refresh prepared cases.",
-    "case_lint_version_changed": "Case lint version changed; rerun lint/local to refresh prepared cases.",
-    "missing_manifest_step": "Manifest has no record for this step; run local once to seed reusable artifacts.",
-    "manifest_status_not_ok": "Manifest recorded a non-OK step; inspect the previous failure before expecting reuse.",
-    "input_hash_changed": "Inputs changed; compare cases, skill hash, model, timeout, and response artifacts.",
-    "missing_outputs": "Required outputs are missing; inspect the missing_outputs sample before rerunning all steps.",
-    "force_executor": "--force-executor requested an executor rerun.",
-    "force_grader": "--force-grader requested a grader rerun.",
-    "cases_file_not_found": "The requested cases file does not exist.",
-}
-
-
 def reuse_hints(reuse_summary: dict, reuse_decisions: list[dict]) -> list[str]:
     existing = _as_list(reuse_summary.get("hints"))
     hints = [str(item) for item in existing if isinstance(item, str)]
     for item in reuse_decisions:
         if not isinstance(item, dict) or item.get("reused"):
             continue
-        hint = REUSE_REASON_HINTS.get(str(item.get("reason")))
+        hint = sentry_reuse.hint_for_reason(item.get("reason"))
         if hint and hint not in hints:
             hints.append(hint)
     return hints
