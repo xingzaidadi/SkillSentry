@@ -133,7 +133,7 @@ bash install.sh
 | `scripts/sentry_grader.py` | grader-report 稳定 wrapper,调用 `ci_grader.py` 评审已有 response,写 summary/report 并更新 session。 |
 | `scripts/sentry_run.py` | profile 组合器;`preflight/lint/debug` 跑轻路径,`local` 跑已有 cases 的本地单边测评,`ci/release` 委托完整 CI。 |
 | `scripts/sentry_diagnostics.py` | 聚合 CI 诊断:用例可执行性、executor 失败/超时、grader 错误、sync 降级、Delta 状态和 publish 状态。 |
-| `scripts/sentry_timing.py` | 独立轻量耗时分析器,读取 `eval_result.json` 或 session,输出最慢 step/phase 和优化建议;不调 LLM、不联网。 |
+| `scripts/sentry_timing.py` | 独立轻量耗时分析器,读取 `eval_result.json` 或 session,输出最慢 step/phase、executor per-eval 耗时分布和优化建议;不调 LLM、不联网。 |
 | `scripts/sentry_report.py` | 独立轻量报告生成器,只读取已有 session/result artifact 并生成 HTML,不调 LLM、不联网。 |
 | `scripts/sentry_sync.py` | 包装 `sync_cases.py`,为 `sync-pull`/`sync-push-*` 输出稳定 JSON,无配置时显式 `skipped_no_config`。 |
 | `scripts/sentry_publish.py` | 包装发布步骤,生成本地 `publish-result.json`/报告兜底,保留 `publish.py` 交互发布入口。 |
@@ -211,7 +211,7 @@ python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json
 
 ## 报告怎么看
 
-CI 每次运行都会在 `--output-dir/report.html` 生成稳定 HTML artifact;如果已经创建 session,中途失败时也会补 `session/report.html`。报告包含 `Execution Diagnostics` 区块,用于区分 preflight 环境问题、用例不可执行、runner 超时/错误、grader 错误、`skipped_no_config` 这类环境降级,以及真正的 Skill 质量失败。`eval_result.json` 同时输出 `timings`,来自 `session.json.ci_step_timings` / `ci_phase_timings` / `ci_timing`,用于观察每个 CI step 和非 pipeline phase 的耗时,不参与评分或退出码判断。
+CI 每次运行都会在 `--output-dir/report.html` 生成稳定 HTML artifact;如果已经创建 session,中途失败时也会补 `session/report.html`。报告包含 `Execution Diagnostics` 区块,用于区分 preflight 环境问题、用例不可执行、runner 超时/错误、grader 错误、`skipped_no_config` 这类环境降级,以及真正的 Skill 质量失败。`eval_result.json` 同时输出 `timings`,来自 `session.json.ci_step_timings` / `ci_phase_timings` / `ci_timing`,用于观察每个 CI step 和非 pipeline phase 的耗时,不参与评分或退出码判断。`scripts/sentry_timing.py` 还会在可解析到 session 时读取 `executor_results.json` 的 per-eval `duration`,汇总 avg/p50/p95/max 和最慢用例。
 稳定 HTML 报告由 `scripts/sentry_report.py` 统一生成;它是 `no-llm, no-network` 的轻工具,可单独重出报告:
 
 ```bash

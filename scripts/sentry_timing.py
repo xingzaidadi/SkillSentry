@@ -48,6 +48,34 @@ def _number(value, default: float = 0.0) -> float:
     return default
 
 
+def _round(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(value, 1)
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * percentile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = position - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
+def _duration_ms(value) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if value is None:
+        return None
+    duration = _number(value, default=-1.0)
+    if duration < 0:
+        return None
+    return round(duration * 1000, 1)
+
+
 def timing_from_eval_result(path: Path) -> tuple[dict, dict]:
     payload = load_json(path)
     return _as_dict(payload.get("timings")), {
@@ -55,6 +83,7 @@ def timing_from_eval_result(path: Path) -> tuple[dict, dict]:
         "kind": "eval_result",
         "verdict": payload.get("verdict"),
         "status": payload.get("status"),
+        "artifacts": _as_dict(payload.get("artifacts")),
     }
 
 
@@ -88,6 +117,7 @@ def load_timing(path: Path) -> tuple[dict, dict]:
             "kind": "eval_result",
             "verdict": payload.get("verdict"),
             "status": payload.get("status"),
+            "artifacts": _as_dict(payload.get("artifacts")),
         }
     if "ci_step_timings" in payload or "ci_timing" in payload:
         return timing_from_session(path)
@@ -101,6 +131,110 @@ def sorted_items(items: list, name_key: str) -> list[dict]:
             continue
         normalized.append(dict(item))
     return sorted(normalized, key=lambda item: _number(item.get("duration_ms")), reverse=True)
+
+
+def resolve_session_dir(input_path: Path, meta: dict) -> Path | None:
+    if meta.get("kind") == "session":
+        source = Path(str(meta.get("source") or ""))
+        if source.name == "session.json":
+            return source.parent
+        return source if source.is_dir() else None
+
+    artifacts = _as_dict(meta.get("artifacts"))
+    session_report = artifacts.get("session_report_html")
+    if isinstance(session_report, str) and session_report:
+        report_path = Path(session_report)
+        candidates = [report_path]
+        if not report_path.is_absolute():
+            candidates.append(input_path.parent / report_path)
+            candidates.append(Path.cwd() / report_path)
+        for candidate in candidates:
+            if candidate.exists() and candidate.name == "report.html":
+                session_dir = candidate.parent
+                if (session_dir / "session.json").exists():
+                    return session_dir
+
+    if (input_path.parent / "session.json").exists():
+        return input_path.parent
+    return None
+
+
+def load_executor_summary(session_dir: Path, variant: str) -> dict:
+    filename = "executor_results.json" if variant == "with_skill" else f"executor_{variant}_results.json"
+    path = session_dir / filename
+    payload = load_json(path)
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def summarize_executor_variant(summary: dict, variant: str, top: int) -> dict:
+    rows = []
+    for item in _as_list(summary.get("results")):
+        if not isinstance(item, dict):
+            continue
+        duration_ms = _duration_ms(item.get("duration"))
+        if duration_ms is None:
+            continue
+        rows.append(
+            {
+                "variant": variant,
+                "eval_id": item.get("eval_id"),
+                "name": item.get("name"),
+                "status": item.get("status"),
+                "duration_ms": duration_ms,
+            }
+        )
+
+    durations = [item["duration_ms"] for item in rows]
+    slowest = sorted(rows, key=lambda item: item.get("duration_ms", 0), reverse=True)
+    total = _number(summary.get("total"), len(_as_list(summary.get("results"))))
+    success = _number(summary.get("success"), 0)
+    failed = _number(summary.get("failed"), max(total - success, 0))
+    duration_total = sum(durations)
+    return {
+        "variant": variant,
+        "total": int(total),
+        "success": int(success),
+        "failed": int(failed),
+        "timed": len(rows),
+        "duration_ms": {
+            "total": _round(duration_total),
+            "avg": _round(duration_total / len(durations)) if durations else None,
+            "p50": _round(_percentile(durations, 0.50)),
+            "p95": _round(_percentile(durations, 0.95)),
+            "max": _round(max(durations)) if durations else None,
+        },
+        "slowest_cases": slowest[:top],
+    }
+
+
+def executor_timing(session_dir: Path | None, top: int) -> dict:
+    if session_dir is None:
+        return {"available": False, "reason": "session_dir_unavailable"}
+
+    variants = []
+    for variant in ("with_skill", "without_skill"):
+        try:
+            summary = load_executor_summary(session_dir, variant)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+        if summary:
+            variants.append(summarize_executor_variant(summary, variant, top))
+
+    if not variants:
+        return {"available": False, "reason": "executor_results_unavailable", "session_dir": str(session_dir)}
+
+    slowest_cases = []
+    for variant in variants:
+        slowest_cases.extend(_as_list(variant.get("slowest_cases")))
+    slowest_cases = sorted(slowest_cases, key=lambda item: item.get("duration_ms", 0), reverse=True)[:top]
+    return {
+        "available": True,
+        "session_dir": str(session_dir),
+        "variants": variants,
+        "slowest_cases": slowest_cases,
+    }
 
 
 def recommendation(step: dict) -> str:
@@ -128,6 +262,7 @@ def analyze(path: Path, top: int = 5) -> dict:
     steps = sorted_items(_as_list(timings.get("steps")), "step")
     phases = sorted_items(_as_list(timings.get("phases")), "phase")
     slowest = steps[0] if steps else (phases[0] if phases else {})
+    session_dir = resolve_session_dir(path, meta)
     return {
         "status": "OK",
         "source": meta,
@@ -135,6 +270,7 @@ def analyze(path: Path, top: int = 5) -> dict:
         "top_steps": steps[:top],
         "top_phases": phases[:top],
         "failed_steps": timings.get("failed_steps", []),
+        "executor_timing": executor_timing(session_dir, top),
         "recommendation": recommendation(slowest),
     }
 
@@ -173,6 +309,22 @@ def main() -> int:
         print("top phases:")
         for item in payload["top_phases"]:
             print(f"- {item.get('phase')}: {item.get('duration_ms')}ms ({item.get('status', 'N/A')})")
+        executor = _as_dict(payload.get("executor_timing"))
+        if executor.get("available"):
+            print("executor timing:")
+            for variant in _as_list(executor.get("variants")):
+                duration = _as_dict(variant.get("duration_ms"))
+                print(
+                    f"- {variant.get('variant')}: timed {variant.get('timed')}/{variant.get('total')} "
+                    f"avg={duration.get('avg')}ms p50={duration.get('p50')}ms "
+                    f"p95={duration.get('p95')}ms max={duration.get('max')}ms"
+                )
+            print("slowest executor cases:")
+            for item in _as_list(executor.get("slowest_cases")):
+                print(
+                    f"- {item.get('variant')} {item.get('eval_id')}: "
+                    f"{item.get('duration_ms')}ms ({item.get('status', 'N/A')})"
+                )
         print(f"recommendation: {payload['recommendation']}")
     return 0
 

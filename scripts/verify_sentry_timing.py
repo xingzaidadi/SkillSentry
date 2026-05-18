@@ -43,7 +43,25 @@ def make_timing_payload() -> dict:
     }
 
 
+def make_executor_payload() -> dict:
+    return {
+        "total": 3,
+        "success": 2,
+        "failed": 1,
+        "results": [
+            {"eval_id": "eval-1", "name": "fast", "status": "success", "duration": 0.2},
+            {"eval_id": "eval-2", "name": "slow", "status": "success", "duration": 5.0},
+            {"eval_id": "eval-3", "name": "failed", "status": "failed", "duration": 1.2},
+        ],
+    }
+
+
 def verify_eval_result(root: Path, errors: list[str]) -> None:
+    session_dir = root / "eval-result-session"
+    session_dir.mkdir()
+    save_json(session_dir / "session.json", {"skill": "timing-fixture", "mode": "smoke"})
+    save_json(session_dir / "executor_results.json", make_executor_payload())
+    (session_dir / "report.html").write_text("<html></html>", encoding="utf-8")
     result_file = root / "eval_result.json"
     save_json(
         result_file,
@@ -51,6 +69,7 @@ def verify_eval_result(root: Path, errors: list[str]) -> None:
             "verdict": "PASS",
             "status": "pass",
             "timings": make_timing_payload(),
+            "artifacts": {"session_report_html": str(session_dir / "report.html")},
         },
     )
     payload = sentry_timing.analyze(result_file, top=2)
@@ -62,6 +81,11 @@ def verify_eval_result(root: Path, errors: list[str]) -> None:
         errors.append("eval_result top limit was not applied")
     if "Executor dominates" not in payload.get("recommendation", ""):
         errors.append("eval_result recommendation should mention executor")
+    executor = payload.get("executor_timing", {})
+    if not executor.get("available"):
+        errors.append("eval_result should resolve executor timing from session_report_html")
+    if executor.get("slowest_cases", [{}])[0].get("eval_id") != "eval-2":
+        errors.append("eval_result executor slowest case should be eval-2")
 
 
 def verify_session(root: Path, errors: list[str]) -> None:
@@ -79,11 +103,16 @@ def verify_session(root: Path, errors: list[str]) -> None:
             "ci_timing": {"total_ms": timing["total_ms"], "failed_steps": []},
         },
     )
+    save_json(session_dir / "executor_results.json", make_executor_payload())
     payload = sentry_timing.analyze(session_dir, top=5)
     if payload.get("source", {}).get("kind") != "session":
         errors.append("session analysis source kind should be session")
     if payload.get("total_ms") != 150.0:
         errors.append("session total_ms should be 150.0")
+    executor = payload.get("executor_timing", {})
+    variants = executor.get("variants", [])
+    if not variants or variants[0].get("duration_ms", {}).get("p95") != 4620.0:
+        errors.append("session executor timing p95 should be 4620.0ms")
 
 
 def verify_cli(root: Path, errors: list[str]) -> None:
