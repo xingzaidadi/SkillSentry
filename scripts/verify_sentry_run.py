@@ -333,6 +333,14 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("missing response reuse summary should include missing_outputs hint")
     if not response_file.exists():
         errors.append("missing response was not restored by executor rerun")
+    response_file.unlink()
+    text_completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir, output_format="text")
+    if text_completed.returncode != 0:
+        errors.append(f"local missing response text exited {text_completed.returncode}: {text_completed.stderr.strip()} {text_completed.stdout.strip()}")
+        return
+    for marker in ("reuse hints:", "Required outputs are missing"):
+        if marker not in text_completed.stdout:
+            errors.append(f"local missing response text output missing {marker!r}")
 
     # Missing per-eval grading artifacts must invalidate grader reuse.
     grading_file = session_dir / "eval-1" / "grading.json"

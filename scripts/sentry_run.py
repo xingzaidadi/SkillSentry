@@ -840,6 +840,11 @@ def main() -> int:
                     continue
                 action = "reused" if item.get("reused") else "reran"
                 print(f"- {item.get('step')}: {action} ({item.get('reason')})")
+            hints = reuse_summary.get("hints")
+            if isinstance(hints, list) and hints:
+                print("reuse hints:")
+                for hint in hints:
+                    print(f"- {hint}")
         artifacts = payload.get("artifacts", {})
         if isinstance(artifacts, dict) and artifacts.get("report_html"):
             print(f"report: {artifacts['report_html']}")
