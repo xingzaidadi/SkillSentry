@@ -11,6 +11,7 @@ REUSE_REASON_HINTS = {
     "case_lint_missing": "Case lint state is missing; rerun lint/local to refresh prepared cases.",
     "case_lint_version_changed": "Case lint version changed; rerun lint/local to refresh prepared cases.",
     "missing_manifest_step": "Manifest has no record for this step; run local once to seed reusable artifacts.",
+    "manifest_load_error": "Manifest could not be read; rerun local to regenerate the manifest.",
     "manifest_status_not_ok": "Manifest recorded a non-OK step; inspect the previous failure before expecting reuse.",
     "input_hash_changed": "Inputs changed; compare cases, skill hash, model, timeout, and response artifacts.",
     "missing_outputs": "Required outputs are missing; inspect the missing_outputs sample before rerunning all steps.",

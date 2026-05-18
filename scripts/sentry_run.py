@@ -98,16 +98,17 @@ def load_manifest(session_dir: Path) -> dict:
         return {"version": 1, "steps": {}}
     try:
         data = load_json(path)
-    except Exception:
-        return {"version": 1, "steps": {}}
+    except Exception as exc:
+        return {"version": 1, "steps": {}, "load_error": str(exc)}
     if not isinstance(data, dict):
-        return {"version": 1, "steps": {}}
+        return {"version": 1, "steps": {}, "load_error": "manifest is not a JSON object"}
     data.setdefault("version", 1)
     data.setdefault("steps", {})
     return data
 
 
 def save_manifest(session_dir: Path, manifest: dict) -> None:
+    manifest.pop("load_error", None)
     manifest["updated_at"] = utc_now()
     save_json(manifest_path(session_dir), manifest)
 
@@ -122,6 +123,9 @@ def step_reuse_state(session_dir: Path, step: str, input_hash: str, required: li
         "missing_outputs": [],
     }
     if not isinstance(step_data, dict) or not step_data:
+        if manifest.get("load_error"):
+            state["reason"] = "manifest_load_error"
+            state["manifest_error"] = manifest.get("load_error")
         return state
     recorded_status = step_data.get("status")
     if recorded_status != "OK":
