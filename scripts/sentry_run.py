@@ -616,13 +616,24 @@ def run_delegated_ci(args, release: bool = False) -> tuple[int, dict]:
     if args.verbose:
         cmd.append("--verbose")
     with timings.phase("delegated_ci"):
-        completed = subprocess.run(cmd, text=True)
+        completed = subprocess.run(
+            cmd,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=args.format == "json",
+        )
+    extra = {}
+    if args.format == "json":
+        extra["delegated_stdout"] = completed.stdout or ""
+        extra["delegated_stderr"] = completed.stderr or ""
     return completed.returncode, profile_payload(
         "release" if release else "ci",
         "OK" if completed.returncode == 0 else "ERROR",
         delegated_command=cmd,
         exit_code=completed.returncode,
         timings=timings.snapshot(),
+        **extra,
     )
 
 

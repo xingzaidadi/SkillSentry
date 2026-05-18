@@ -84,6 +84,7 @@ def run_profile(
     cases: Path | None = None,
     session: Path | None = None,
     reuse_session: Path | None = None,
+    output_dir: Path | None = None,
     force_executor: bool = False,
     force_grader: bool = False,
 ):
@@ -103,6 +104,8 @@ def run_profile(
         cmd.extend(["--session-dir", str(session)])
     if reuse_session is not None:
         cmd.extend(["--reuse-session", str(reuse_session)])
+    if output_dir is not None:
+        cmd.extend(["--output-dir", str(output_dir)])
     if force_executor:
         cmd.append("--force-executor")
     if force_grader:
@@ -335,6 +338,29 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("--force-grader did not explain grader reuse miss as force_grader")
 
 
+def verify_delegated_ci_json(root: Path, env: dict, errors: list[str]) -> None:
+    completed = run_profile(
+        root,
+        env,
+        "ci",
+        skill=root / "missing-skill",
+        output_dir=root / "ci-output",
+    )
+    if completed.returncode != 2:
+        errors.append(f"delegated ci missing skill should exit 2, got {completed.returncode}")
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        errors.append(f"delegated ci --format json stdout was not clean JSON: {exc}: {completed.stdout[:200]!r}")
+        return
+    if payload.get("profile") != "ci":
+        errors.append(f"delegated ci profile was {payload.get('profile')!r}")
+    if payload.get("exit_code") != 2:
+        errors.append(f"delegated ci payload exit_code was {payload.get('exit_code')!r}")
+    if "delegated_stdout" not in payload:
+        errors.append("delegated ci payload missing captured stdout")
+
+
 def verify() -> tuple[bool, list[str]]:
     errors: list[str] = []
     with tempfile.TemporaryDirectory(prefix="skillsentry-run-") as tmp:
@@ -352,6 +378,7 @@ def verify() -> tuple[bool, list[str]]:
         if lint_session is not None:
             verify_debug(root, env, lint_session, errors)
         verify_local(root, env, skill, cases, errors)
+        verify_delegated_ci_json(root, env, errors)
     return not errors, errors
 
 
