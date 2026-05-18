@@ -223,6 +223,14 @@ def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
     inferred_payload = sentry_timing.analyze(session_dir / "sentry-run-result.json", top=2)
     if not inferred_payload.get("executor_timing", {}).get("available"):
         errors.append("sentry-run-result next to session.json should infer session_dir")
+    legacy_run_result = dict(run_result)
+    legacy_run_result.pop("reuse_summary", None)
+    save_json(result_file, legacy_run_result)
+    legacy_payload = sentry_timing.analyze(result_file, top=2)
+    if legacy_payload.get("reuse_summary", {}).get("rerun_steps") != ["grader-report"]:
+        errors.append("legacy sentry-run-result should synthesize reuse summary rerun steps")
+    if not any("Required outputs are missing" in hint for hint in legacy_payload.get("reuse_hints", [])):
+        errors.append("legacy sentry-run-result should synthesize reuse hints")
 
 
 def verify_cli(root: Path, errors: list[str]) -> None:

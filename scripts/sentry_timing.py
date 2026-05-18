@@ -99,6 +99,28 @@ def reuse_hints(reuse_summary: dict, reuse_decisions: list[dict]) -> list[str]:
     return hints
 
 
+def summarize_reuse_decisions(reuse_decisions: list[dict]) -> dict:
+    steps = [dict(item) for item in reuse_decisions if isinstance(item, dict)]
+    miss_reasons: dict[str, int] = {}
+    hints: list[str] = []
+    for item in steps:
+        if item.get("reused"):
+            continue
+        reason = item.get("reason") or "unknown"
+        miss_reasons[str(reason)] = miss_reasons.get(str(reason), 0) + 1
+        hint = sentry_reuse.hint_for_reason(reason)
+        if hint and hint not in hints:
+            hints.append(hint)
+    return {
+        "steps": steps,
+        "reused_steps": [item.get("step") for item in steps if item.get("reused")],
+        "rerun_steps": [item.get("step") for item in steps if not item.get("reused")],
+        "miss_reasons": miss_reasons,
+        "all_reused": bool(steps) and all(item.get("reused") for item in steps),
+        "hints": hints,
+    }
+
+
 def timing_from_eval_result(path: Path) -> tuple[dict, dict]:
     payload = load_json(path)
     return _as_dict(payload.get("timings")), {
@@ -158,6 +180,8 @@ def timing_from_sentry_run_result(path: Path, payload: dict) -> tuple[dict, dict
                 "reusable": reuse.get("reusable"),
             }
         )
+    if not reuse_summary and reuse_decisions:
+        reuse_summary = summarize_reuse_decisions(reuse_decisions)
     return {
         "total_ms": timings.get("total_ms"),
         "steps": [],
