@@ -189,6 +189,25 @@ def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
         errors.append("sentry-run-result should include reuse summary rerun steps")
     if not any("Required outputs are missing" in hint for hint in payload.get("reuse_hints", [])):
         errors.append("sentry-run-result should derive reuse hints from miss reasons")
+    text = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "sentry_timing.py"),
+            "--input",
+            str(result_file),
+            "--format",
+            "text",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if text.returncode != 0:
+        errors.append(f"sentry_timing.py text sentry-run-result exited {text.returncode}: {text.stderr.strip()} {text.stdout.strip()}")
+    for marker in ("reuse decisions:", "rerun steps: grader-report", "reuse hints:", "Required outputs are missing"):
+        if marker not in text.stdout:
+            errors.append(f"sentry_timing.py text sentry-run-result missing {marker!r}")
     if not payload.get("executor_timing", {}).get("available"):
         errors.append("sentry-run-result should resolve executor timing from session_dir")
     if not payload.get("grader_timing", {}).get("available"):
