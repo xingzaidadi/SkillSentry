@@ -219,6 +219,9 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("local reuse did not explain grader reuse as matched")
     if reused_payload.get("cases", {}).get("reused") is not True:
         errors.append("local reuse did not mark cases.reused=true")
+    session = load_json(session_dir / "session.json")
+    if session.get("cases", {}).get("reused") is not True:
+        errors.append("local reuse should write session.cases.reused=true")
 
     # Missing executor response artifacts must invalidate executor reuse.
     response_file = session_dir / "eval-1" / "with_skill" / "outputs" / "response.md"

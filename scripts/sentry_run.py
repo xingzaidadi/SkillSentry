@@ -311,6 +311,12 @@ def reusable_prepared_cases(session_dir: Path, cases_file: Path, target: Path, c
     case_lint = dict(case_lint)
     case_lint["cases_file"] = str(target)
     case_lint["warnings"] = session.get("case_warnings", [])
+    cases_meta = session.get("cases") if isinstance(session.get("cases"), dict) else {}
+    cases_meta = dict(cases_meta)
+    cases_meta["reused"] = True
+    session["cases"] = cases_meta
+    session["updated_at"] = utc_now()
+    sentry_state.save_session(session_dir, session)
     return {
         "status": "OK",
         "cases_file": str(target),
