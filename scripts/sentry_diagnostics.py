@@ -177,6 +177,18 @@ def collect_preflight(session: dict) -> dict:
 
 
 def collect_timing(session: dict) -> dict:
+    phases = []
+    for item in _as_list(session.get("ci_phase_timings")):
+        if not isinstance(item, dict):
+            continue
+        phases.append(
+            {
+                "phase": item.get("phase"),
+                "status": item.get("status"),
+                "duration_ms": item.get("duration_ms"),
+                "completed_at": item.get("completed_at"),
+            }
+        )
     steps = []
     for item in _as_list(session.get("ci_step_timings")):
         if not isinstance(item, dict):
@@ -202,6 +214,7 @@ def collect_timing(session: dict) -> dict:
     )[:5]
     return {
         "total_ms": total,
+        "phases": phases,
         "steps": steps,
         "slowest_steps": slowest,
         "failed_steps": pipeline.get("failed_steps", []),
@@ -328,8 +341,12 @@ def render_markdown(diagnostics: dict) -> str:
     total_ms = timings.get("total_ms")
     total_text = str(total_ms) if total_ms is not None else "N/A"
     slowest = _as_list(timings.get("slowest_steps"))
+    phases = _as_list(timings.get("phases"))
     slowest_text = ", ".join(
         f"{item.get('step')}={item.get('duration_ms')}ms" for item in slowest[:3] if isinstance(item, dict)
+    ) or "N/A"
+    phases_text = ", ".join(
+        f"{item.get('phase')}={item.get('duration_ms')}ms" for item in phases[:3] if isinstance(item, dict)
     ) or "N/A"
     lines = [
         "### Execution Diagnostics",
@@ -359,6 +376,7 @@ def render_markdown(diagnostics: dict) -> str:
         f"| Delta | {delta.get('status') or 'N/A'} |",
         f"| Publish | {publish.get('status') or 'N/A'} |",
         f"| CI timing | total={total_text}ms; slowest={slowest_text} |",
+        f"| CI phases | {phases_text} |",
         "",
     ]
 
@@ -403,6 +421,19 @@ def render_html_section(diagnostics: dict) -> str:
     )
     if not timing_items:
         timing_items = "<li>N/A</li>"
+    phase_items = "".join(
+        "<li>"
+        + html.escape(str(item.get("phase", "unknown")))
+        + ": "
+        + html.escape(str(item.get("duration_ms", "N/A")))
+        + "ms ("
+        + html.escape(str(item.get("status", "N/A")))
+        + ")</li>"
+        for item in _as_list(timings.get("phases"))[:20]
+        if isinstance(item, dict)
+    )
+    if not phase_items:
+        phase_items = "<li>N/A</li>"
 
     return f"""
   <h2>Execution Diagnostics</h2>
@@ -422,4 +453,6 @@ def render_html_section(diagnostics: dict) -> str:
   <ul>{grader_items}</ul>
   <h3>Step timings</h3>
   <ul>{timing_items}</ul>
+  <h3>Phase timings</h3>
+  <ul>{phase_items}</ul>
 """

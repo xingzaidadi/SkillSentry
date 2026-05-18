@@ -73,6 +73,10 @@ def make_session(root: Path) -> Path:
                 {"step": "executor-with", "tool": "sentry-executor", "status": "OK", "duration_ms": 45.0},
                 {"step": "grader-report", "tool": "sentry-grader", "status": "OK", "duration_ms": 30.0},
             ],
+            "ci_phase_timings": [
+                {"phase": "preflight", "status": "OK", "duration_ms": 5.0},
+                {"phase": "session", "status": "OK", "duration_ms": 3.0},
+            ],
             "ci_timing": {"total_ms": 100.0, "failed_steps": []},
             "ci": True,
         },
@@ -229,10 +233,12 @@ def verify() -> tuple[bool, list[str]]:
             errors.append("timings.total_ms: expected 100.0")
         if diagnostics.get("timings", {}).get("slowest_steps", [{}])[0].get("step") != "executor-with":
             errors.append("timings.slowest_steps[0]: expected executor-with")
+        if diagnostics.get("timings", {}).get("phases", [{}])[0].get("phase") != "preflight":
+            errors.append("timings.phases[0]: expected preflight")
 
         sentry_ci.write_minimal_report(session_dir, gate)
         report_text = (session_dir / "report.html").read_text(encoding="utf-8")
-        for marker in ("Execution Diagnostics", "runner_timeout", "LLM grader call failed", "skipped_no_config", "Step timings"):
+        for marker in ("Execution Diagnostics", "runner_timeout", "LLM grader call failed", "skipped_no_config", "Step timings", "Phase timings"):
             assert_contains(report_text, marker, "ci report.html", errors)
 
         args = SimpleNamespace(skill="diagnostic-fixture", mode="standard", threshold=0.8, github_output=False)
@@ -245,7 +251,7 @@ def verify() -> tuple[bool, list[str]]:
             errors.append("eval_result.json: missing diagnostics")
         if output_json.get("timings", {}).get("total_ms") != 100.0:
             errors.append("eval_result.json: missing top-level timings")
-        for marker in ("Execution Diagnostics", "runner_timeout", "skipped_no_config", "CI timing"):
+        for marker in ("Execution Diagnostics", "runner_timeout", "skipped_no_config", "CI timing", "CI phases"):
             assert_contains(summary_md, marker, "summary.md", errors)
 
         sentry_publish.ensure_report(session_dir, gate)

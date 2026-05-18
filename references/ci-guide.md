@@ -164,4 +164,4 @@ python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json
 `preflight/lint/debug` 不触发 executor/grader;`local` 只跑 with_skill + grader/report;`ci/release` 委托 `sentry_ci.py`。
 `local` 会写 `manifest.json`;复用同一 session 且输入 hash 未变时,会复用已准备的 `evals.json`/case lint 摘要并跳过 executor/grader。需要重跑重步骤时使用 `--force-executor` 或 `--force-grader`。
 `--format json` 输出包含 `timings.total_ms` 和 `timings.phases_ms`;这些耗时字段用于定位慢阶段,不参与评分或退出码判断。
-完整 CI 运行会在 `session.json.ci_step_timings` 记录每个 pipeline step 的耗时,并在 `eval_result.json.timings`、`diagnostics.timings` 和 `summary.md` 中展示;这些字段只做观测,不改变 pipeline 步骤、gate 或退出码。
+完整 CI 运行会在 `session.json.ci_step_timings` / `ci_phase_timings` 记录每个 pipeline step 和非 pipeline phase 的耗时,并在 `eval_result.json.timings`、`diagnostics.timings` 和 `summary.md` 中展示;这些字段只做观测,不改变 pipeline 步骤、gate 或退出码。

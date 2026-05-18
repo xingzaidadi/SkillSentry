@@ -277,6 +277,21 @@ def record_pipeline_timing(session_dir: Path, total_time: float, failed_steps: l
     )
 
 
+def record_phase_timing(phase_timings: list[dict], phase: str, started: float, status: str = "OK") -> None:
+    phase_timings.append(
+        {
+            "phase": phase,
+            "status": status,
+            "duration_ms": round((time.time() - started) * 1000, 1),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+
+def save_phase_timings(session_dir: Path, phase_timings: list[dict]) -> None:
+    merge_session(session_dir, {"ci_phase_timings": phase_timings})
+
+
 def run_step(step: str, session_dir: Path, skill_path: Path, args, **kwargs) -> bool:
     """执行单个 pipeline 步骤，返回 True=成功"""
     definition = step_definition(step)
@@ -801,11 +816,15 @@ def write_ci_output(output_dir: Path, results: dict, args, session_dir: Path | N
 def main():
     args = parse_args()
     log._verbose = args.verbose
+    ci_started = time.time()
+    phase_timings: list[dict] = []
 
     log(f"SkillSentry CI current-contract — mode={args.mode}, threshold={args.threshold:.0%}")
 
     # 1. 预检并定位 Skill
+    phase_started = time.time()
     preflight_code, preflight = run_preflight(args)
+    record_phase_timing(phase_timings, "preflight", phase_started, "OK" if preflight_code == 0 else "ERROR")
     if preflight_code != 0:
         log(f"❌ preflight 失败: {preflight.get('error', 'unknown')}")
         results = {
@@ -816,6 +835,13 @@ def main():
                 "preflight": preflight,
                 "categories": ["preflight_error"],
                 "notes": [f"Preflight failed before session creation: {preflight.get('error', 'unknown')}."],
+                "timings": {
+                    "total_ms": round((time.time() - ci_started) * 1000, 1),
+                    "phases": phase_timings,
+                    "steps": [],
+                    "slowest_steps": [],
+                    "failed_steps": [],
+                },
             },
         }
         write_ci_output(Path(args.output_dir), results, args)
@@ -836,11 +862,17 @@ def main():
         log("  ⚠️ preflight: claude CLI not found; real executor steps will fail unless the environment is fixed")
 
     # 3. 初始化 session
+    phase_started = time.time()
     session_dir = init_session(skill_name, skill_hash, skill_type, args.mode, preflight)
+    record_phase_timing(phase_timings, "session", phase_started)
+    save_phase_timings(session_dir, phase_timings)
     log(f"📁 Session: {session_dir}")
 
     # 4. 确定 pipeline
+    phase_started = time.time()
     pipeline = pipeline_for_mode(args.mode)
+    record_phase_timing(phase_timings, "pipeline_resolve", phase_started)
+    save_phase_timings(session_dir, phase_timings)
     log(f"🔗 Pipeline: {' → '.join(pipeline)}")
 
     # 5. 查找已有 cases（regression 模式或缓存命中）
@@ -854,8 +886,13 @@ def main():
             sys.exit(2)
 
     if existing_cases and "cases" not in pipeline:
+        phase_started = time.time()
         if not prepare_existing_cases(session_dir, existing_cases):
+            record_phase_timing(phase_timings, "prepare_existing_cases", phase_started, "ERROR")
+            save_phase_timings(session_dir, phase_timings)
             sys.exit(2)
+        record_phase_timing(phase_timings, "prepare_existing_cases", phase_started)
+        save_phase_timings(session_dir, phase_timings)
 
     # 6. 执行 pipeline
     start_time = time.time()
@@ -898,6 +935,7 @@ def main():
     log(f"⏱️ Pipeline 完成 ({total_time:.1f}s)")
 
     # 7. 收集结果
+    phase_started = time.time()
     if not failed_steps:
         results = collect_results(session_dir, args)
     else:
@@ -907,10 +945,16 @@ def main():
             "summary": {},
             "diagnostics": collect_diagnostics(session_dir),
         }
+    record_phase_timing(phase_timings, "collect_results", phase_started)
+    save_phase_timings(session_dir, phase_timings)
+    results["diagnostics"] = collect_diagnostics(session_dir, results.get("gate"))
 
     # 8. 输出
     output_dir = Path(args.output_dir)
+    phase_started = time.time()
     write_ci_output(output_dir, results, args, session_dir=session_dir)
+    record_phase_timing(phase_timings, "write_output", phase_started)
+    save_phase_timings(session_dir, phase_timings)
 
     # 9. 打印结果
     verdict = results["verdict"]

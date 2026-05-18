@@ -210,7 +210,7 @@ python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json
 
 ## 报告怎么看
 
-CI 每次运行都会在 `--output-dir/report.html` 生成稳定 HTML artifact;如果已经创建 session,中途失败时也会补 `session/report.html`。报告包含 `Execution Diagnostics` 区块,用于区分 preflight 环境问题、用例不可执行、runner 超时/错误、grader 错误、`skipped_no_config` 这类环境降级,以及真正的 Skill 质量失败。`eval_result.json` 同时输出 `timings`,来自 `session.json.ci_step_timings` / `ci_timing`,用于观察每个 CI step 的耗时,不参与评分或退出码判断。
+CI 每次运行都会在 `--output-dir/report.html` 生成稳定 HTML artifact;如果已经创建 session,中途失败时也会补 `session/report.html`。报告包含 `Execution Diagnostics` 区块,用于区分 preflight 环境问题、用例不可执行、runner 超时/错误、grader 错误、`skipped_no_config` 这类环境降级,以及真正的 Skill 质量失败。`eval_result.json` 同时输出 `timings`,来自 `session.json.ci_step_timings` / `ci_phase_timings` / `ci_timing`,用于观察每个 CI step 和非 pipeline phase 的耗时,不参与评分或退出码判断。
 稳定 HTML 报告由 `scripts/sentry_report.py` 统一生成;它是 `no-llm, no-network` 的轻工具,可单独重出报告:
 
 ```bash
