@@ -25,6 +25,11 @@ def save_json(path: Path, payload) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def save_json_bom(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
+
+
 def load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -146,7 +151,7 @@ def verify() -> tuple[bool, list[str]]:
         bin_dir = root / "bin"
         bin_dir.mkdir()
         make_fake_claude(bin_dir)
-        save_json(
+        save_json_bom(
             root / "evals.json",
             [{"id": "eval-1", "name": "fixture", "prompt": "Say fixture", "assertions": []}],
         )
