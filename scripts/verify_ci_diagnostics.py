@@ -102,8 +102,8 @@ def make_session(root: Path) -> Path:
             "success": 1,
             "failed": 1,
             "results": [
-                {"eval_id": "eval-1", "status": "success"},
-                {"eval_id": "eval-2", "status": "timeout", "error": "Timeout after 1s"},
+                {"eval_id": "eval-1", "status": "success", "duration": 0.4},
+                {"eval_id": "eval-2", "status": "timeout", "duration": 1.5, "error": "Timeout after 1s"},
             ],
         },
     )
@@ -111,6 +111,8 @@ def make_session(root: Path) -> Path:
         session_dir / "eval-1" / "grading.json",
         {
             "eval_id": "eval-1",
+            "duration_ms": 250.0,
+            "timing": {"grader_duration_ms": 250.0},
             "runs": {
                 "run-1": {
                     "pass": False,
@@ -235,10 +237,14 @@ def verify() -> tuple[bool, list[str]]:
             errors.append("timings.slowest_steps[0]: expected executor-with")
         if diagnostics.get("timings", {}).get("phases", [{}])[0].get("phase") != "preflight":
             errors.append("timings.phases[0]: expected preflight")
+        if diagnostics.get("timings", {}).get("executor_cases", {}).get("slowest_cases", [{}])[0].get("eval_id") != "eval-2":
+            errors.append("timings.executor_cases.slowest_cases[0]: expected eval-2")
+        if diagnostics.get("timings", {}).get("grader_cases", {}).get("duration_ms", {}).get("p50") != 250.0:
+            errors.append("timings.grader_cases.duration_ms.p50: expected 250.0")
 
         sentry_ci.write_minimal_report(session_dir, gate)
         report_text = (session_dir / "report.html").read_text(encoding="utf-8")
-        for marker in ("Execution Diagnostics", "runner_timeout", "LLM grader call failed", "skipped_no_config", "Step timings", "Phase timings"):
+        for marker in ("Execution Diagnostics", "runner_timeout", "LLM grader call failed", "skipped_no_config", "Step timings", "Phase timings", "Executor case timings", "Grader case timings"):
             assert_contains(report_text, marker, "ci report.html", errors)
 
         args = SimpleNamespace(skill="diagnostic-fixture", mode="standard", threshold=0.8, github_output=False)
@@ -251,7 +257,7 @@ def verify() -> tuple[bool, list[str]]:
             errors.append("eval_result.json: missing diagnostics")
         if output_json.get("timings", {}).get("total_ms") != 100.0:
             errors.append("eval_result.json: missing top-level timings")
-        for marker in ("Execution Diagnostics", "runner_timeout", "skipped_no_config", "CI timing", "CI phases"):
+        for marker in ("Execution Diagnostics", "runner_timeout", "skipped_no_config", "CI timing", "CI phases", "Executor case timing", "Grader case timing"):
             assert_contains(summary_md, marker, "summary.md", errors)
 
         sentry_publish.ensure_report(session_dir, gate)

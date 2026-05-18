@@ -47,11 +47,73 @@ def _int_value(value: Any, default: int = 0) -> int:
     return default
 
 
+def _number(value: Any, default: float | None = None) -> float | None:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _round(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(value, 1)
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * percentile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = position - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
+def _duration_seconds_to_ms(value: Any) -> float | None:
+    duration = _number(value)
+    if duration is None or duration < 0:
+        return None
+    return round(duration * 1000, 1)
+
+
+def _duration_ms(value: Any) -> float | None:
+    duration = _number(value)
+    if duration is None or duration < 0:
+        return None
+    return round(duration, 1)
+
+
 def _short_error(value: Any, limit: int = 240) -> str:
     text = str(value or "").strip().replace("\r", " ").replace("\n", " ")
     if len(text) > limit:
         return text[: limit - 3] + "..."
     return text
+
+
+def _duration_summary(rows: list[dict], total: int) -> dict:
+    durations = [item["duration_ms"] for item in rows if isinstance(item.get("duration_ms"), (int, float))]
+    slowest = sorted(rows, key=lambda item: item.get("duration_ms", 0), reverse=True)[:5]
+    duration_total = sum(durations)
+    return {
+        "total": total,
+        "timed": len(durations),
+        "duration_ms": {
+            "total": _round(duration_total),
+            "avg": _round(duration_total / len(durations)) if durations else None,
+            "p50": _round(_percentile(durations, 0.50)),
+            "p95": _round(_percentile(durations, 0.95)),
+            "max": _round(max(durations)) if durations else None,
+        },
+        "slowest_cases": slowest,
+    }
 
 
 def collect_executor(session_dir: Path, session: dict) -> dict:
@@ -95,6 +157,48 @@ def collect_executor(session_dir: Path, session: dict) -> dict:
     }
 
 
+def collect_executor_case_timing(session_dir: Path) -> dict:
+    variants = []
+    for variant, filename in (
+        ("with_skill", "executor_results.json"),
+        ("without_skill", "executor_without_skill_results.json"),
+    ):
+        summary = load_json(session_dir / filename)
+        if not isinstance(summary, dict):
+            continue
+        rows = []
+        for item in _as_list(summary.get("results")):
+            if not isinstance(item, dict):
+                continue
+            duration_ms = _duration_seconds_to_ms(item.get("duration"))
+            if duration_ms is None:
+                continue
+            rows.append(
+                {
+                    "variant": variant,
+                    "eval_id": item.get("eval_id"),
+                    "name": item.get("name"),
+                    "status": item.get("status"),
+                    "duration_ms": duration_ms,
+                }
+            )
+        variant_summary = _duration_summary(rows, total=_int_value(summary.get("total"), len(_as_list(summary.get("results")))))
+        variant_summary["variant"] = variant
+        variant_summary["success"] = _int_value(summary.get("success"))
+        variant_summary["failed"] = _int_value(summary.get("failed"))
+        variants.append(variant_summary)
+
+    slowest = []
+    for variant in variants:
+        slowest.extend(_as_list(variant.get("slowest_cases")))
+    slowest = sorted(slowest, key=lambda item: item.get("duration_ms", 0), reverse=True)[:5]
+    return {
+        "available": any(variant.get("timed") for variant in variants),
+        "variants": variants,
+        "slowest_cases": slowest,
+    }
+
+
 def collect_grader_errors(session_dir: Path) -> list[dict]:
     errors = []
     for path in sorted(session_dir.rglob("grading.json")):
@@ -126,6 +230,45 @@ def collect_grader_errors(session_dir: Path) -> list[dict]:
         if reason:
             errors.append({"source": "grading-summary.json", "reason": _short_error(reason)})
     return errors
+
+
+def grading_duration_ms(payload: dict) -> float | None:
+    for source in (payload, _as_dict(payload.get("summary")), _as_dict(payload.get("timing"))):
+        for key in ("duration_ms", "grader_duration_ms", "grading_duration_ms"):
+            duration = _duration_ms(source.get(key))
+            if duration is not None:
+                return duration
+        for key in ("duration_seconds", "grader_duration_seconds", "grading_duration_seconds"):
+            duration = _duration_seconds_to_ms(source.get(key))
+            if duration is not None:
+                return duration
+    return None
+
+
+def collect_grader_case_timing(session_dir: Path) -> dict:
+    grading_files = [path for path in sorted(session_dir.rglob("grading.json")) if "without_skill" not in set(path.parts)]
+    rows = []
+    for path in grading_files:
+        payload = load_json(path)
+        if not isinstance(payload, dict):
+            continue
+        duration_ms = grading_duration_ms(payload)
+        if duration_ms is None:
+            continue
+        summary = _as_dict(payload.get("summary"))
+        rows.append(
+            {
+                "eval_id": payload.get("eval_id") or path.parent.name,
+                "source": str(path.relative_to(session_dir)),
+                "status": "ERROR" if summary.get("grader_error") or payload.get("grader_error") else "OK",
+                "duration_ms": duration_ms,
+                "assertions": summary.get("total"),
+            }
+        )
+    payload = _duration_summary(rows, total=len(grading_files))
+    payload["available"] = bool(rows)
+    payload["grading_files"] = len(grading_files)
+    return payload
 
 
 def collect_sync(session: dict) -> dict:
@@ -176,7 +319,7 @@ def collect_preflight(session: dict) -> dict:
     }
 
 
-def collect_timing(session: dict) -> dict:
+def collect_timing(session: dict, session_dir: Path | None = None) -> dict:
     phases = []
     for item in _as_list(session.get("ci_phase_timings")):
         if not isinstance(item, dict):
@@ -212,13 +355,17 @@ def collect_timing(session: dict) -> dict:
         key=lambda item: item.get("duration_ms", 0),
         reverse=True,
     )[:5]
-    return {
+    payload = {
         "total_ms": total,
         "phases": phases,
         "steps": steps,
         "slowest_steps": slowest,
         "failed_steps": pipeline.get("failed_steps", []),
     }
+    if session_dir is not None:
+        payload["executor_cases"] = collect_executor_case_timing(session_dir)
+        payload["grader_cases"] = collect_grader_case_timing(session_dir)
+    return payload
 
 
 def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> dict:
@@ -232,7 +379,7 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
     sync = collect_sync(session)
     publish = collect_publish(session_path, session)
     preflight = collect_preflight(session)
-    timings = collect_timing(session)
+    timings = collect_timing(session, session_path)
     delta = _as_dict(gate_data.get("delta"))
 
     categories = []
@@ -342,11 +489,23 @@ def render_markdown(diagnostics: dict) -> str:
     total_text = str(total_ms) if total_ms is not None else "N/A"
     slowest = _as_list(timings.get("slowest_steps"))
     phases = _as_list(timings.get("phases"))
+    executor_cases = _as_dict(timings.get("executor_cases"))
+    grader_cases = _as_dict(timings.get("grader_cases"))
     slowest_text = ", ".join(
         f"{item.get('step')}={item.get('duration_ms')}ms" for item in slowest[:3] if isinstance(item, dict)
     ) or "N/A"
     phases_text = ", ".join(
         f"{item.get('phase')}={item.get('duration_ms')}ms" for item in phases[:3] if isinstance(item, dict)
+    ) or "N/A"
+    executor_text = ", ".join(
+        f"{item.get('variant')}:{item.get('eval_id')}={item.get('duration_ms')}ms"
+        for item in _as_list(executor_cases.get("slowest_cases"))[:3]
+        if isinstance(item, dict)
+    ) or "N/A"
+    grader_text = ", ".join(
+        f"{item.get('eval_id')}={item.get('duration_ms')}ms"
+        for item in _as_list(grader_cases.get("slowest_cases"))[:3]
+        if isinstance(item, dict)
     ) or "N/A"
     lines = [
         "### Execution Diagnostics",
@@ -377,6 +536,8 @@ def render_markdown(diagnostics: dict) -> str:
         f"| Publish | {publish.get('status') or 'N/A'} |",
         f"| CI timing | total={total_text}ms; slowest={slowest_text} |",
         f"| CI phases | {phases_text} |",
+        f"| Executor case timing | {executor_text} |",
+        f"| Grader case timing | {grader_text} |",
         "",
     ]
 
@@ -394,6 +555,8 @@ def render_html_section(diagnostics: dict) -> str:
     timings = _as_dict(diagnostics.get("timings"))
     total_ms = timings.get("total_ms")
     total_text = str(total_ms) if total_ms is not None else "N/A"
+    executor_cases = _as_dict(timings.get("executor_cases"))
+    grader_cases = _as_dict(timings.get("grader_cases"))
     categories = ", ".join(diagnostics.get("categories") or ["none"])
     notes = "".join(f"<li>{html.escape(str(note))}</li>" for note in _as_list(diagnostics.get("notes")))
     grader_errors = _as_list(diagnostics.get("grader_errors"))
@@ -434,6 +597,34 @@ def render_html_section(diagnostics: dict) -> str:
     )
     if not phase_items:
         phase_items = "<li>N/A</li>"
+    executor_case_items = "".join(
+        "<li>"
+        + html.escape(str(item.get("variant", "with_skill")))
+        + " "
+        + html.escape(str(item.get("eval_id", "unknown")))
+        + ": "
+        + html.escape(str(item.get("duration_ms", "N/A")))
+        + "ms ("
+        + html.escape(str(item.get("status", "N/A")))
+        + ")</li>"
+        for item in _as_list(executor_cases.get("slowest_cases"))[:10]
+        if isinstance(item, dict)
+    )
+    if not executor_case_items:
+        executor_case_items = "<li>N/A</li>"
+    grader_case_items = "".join(
+        "<li>"
+        + html.escape(str(item.get("eval_id", "unknown")))
+        + ": "
+        + html.escape(str(item.get("duration_ms", "N/A")))
+        + "ms ("
+        + html.escape(str(item.get("status", "N/A")))
+        + ")</li>"
+        for item in _as_list(grader_cases.get("slowest_cases"))[:10]
+        if isinstance(item, dict)
+    )
+    if not grader_case_items:
+        grader_case_items = "<li>N/A</li>"
 
     return f"""
   <h2>Execution Diagnostics</h2>
@@ -455,4 +646,8 @@ def render_html_section(diagnostics: dict) -> str:
   <ul>{timing_items}</ul>
   <h3>Phase timings</h3>
   <ul>{phase_items}</ul>
+  <h3>Executor case timings</h3>
+  <ul>{executor_case_items}</ul>
+  <h3>Grader case timings</h3>
+  <ul>{grader_case_items}</ul>
 """
