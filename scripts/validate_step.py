@@ -19,7 +19,7 @@ def load_session(session_dir: Path) -> dict:
     session_file = session_dir / "session.json"
     if not session_file.exists():
         raise FileNotFoundError(f"session.json not found: {session_file}")
-    return json.loads(session_file.read_text(encoding="utf-8"))
+    return json.loads(session_file.read_text(encoding="utf-8-sig"))
 
 
 def dotted_get(data: dict, field: str):

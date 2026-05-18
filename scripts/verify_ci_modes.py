@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import sentry_ci
+import sentry_pipeline
 import sentry_state
 from sentry_pipeline import pipeline_for_mode
 
@@ -250,6 +251,22 @@ def main() -> int:
         save_json(cases_file, FIXTURE_CASES)
 
         results = [verify_mode(mode, root, skill_path, cases_file) for mode in modes]
+        bom_session = root / "smoke" / "session.json"
+        bom_session.write_text(bom_session.read_text(encoding="utf-8"), encoding="utf-8-sig")
+        try:
+            loaded_session = sentry_pipeline.load_session(root / "smoke")
+            next_payload = sentry_pipeline.describe_next("smoke", loaded_session.get("last_step"))
+            if (
+                loaded_session.get("last_step") != "publish"
+                or next_payload.get("last_step") != "publish"
+            ):
+                results.append({
+                    "mode": "pipeline-bom",
+                    "status": "FAIL",
+                    "error": "pipeline did not read BOM session.json",
+                })
+        except Exception as exc:
+            results.append({"mode": "pipeline-bom", "status": "FAIL", "error": str(exc)})
 
     failures = [item for item in results if item["status"] != "PASS"]
     if args.format == "json":

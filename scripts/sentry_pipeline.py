@@ -191,7 +191,7 @@ def load_session(path: str | Path) -> dict:
     session_path = Path(path)
     if session_path.is_dir():
         session_path = session_path / "session.json"
-    return json.loads(session_path.read_text(encoding="utf-8"))
+    return json.loads(session_path.read_text(encoding="utf-8-sig"))
 
 
 def pipelines_from_contract(path: str | Path) -> dict[str, list[str]]:
