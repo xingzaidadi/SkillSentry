@@ -199,6 +199,26 @@ def resolve_local_session(args, preflight: dict) -> Path:
     )
 
 
+def refresh_session_metadata(session_dir: Path, args, preflight: dict) -> None:
+    session_file = session_dir / "session.json"
+    if not session_file.exists():
+        return
+    session = sentry_state.load_session(session_dir)
+    session.update(
+        {
+            "skill": preflight["skill_dir_name"],
+            "mode": args.mode,
+            "skill_type": preflight["skill_type"],
+            "skill_hash": preflight["skill_hash"],
+            "runtime": preflight.get("runtime", args.runtime),
+            "preflight": preflight,
+            "profile_run": True,
+            "updated_at": utc_now(),
+        }
+    )
+    sentry_state.save_session(session_dir, session)
+
+
 def cached_cases_from_preflight(preflight: dict) -> Path | None:
     cache = preflight.get("cases_cache", {}) if isinstance(preflight, dict) else {}
     inputs_dir = Path(cache.get("inputs_dir", "")).expanduser()
@@ -316,6 +336,7 @@ def run_profile_local(args) -> tuple[int, dict]:
         session_dir = resolve_local_session(args, preflight)
     except FileNotFoundError as exc:
         return 2, profile_payload("local", "ERROR", preflight=preflight, error=str(exc))
+    refresh_session_metadata(session_dir, args, preflight)
 
     prepared = prepare_cases(session_dir, cases_file)
     if prepared.get("status") != "OK":

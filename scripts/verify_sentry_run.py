@@ -79,6 +79,8 @@ def run_profile(
     cases: Path | None = None,
     session: Path | None = None,
     reuse_session: Path | None = None,
+    force_executor: bool = False,
+    force_grader: bool = False,
 ):
     cmd = [
         sys.executable,
@@ -96,6 +98,10 @@ def run_profile(
         cmd.extend(["--session-dir", str(session)])
     if reuse_session is not None:
         cmd.extend(["--reuse-session", str(reuse_session)])
+    if force_executor:
+        cmd.append("--force-executor")
+    if force_grader:
+        cmd.append("--force-grader")
     if profile == "local":
         cmd.extend(["--model", "sonnet", "--executor-model", "sonnet", "--timeout-per-eval", "10"])
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
@@ -171,6 +177,81 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("local reuse did not mark executor.reused=true")
     if reused_payload.get("grader", {}).get("reused") is not True:
         errors.append("local reuse did not mark grader.reused=true")
+
+    # Changing cases must invalidate both executor and grader.
+    before = fake_count(count_file)
+    save_json(
+        cases,
+        [
+            {
+                "id": "eval-1",
+                "name": "fixture changed",
+                "prompt": "Say changed",
+                "assertions": [{"name": "A1", "type": "exact_match", "expected": "changed"}],
+            }
+        ],
+    )
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir)
+    if completed.returncode != 0:
+        errors.append(f"local changed cases exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before + 1:
+        errors.append(f"changed cases should rerun executor: before={before}, after={after}")
+    changed_cases_payload = json.loads(completed.stdout)
+    if changed_cases_payload.get("executor", {}).get("reused") is True:
+        errors.append("changed cases incorrectly reused executor")
+    if changed_cases_payload.get("grader", {}).get("reused") is True:
+        errors.append("changed cases incorrectly reused grader")
+
+    # Changing SKILL.md must invalidate executor and refresh session metadata.
+    before = fake_count(count_file)
+    skill.write_text(
+        "---\nname: sentry-run-fixture\ndescription: Updated fixture skill for sentry_run tests\n---\nRespond with the updated behavior.",
+        encoding="utf-8",
+    )
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir)
+    if completed.returncode != 0:
+        errors.append(f"local changed skill exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before + 1:
+        errors.append(f"changed skill should rerun executor: before={before}, after={after}")
+    changed_skill_payload = json.loads(completed.stdout)
+    if changed_skill_payload.get("executor", {}).get("reused") is True:
+        errors.append("changed skill incorrectly reused executor")
+    session = load_json(session_dir / "session.json")
+    preflight_hash = changed_skill_payload.get("preflight", {}).get("skill_hash")
+    if preflight_hash and session.get("skill_hash") != preflight_hash:
+        errors.append("changed skill did not refresh session.skill_hash")
+
+    # force-executor must rerun executor even when manifest matches.
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir, force_executor=True)
+    if completed.returncode != 0:
+        errors.append(f"local force executor exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before + 1:
+        errors.append(f"--force-executor should rerun executor: before={before}, after={after}")
+    force_executor_payload = json.loads(completed.stdout)
+    if force_executor_payload.get("executor", {}).get("reused") is True:
+        errors.append("--force-executor incorrectly reused executor")
+
+    # force-grader must rerun grader without rerunning executor when executor manifest matches.
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir, force_grader=True)
+    if completed.returncode != 0:
+        errors.append(f"local force grader exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before:
+        errors.append(f"--force-grader should not rerun executor: before={before}, after={after}")
+    force_grader_payload = json.loads(completed.stdout)
+    if force_grader_payload.get("executor", {}).get("reused") is not True:
+        errors.append("--force-grader should still reuse executor")
+    if force_grader_payload.get("grader", {}).get("reused") is True:
+        errors.append("--force-grader incorrectly reused grader")
 
 
 def verify() -> tuple[bool, list[str]]:
