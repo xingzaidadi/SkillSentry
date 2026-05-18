@@ -344,13 +344,42 @@ def same_path(left: Path, right: Path) -> bool:
         return False
 
 
-def reusable_prepared_cases(session_dir: Path, cases_file: Path, target: Path, cases_hash: str | None) -> dict | None:
-    if cases_hash is None or not target.exists() or file_hash(target) != cases_hash:
+def prepared_cases_reuse_state(session_dir: Path, target: Path, cases_hash: str | None) -> dict:
+    state = {
+        "step": "prepare_cases",
+        "reusable": False,
+        "reason": "missing_cases_hash",
+    }
+    if cases_hash is None:
+        return state
+    if not target.exists():
+        state["reason"] = "missing_prepared_cases"
+        return state
+    target_hash = file_hash(target)
+    if target_hash != cases_hash:
+        state["reason"] = "cases_hash_changed"
+        state["prepared_cases_hash"] = target_hash
+        return state
+    session = sentry_state.load_session(session_dir)
+    case_lint = session.get("case_lint")
+    if not isinstance(case_lint, dict):
+        state["reason"] = "case_lint_missing"
+        return state
+    if case_lint.get("version") != sentry_case_lint.LINT_VERSION:
+        state["reason"] = "case_lint_version_changed"
+        state["recorded_version"] = case_lint.get("version")
+        state["expected_version"] = sentry_case_lint.LINT_VERSION
+        return state
+    state["reusable"] = True
+    state["reason"] = "matched"
+    return state
+
+
+def reusable_prepared_cases(session_dir: Path, cases_file: Path, target: Path, cases_hash: str | None, reuse_state: dict) -> dict | None:
+    if not reuse_state.get("reusable"):
         return None
     session = sentry_state.load_session(session_dir)
     case_lint = session.get("case_lint")
-    if not isinstance(case_lint, dict) or case_lint.get("version") != sentry_case_lint.LINT_VERSION:
-        return None
     case_lint = dict(case_lint)
     case_lint["cases_file"] = str(target)
     case_lint["warnings"] = session.get("case_warnings", [])
@@ -366,16 +395,25 @@ def reusable_prepared_cases(session_dir: Path, cases_file: Path, target: Path, c
         "source": str(cases_file),
         "cases_hash": cases_hash,
         "case_lint": case_lint,
+        "step": "prepare_cases",
         "reused": True,
+        "reuse": reuse_state,
     }
 
 
 def prepare_cases(session_dir: Path, cases_file: Path) -> dict:
     if not cases_file.exists():
-        return {"status": "ERROR", "error": f"cases file not found: {cases_file}"}
+        return {
+            "status": "ERROR",
+            "error": f"cases file not found: {cases_file}",
+            "step": "prepare_cases",
+            "reused": False,
+            "reuse": {"step": "prepare_cases", "reusable": False, "reason": "cases_file_not_found"},
+        }
     target = session_dir / "evals.json"
     cases_hash = file_hash(cases_file)
-    reused = reusable_prepared_cases(session_dir, cases_file, target, cases_hash)
+    reuse_state = prepared_cases_reuse_state(session_dir, target, cases_hash)
+    reused = reusable_prepared_cases(session_dir, cases_file, target, cases_hash, reuse_state)
     if reused is not None:
         return reused
 
@@ -394,7 +432,9 @@ def prepare_cases(session_dir: Path, cases_file: Path) -> dict:
         "source": str(cases_file),
         "cases_hash": cases_hash,
         "case_lint": lint,
+        "step": "prepare_cases",
         "reused": False,
+        "reuse": reuse_state,
     }
 
 
@@ -461,7 +501,15 @@ def run_profile_lint(args) -> tuple[int, dict]:
     with timings.phase("prepare_cases"):
         prepared = prepare_cases(session_dir, cases_file)
     status = "OK" if prepared.get("status") == "OK" and prepared.get("case_lint", {}).get("warning_count", 0) == 0 else "WARN"
-    payload = profile_payload("lint", status, session_dir=str(session_dir), preflight=preflight, cases=prepared, timings=timings.snapshot())
+    payload = profile_payload(
+        "lint",
+        status,
+        session_dir=str(session_dir),
+        preflight=preflight,
+        cases=prepared,
+        reuse_summary=summarize_reuse_decisions(prepared),
+        timings=timings.snapshot(),
+    )
     save_json(session_dir / "sentry-run-result.json", payload)
     return 0 if prepared.get("status") == "OK" else 1, payload
 
@@ -523,7 +571,15 @@ def run_profile_local(args) -> tuple[int, dict]:
     with timings.phase("prepare_cases"):
         prepared = prepare_cases(session_dir, cases_file)
     if prepared.get("status") != "OK":
-        payload = profile_payload("local", "ERROR", session_dir=str(session_dir), preflight=preflight, cases=prepared, timings=timings.snapshot())
+        payload = profile_payload(
+            "local",
+            "ERROR",
+            session_dir=str(session_dir),
+            preflight=preflight,
+            cases=prepared,
+            reuse_summary=summarize_reuse_decisions(prepared),
+            timings=timings.snapshot(),
+        )
         save_json(session_dir / "sentry-run-result.json", payload)
         return 1, payload
 
@@ -579,7 +635,7 @@ def run_profile_local(args) -> tuple[int, dict]:
             preflight=preflight,
             cases=prepared,
             executor=executor,
-            reuse_summary=summarize_reuse_decisions(executor),
+            reuse_summary=summarize_reuse_decisions(prepared, executor),
             timings=timings.snapshot(),
         )
         save_json(session_dir / "sentry-run-result.json", payload)
@@ -635,7 +691,7 @@ def run_profile_local(args) -> tuple[int, dict]:
         cases=prepared,
         executor=executor,
         grader=grader,
-        reuse_summary=summarize_reuse_decisions(executor, grader),
+        reuse_summary=summarize_reuse_decisions(prepared, executor, grader),
         gate=gate,
         diagnostics=diagnostics,
         manifest=str(manifest_path(session_dir)),

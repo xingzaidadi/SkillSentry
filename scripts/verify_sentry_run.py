@@ -131,6 +131,8 @@ def verify_lint(root: Path, env: dict, skill: Path, cases: Path, errors: list[st
     session = load_json(session_dir / "session.json")
     if "case_lint" not in session:
         errors.append("lint did not write session.case_lint")
+    if payload.get("cases", {}).get("reuse", {}).get("reason") != "missing_prepared_cases":
+        errors.append("lint fresh prepare should explain cases reuse miss as missing_prepared_cases")
     return session_dir
 
 
@@ -190,6 +192,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("local did not update session.grader_report.status")
     if session.get("cases", {}).get("reused") is not False:
         errors.append("local fresh prepare should write session.cases.reused=false")
+    if payload.get("cases", {}).get("reuse", {}).get("reason") != "missing_prepared_cases":
+        errors.append("local fresh prepare should explain cases reuse miss as missing_prepared_cases")
     if not (session_dir / "manifest.json").exists():
         errors.append("local did not write manifest.json")
     manifest = load_json(session_dir / "manifest.json")
@@ -274,8 +278,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     if missing_grading_payload.get("grader", {}).get("reuse", {}).get("reason") != "missing_outputs":
         errors.append("missing grading did not explain grader reuse miss as missing_outputs")
     reuse_summary = missing_grading_payload.get("reuse_summary", {})
-    if reuse_summary.get("reused_steps") != ["executor-with"]:
-        errors.append(f"missing grading reuse summary should reuse only executor-with, got {reuse_summary.get('reused_steps')!r}")
+    if reuse_summary.get("reused_steps") != ["prepare_cases", "executor-with"]:
+        errors.append(f"missing grading reuse summary should reuse prepare_cases and executor-with, got {reuse_summary.get('reused_steps')!r}")
     if reuse_summary.get("rerun_steps") != ["grader-report"]:
         errors.append(f"missing grading reuse summary should rerun only grader-report, got {reuse_summary.get('rerun_steps')!r}")
     if not grading_file.exists():
@@ -308,6 +312,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("changed cases incorrectly reused grader")
     if changed_cases_payload.get("cases", {}).get("reused") is True:
         errors.append("changed cases incorrectly reused prepared cases")
+    if changed_cases_payload.get("cases", {}).get("reuse", {}).get("reason") != "cases_hash_changed":
+        errors.append("changed cases should explain prepared cases reuse miss as cases_hash_changed")
 
     # Changing SKILL.md must invalidate executor and refresh session metadata.
     before = fake_count(count_file)
