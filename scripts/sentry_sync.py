@@ -59,6 +59,10 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
 def result_payload(
     *,
     status: str,
@@ -89,7 +93,7 @@ def config_status(config: str | None) -> tuple[bool, Path, str | None]:
     if not path.exists():
         return False, path, "config file not found"
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = load_json(path)
     except Exception as exc:  # pragma: no cover - defensive, exercised by CLI.
         return False, path, f"config file is not valid JSON: {exc}"
 
@@ -107,7 +111,7 @@ def infer_skill_from_session(session_dir: Path | None) -> str | None:
     if not session_file.exists():
         return None
     try:
-        session = json.loads(session_file.read_text(encoding="utf-8"))
+        session = load_json(session_file)
     except Exception:
         return None
     return session.get("skill")
@@ -135,7 +139,7 @@ def write_session_sync(session_dir: Path | None, step: str, payload: dict) -> No
     if not session_file.exists():
         return
     try:
-        session = json.loads(session_file.read_text(encoding="utf-8"))
+        session = load_json(session_file)
     except Exception:
         return
     sync = session.setdefault("sync", {})
