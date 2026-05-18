@@ -287,6 +287,24 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     if not any("Manifest step data is invalid" in hint for hint in invalid_step_payload.get("reuse_summary", {}).get("hints", [])):
         errors.append("invalid manifest step reuse summary should include manifest step invalid hint")
 
+    # A non-OK manifest step must explain the miss without inspecting output files first.
+    manifest = load_json(session_dir / "manifest.json")
+    manifest["steps"]["executor-with"]["status"] = "ERROR"
+    save_json(session_dir / "manifest.json", manifest)
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir)
+    if completed.returncode != 0:
+        errors.append(f"local manifest status miss exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before + 1:
+        errors.append(f"manifest status miss should rerun executor: before={before}, after={after}")
+    status_miss_payload = json.loads(completed.stdout)
+    if status_miss_payload.get("executor", {}).get("reuse", {}).get("reason") != "manifest_status_not_ok":
+        errors.append("manifest status miss should explain executor reuse miss as manifest_status_not_ok")
+    if not any("non-OK step" in hint for hint in status_miss_payload.get("reuse_summary", {}).get("hints", [])):
+        errors.append("manifest status miss reuse summary should include non-OK manifest hint")
+
     # Missing executor response artifacts must invalidate executor reuse.
     response_file = session_dir / "eval-1" / "with_skill" / "outputs" / "response.md"
     if response_file.exists():
