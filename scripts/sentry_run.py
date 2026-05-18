@@ -658,7 +658,7 @@ def run_profile_local(args) -> tuple[int, dict]:
         return 1, payload
 
     with timings.phase("grader"):
-        response_hashes = [(str(path), file_hash(path)) for path in sorted(session_dir.glob("eval-*/with_skill/outputs/response.md"))]
+        response_hashes = [(str(path), file_hash(path)) for path in expected_response_outputs(evals_file, session_dir)]
         grader_hash = combine_hash("grader-report", file_hash(evals_file), response_hashes, args.model)
         grader_outputs = [session_dir / "grading-summary.json", session_dir / "report.html"] + expected_grading_outputs(evals_file, session_dir)
         grader_reuse = step_reuse_state(session_dir, "grader-report", grader_hash, grader_outputs)
