@@ -56,11 +56,22 @@ def make_executor_payload() -> dict:
     }
 
 
+def make_grading_payload(eval_id: str, duration_ms: float, total: int = 2) -> dict:
+    return {
+        "eval_id": eval_id,
+        "duration_ms": duration_ms,
+        "runs": {"run-1": {"pass": True, "assertions": []}},
+        "summary": {"pass": total, "fail": 0, "total": total, "authoritative_pass_rate": 1.0},
+    }
+
+
 def verify_eval_result(root: Path, errors: list[str]) -> None:
     session_dir = root / "eval-result-session"
     session_dir.mkdir()
     save_json(session_dir / "session.json", {"skill": "timing-fixture", "mode": "smoke"})
     save_json(session_dir / "executor_results.json", make_executor_payload())
+    save_json(session_dir / "eval-1" / "grading.json", make_grading_payload("eval-1", 300.0))
+    save_json(session_dir / "eval-2" / "grading.json", make_grading_payload("eval-2", 900.0))
     (session_dir / "report.html").write_text("<html></html>", encoding="utf-8")
     result_file = root / "eval_result.json"
     save_json(
@@ -86,6 +97,11 @@ def verify_eval_result(root: Path, errors: list[str]) -> None:
         errors.append("eval_result should resolve executor timing from session_report_html")
     if executor.get("slowest_cases", [{}])[0].get("eval_id") != "eval-2":
         errors.append("eval_result executor slowest case should be eval-2")
+    grader = payload.get("grader_timing", {})
+    if not grader.get("available"):
+        errors.append("eval_result should resolve grader timing from session_report_html")
+    if grader.get("slowest_cases", [{}])[0].get("eval_id") != "eval-2":
+        errors.append("eval_result grader slowest case should be eval-2")
 
 
 def verify_session(root: Path, errors: list[str]) -> None:
@@ -104,6 +120,8 @@ def verify_session(root: Path, errors: list[str]) -> None:
         },
     )
     save_json(session_dir / "executor_results.json", make_executor_payload())
+    save_json(session_dir / "eval-1" / "grading.json", make_grading_payload("eval-1", 300.0))
+    save_json(session_dir / "eval-2" / "grading.json", make_grading_payload("eval-2", 900.0))
     payload = sentry_timing.analyze(session_dir, top=5)
     if payload.get("source", {}).get("kind") != "session":
         errors.append("session analysis source kind should be session")
@@ -113,6 +131,9 @@ def verify_session(root: Path, errors: list[str]) -> None:
     variants = executor.get("variants", [])
     if not variants or variants[0].get("duration_ms", {}).get("p95") != 4620.0:
         errors.append("session executor timing p95 should be 4620.0ms")
+    grader = payload.get("grader_timing", {})
+    if grader.get("duration_ms", {}).get("p50") != 600.0:
+        errors.append("session grader timing p50 should be 600.0ms")
 
 
 def verify_cli(root: Path, errors: list[str]) -> None:

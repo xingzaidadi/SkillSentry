@@ -76,6 +76,15 @@ def _duration_ms(value) -> float | None:
     return round(duration * 1000, 1)
 
 
+def _milliseconds(value) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    duration = _number(value, default=-1.0)
+    if duration < 0:
+        return None
+    return round(duration, 1)
+
+
 def timing_from_eval_result(path: Path) -> tuple[dict, dict]:
     payload = load_json(path)
     return _as_dict(payload.get("timings")), {
@@ -209,6 +218,24 @@ def summarize_executor_variant(summary: dict, variant: str, top: int) -> dict:
     }
 
 
+def summarize_duration_rows(rows: list[dict], total: int, top: int) -> dict:
+    durations = [item["duration_ms"] for item in rows]
+    slowest = sorted(rows, key=lambda item: item.get("duration_ms", 0), reverse=True)
+    duration_total = sum(durations)
+    return {
+        "total": total,
+        "timed": len(rows),
+        "duration_ms": {
+            "total": _round(duration_total),
+            "avg": _round(duration_total / len(durations)) if durations else None,
+            "p50": _round(_percentile(durations, 0.50)),
+            "p95": _round(_percentile(durations, 0.95)),
+            "max": _round(max(durations)) if durations else None,
+        },
+        "slowest_cases": slowest[:top],
+    }
+
+
 def executor_timing(session_dir: Path | None, top: int) -> dict:
     if session_dir is None:
         return {"available": False, "reason": "session_dir_unavailable"}
@@ -235,6 +262,74 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
         "variants": variants,
         "slowest_cases": slowest_cases,
     }
+
+
+def find_grading_files(session_dir: Path) -> list[Path]:
+    files = []
+    for path in session_dir.rglob("grading.json"):
+        if "without_skill" in set(path.parts):
+            continue
+        files.append(path)
+    return sorted(files)
+
+
+def grading_duration_ms(payload: dict) -> float | None:
+    for source in (payload, _as_dict(payload.get("summary")), _as_dict(payload.get("timing"))):
+        for key in ("duration_ms", "grader_duration_ms", "grading_duration_ms"):
+            duration = _milliseconds(source.get(key))
+            if duration is not None:
+                return duration
+        for key in ("duration_seconds", "grader_duration_seconds", "grading_duration_seconds"):
+            duration = _duration_ms(source.get(key))
+            if duration is not None:
+                return duration
+    return None
+
+
+def grader_timing(session_dir: Path | None, top: int) -> dict:
+    if session_dir is None:
+        return {"available": False, "reason": "session_dir_unavailable"}
+
+    grading_files = find_grading_files(session_dir)
+    if not grading_files:
+        return {"available": False, "reason": "grading_files_unavailable", "session_dir": str(session_dir)}
+
+    rows = []
+    for path in grading_files:
+        try:
+            payload = load_json(path)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        duration_ms = grading_duration_ms(payload)
+        if duration_ms is None:
+            continue
+        summary = _as_dict(payload.get("summary"))
+        rows.append(
+            {
+                "eval_id": payload.get("eval_id") or path.parent.name,
+                "source": str(path.relative_to(session_dir)),
+                "status": "ERROR" if summary.get("grader_error") or payload.get("grader_error") else "OK",
+                "duration_ms": duration_ms,
+                "assertions": summary.get("total"),
+                "passed": summary.get("pass") if "pass" in summary else summary.get("passed"),
+                "failed": summary.get("fail") if "fail" in summary else summary.get("failed"),
+            }
+        )
+
+    if not rows:
+        return {
+            "available": False,
+            "reason": "grader_timing_unavailable",
+            "session_dir": str(session_dir),
+            "grading_files": len(grading_files),
+            "timed": 0,
+        }
+
+    summary = summarize_duration_rows(rows, total=len(grading_files), top=top)
+    summary.update({"available": True, "session_dir": str(session_dir), "grading_files": len(grading_files)})
+    return summary
 
 
 def recommendation(step: dict) -> str:
@@ -271,6 +366,7 @@ def analyze(path: Path, top: int = 5) -> dict:
         "top_phases": phases[:top],
         "failed_steps": timings.get("failed_steps", []),
         "executor_timing": executor_timing(session_dir, top),
+        "grader_timing": grader_timing(session_dir, top),
         "recommendation": recommendation(slowest),
     }
 
@@ -325,6 +421,20 @@ def main() -> int:
                     f"- {item.get('variant')} {item.get('eval_id')}: "
                     f"{item.get('duration_ms')}ms ({item.get('status', 'N/A')})"
                 )
+        grader = _as_dict(payload.get("grader_timing"))
+        if grader.get("available"):
+            duration = _as_dict(grader.get("duration_ms"))
+            print(
+                "grader timing: "
+                f"timed {grader.get('timed')}/{grader.get('total')} "
+                f"avg={duration.get('avg')}ms p50={duration.get('p50')}ms "
+                f"p95={duration.get('p95')}ms max={duration.get('max')}ms"
+            )
+            print("slowest grader cases:")
+            for item in _as_list(grader.get("slowest_cases")):
+                print(f"- {item.get('eval_id')}: {item.get('duration_ms')}ms ({item.get('status', 'N/A')})")
+        elif grader.get("session_dir"):
+            print(f"grader timing: unavailable ({grader.get('reason')})")
         print(f"recommendation: {payload['recommendation']}")
     return 0
 
