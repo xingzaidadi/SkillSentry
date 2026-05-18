@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 
@@ -382,9 +383,16 @@ def verify() -> tuple[bool, list[str]]:
         env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
         env["SKILLSENTRY_SESSION_ROOT"] = str(root / "sessions")
         env["SKILLSENTRY_FAKE_CLAUDE_COUNT"] = str(root / "fake-claude-count.txt")
+        today = datetime.now().strftime("%Y-%m-%d")
+        fixture_session_root = root / "sessions" / "fixture-skill"
+        fixture_session_root.mkdir(parents=True)
+        (fixture_session_root / f"{today}_scratch").mkdir()
+        (fixture_session_root / f"{today}_002").mkdir()
 
         lint_session = verify_lint(root, env, skill, cases, errors)
         if lint_session is not None:
+            if not lint_session.name.endswith("_003"):
+                errors.append(f"lint session should ignore non-numeric session names and use _003, got {lint_session.name}")
             verify_debug(root, env, lint_session, errors)
         verify_local(root, env, skill, cases, errors)
         verify_delegated_ci_json(root, env, errors)

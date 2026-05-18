@@ -212,12 +212,18 @@ def init_session(skill_name: str, skill_hash: str, skill_type: str, mode: str, p
     base = root / skill_name
     base.mkdir(parents=True, exist_ok=True)
     today = datetime.now().strftime("%Y-%m-%d")
-    existing = sorted([d.name for d in base.iterdir() if d.name.startswith(today)])
-    if existing:
-        last_num = int(existing[-1].split("_")[-1])
-        session_name = f"{today}_{last_num + 1:03d}"
-    else:
-        session_name = f"{today}_001"
+    existing_numbers = []
+    for item in base.iterdir():
+        if not item.is_dir():
+            continue
+        prefix = f"{today}_"
+        if not item.name.startswith(prefix):
+            continue
+        suffix = item.name[len(prefix):]
+        if suffix.isdigit():
+            existing_numbers.append(int(suffix))
+    next_num = max(existing_numbers, default=0) + 1
+    session_name = f"{today}_{next_num:03d}"
     session_dir = base / session_name
     session_dir.mkdir(parents=True, exist_ok=True)
     sentry_state.save_session(
