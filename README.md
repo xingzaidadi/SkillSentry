@@ -133,6 +133,7 @@ bash install.sh
 | `scripts/sentry_grader.py` | grader-report 稳定 wrapper,调用 `ci_grader.py` 评审已有 response,写 summary/report 并更新 session。 |
 | `scripts/sentry_run.py` | profile 组合器;`preflight/lint/debug` 跑轻路径,`local` 跑已有 cases 的本地单边测评,`ci/release` 委托完整 CI。 |
 | `scripts/sentry_diagnostics.py` | 聚合 CI 诊断:用例可执行性、executor 失败/超时、grader 错误、sync 降级、Delta 状态和 publish 状态。 |
+| `scripts/sentry_timing.py` | 独立轻量耗时分析器,读取 `eval_result.json` 或 session,输出最慢 step/phase 和优化建议;不调 LLM、不联网。 |
 | `scripts/sentry_report.py` | 独立轻量报告生成器,只读取已有 session/result artifact 并生成 HTML,不调 LLM、不联网。 |
 | `scripts/sentry_sync.py` | 包装 `sync_cases.py`,为 `sync-pull`/`sync-push-*` 输出稳定 JSON,无配置时显式 `skipped_no_config`。 |
 | `scripts/sentry_publish.py` | 包装发布步骤,生成本地 `publish-result.json`/报告兜底,保留 `publish.py` 交互发布入口。 |
@@ -143,7 +144,7 @@ bash install.sh
 
 `scripts/verify_ci_modes.py` 会模拟 heavy LLM 步骤,并让真实 state/sync/comparator/analyzer/gate/publish 代码跑完 `smoke / quick / regression / standard / full` 五种模式,用于确认不是只支持 smoke。
 
-`scripts/verify_ci_preflight.py` 会验证 CI 启动前的环境事实被写入 session 和 diagnostics。`scripts/verify_ci_feasibility.py` 会验证 `sentry_case_lint.py` 能独立检查 `evals.json` 并写入 `session.json.case_warnings`。`scripts/verify_sentry_executor.py` 用 fake `claude` 验证 `sentry_executor.py` 的 CLI、session 更新和 mcp_based without_skill skip。`scripts/verify_sentry_grader.py` 用确定性失败响应验证 `sentry_grader.py` 的 CLI、summary/report 产物和 session 更新。`scripts/verify_sentry_run.py` 用 fake `claude` 验证 `sentry_run.py` 的 `lint/debug/local` profiles。`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。`scripts/verify_ci_failure_report.py` 会验证 preflight/pipeline 失败时仍会生成稳定 `report.html` artifact。`scripts/verify_sentry_report.py` 会验证独立 report 工具可从 session 或 `eval_result.json` 重新生成 HTML,且不会覆盖真实交互报告。`scripts/verify_ci_exit_contract.py` 会验证 `PASS=0`、`CONDITIONAL PASS=1`、`FAIL=1`、`ERROR=2` 和 GitHub output 字段。`scripts/verify_ci_checks_integration.py` 会验证 workflow/Checks 使用 `sentry_ci.py` 的新输出契约。
+`scripts/verify_ci_preflight.py` 会验证 CI 启动前的环境事实被写入 session 和 diagnostics。`scripts/verify_ci_feasibility.py` 会验证 `sentry_case_lint.py` 能独立检查 `evals.json` 并写入 `session.json.case_warnings`。`scripts/verify_sentry_executor.py` 用 fake `claude` 验证 `sentry_executor.py` 的 CLI、session 更新和 mcp_based without_skill skip。`scripts/verify_sentry_grader.py` 用确定性失败响应验证 `sentry_grader.py` 的 CLI、summary/report 产物和 session 更新。`scripts/verify_sentry_run.py` 用 fake `claude` 验证 `sentry_run.py` 的 `lint/debug/local` profiles。`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。`scripts/verify_ci_failure_report.py` 会验证 preflight/pipeline 失败时仍会生成稳定 `report.html` artifact。`scripts/verify_sentry_report.py` 会验证独立 report 工具可从 session 或 `eval_result.json` 重新生成 HTML,且不会覆盖真实交互报告。`scripts/verify_sentry_timing.py` 会验证独立 timing 工具可从 `eval_result.json` 或 session 读取耗时并排序慢步骤。`scripts/verify_ci_exit_contract.py` 会验证 `PASS=0`、`CONDITIONAL PASS=1`、`FAIL=1`、`ERROR=2` 和 GitHub output 字段。`scripts/verify_ci_checks_integration.py` 会验证 workflow/Checks 使用 `sentry_ci.py` 的新输出契约。
 
 需要真实调用 executor/grader 时,可用内置 fixture 跑一次 regression:
 
