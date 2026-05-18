@@ -145,6 +145,18 @@ def verify_session(root: Path, errors: list[str]) -> None:
         errors.append("session grader timing p50 should be 600.0ms")
     if grader.get("grading_files") != 2:
         errors.append("session grader timing should ignore stale grading files outside evals.json")
+    if grader.get("total") != 2 or grader.get("expected_cases") != 2:
+        errors.append("session grader timing total should reflect current evals.json case count")
+
+    partial_dir = root / "partial-session"
+    partial_dir.mkdir()
+    sentry_state.save_session(partial_dir, {"skill": "timing-fixture", "mode": "local"})
+    save_json(partial_dir / "evals.json", make_cases())
+    save_json(partial_dir / "eval-1" / "grading.json", make_grading_payload("eval-1", 300.0))
+    partial_payload = sentry_timing.analyze(partial_dir, top=5)
+    partial_grader = partial_payload.get("grader_timing", {})
+    if partial_grader.get("total") != 2 or partial_grader.get("timed") != 1:
+        errors.append("partial grader timing should report total current cases and timed grading files")
 
 
 def verify_sentry_run_result(root: Path, errors: list[str]) -> None:

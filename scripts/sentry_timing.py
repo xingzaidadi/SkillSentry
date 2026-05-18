@@ -408,9 +408,16 @@ def grader_timing(session_dir: Path | None, top: int) -> dict:
     if session_dir is None:
         return {"available": False, "reason": "session_dir_unavailable"}
 
+    case_ids = current_case_ids(session_dir)
     grading_files = find_grading_files(session_dir)
+    expected_total = len(case_ids) if case_ids else len(grading_files)
     if not grading_files:
-        return {"available": False, "reason": "grading_files_unavailable", "session_dir": str(session_dir)}
+        return {
+            "available": False,
+            "reason": "grading_files_unavailable",
+            "session_dir": str(session_dir),
+            "expected_cases": expected_total,
+        }
 
     rows = []
     for path in grading_files:
@@ -442,11 +449,17 @@ def grader_timing(session_dir: Path | None, top: int) -> dict:
             "reason": "grader_timing_unavailable",
             "session_dir": str(session_dir),
             "grading_files": len(grading_files),
+            "expected_cases": expected_total,
             "timed": 0,
         }
 
-    summary = summarize_duration_rows(rows, total=len(grading_files), top=top)
-    summary.update({"available": True, "session_dir": str(session_dir), "grading_files": len(grading_files)})
+    summary = summarize_duration_rows(rows, total=expected_total, top=top)
+    summary.update({
+        "available": True,
+        "session_dir": str(session_dir),
+        "grading_files": len(grading_files),
+        "expected_cases": expected_total,
+    })
     return summary
 
 
