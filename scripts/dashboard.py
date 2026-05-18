@@ -35,7 +35,7 @@ def scan_sessions(sessions_dir: Path):
     results = []
     for session_file in sessions_dir.rglob("session.json"):
         try:
-            with open(session_file, "r", encoding="utf-8") as f:
+            with open(session_file, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             results.append({
                 "path": str(session_file),

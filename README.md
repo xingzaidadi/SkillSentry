@@ -146,6 +146,8 @@ bash install.sh
 
 `scripts/verify_ci_preflight.py` 会验证 CI 启动前的环境事实被写入 session 和 diagnostics。`scripts/verify_ci_feasibility.py` 会验证 `sentry_case_lint.py` 能独立检查 `evals.json` 并写入 `session.json.case_warnings`。`scripts/verify_sentry_executor.py` 用 fake `claude` 验证 `sentry_executor.py` 的 CLI、session 更新和 mcp_based without_skill skip。`scripts/verify_sentry_grader.py` 用确定性失败响应验证 `sentry_grader.py` 的 CLI、summary/report 产物和 session 更新。`scripts/verify_sentry_run.py` 用 fake `claude` 验证 `sentry_run.py` 的 `lint/debug/local` profiles。`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。`scripts/verify_ci_failure_report.py` 会验证 preflight/pipeline 失败时仍会生成稳定 `report.html` artifact。`scripts/verify_sentry_report.py` 会验证独立 report 工具可从 session 或 `eval_result.json` 重新生成 HTML,且不会覆盖真实交互报告。`scripts/verify_sentry_timing.py` 会验证独立 timing 工具可从 `eval_result.json`、`sentry-run-result.json` 或 session 读取耗时,并排序慢 step、executor 用例、已有 grader 用例耗时和 local 复用决策。`scripts/verify_ci_exit_contract.py` 会验证 `PASS=0`、`CONDITIONAL PASS=1`、`FAIL=1`、`ERROR=2` 和 GitHub output 字段。`scripts/verify_ci_checks_integration.py` 会验证 workflow/Checks 使用 `sentry_ci.py` 的新输出契约。
 
+`scripts/verify_dashboard.py` 会验证 dashboard 扫描历史 `session.json` 时能读取 UTF-8 BOM 文件,避免 Windows 生成的 session 被统计时静默跳过。
+
 需要真实调用 executor/grader 时,可用内置 fixture 跑一次 regression:
 
 ```bash
@@ -281,6 +283,7 @@ SkillSentry/
 │   ├── verify_sentry_report.py # 独立 report 工具回归
 │   ├── verify_ci_exit_contract.py # CI 退出码/GitHub output 回归
 │   ├── verify_ci_checks_integration.py # Actions/Checks 集成回归
+│   ├── verify_dashboard.py  # dashboard session 扫描回归
 │   ├── validate_step.py       # OpenClaw 步骤校验
 │   ├── verify_proof.py        # CLI 读取证明校验
 │   ├── generate_html_report.py
