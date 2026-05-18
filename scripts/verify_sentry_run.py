@@ -271,6 +271,22 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     if invalid_manifest_payload.get("executor", {}).get("reuse", {}).get("reason") != "manifest_load_error":
         errors.append("invalid manifest steps should explain executor reuse miss as manifest_load_error")
 
+    # An invalid manifest step record should be distinguished from a missing step.
+    save_json(session_dir / "manifest.json", {"version": 1, "steps": {"executor-with": []}})
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir)
+    if completed.returncode != 0:
+        errors.append(f"local invalid manifest step exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before + 1:
+        errors.append(f"invalid manifest step should rerun executor: before={before}, after={after}")
+    invalid_step_payload = json.loads(completed.stdout)
+    if invalid_step_payload.get("executor", {}).get("reuse", {}).get("reason") != "manifest_step_invalid":
+        errors.append("invalid manifest step should explain executor reuse miss as manifest_step_invalid")
+    if not any("Manifest step data is invalid" in hint for hint in invalid_step_payload.get("reuse_summary", {}).get("hints", [])):
+        errors.append("invalid manifest step reuse summary should include manifest step invalid hint")
+
     # Missing executor response artifacts must invalidate executor reuse.
     response_file = session_dir / "eval-1" / "with_skill" / "outputs" / "response.md"
     if response_file.exists():

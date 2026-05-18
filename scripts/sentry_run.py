@@ -124,7 +124,11 @@ def step_reuse_state(session_dir: Path, step: str, input_hash: str, required: li
         "reason": "missing_manifest_step",
         "missing_outputs": [],
     }
-    if not isinstance(step_data, dict) or not step_data:
+    if not isinstance(step_data, dict):
+        state["reason"] = "manifest_step_invalid"
+        state["recorded_type"] = type(step_data).__name__
+        return state
+    if not step_data:
         if manifest.get("load_error"):
             state["reason"] = "manifest_load_error"
             state["manifest_error"] = manifest.get("load_error")
