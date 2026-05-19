@@ -378,6 +378,23 @@ first local run: about 41.5s
 second --reuse-session auto run: all heavy steps reused, profile timing about 38ms
 ```
 
+The follow-up was to make this repeatable instead of leaving it as a one-off
+manual transcript. `scripts/verify_local_dogfood.py` now has two modes:
+
+```text
+python scripts/verify_local_dogfood.py --format json
+  deterministic fake Claude CLI; safe for routine regression
+
+python scripts/verify_local_dogfood.py --real --format json
+  real Claude CLI + real installed skill; useful after local profile changes
+```
+
+The fake mode is intentionally not a full quality evaluation. It verifies the
+runtime contract that had regressed in dogfood: local profile creates artifacts
+outside the repo, executor/grader artifacts exist, the manifest is written, and a
+second `--reuse-session auto` run reuses prepared cases, executor, and grader
+without invoking Claude again.
+
 ## When Continuing
 
 Safe next steps:
