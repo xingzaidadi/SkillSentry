@@ -8,7 +8,6 @@ small tools directly.
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -27,18 +26,16 @@ import sentry_debug_profile
 import sentry_delegated_ci
 import sentry_light_profiles
 import sentry_local_profile
-import sentry_preflight
-from sentry_profile_runtime import ProfileTimings, profile_payload, save_json as profile_save_json, utc_now
+from sentry_profile_runtime import save_json as profile_save_json, utc_now
 import sentry_profile_state
 import sentry_reuse_core
-import sentry_run_output
+import sentry_run_cli
 import sentry_run_plan
-from sentry_pipeline import PIPELINES
 
 
-LIGHT_PROFILES = {"preflight", "lint", "debug", "plan"}
-HEAVY_PROFILES = {"local", "ci", "release"}
-PROFILES = sorted(LIGHT_PROFILES | HEAVY_PROFILES)
+LIGHT_PROFILES = sentry_run_cli.LIGHT_PROFILES
+HEAVY_PROFILES = sentry_run_cli.HEAVY_PROFILES
+PROFILES = sentry_run_cli.PROFILES
 
 
 def save_json(path: Path, payload: dict) -> None:
@@ -129,14 +126,7 @@ def find_auto_reuse_session(args, preflight: dict, cases_file: Path) -> dict:
 
 
 def run_preflight(args) -> tuple[int, dict]:
-    preflight_args = argparse.Namespace(
-        skill=args.skill,
-        mode=args.mode,
-        runtime=args.runtime,
-        config=args.config,
-        format="json",
-    )
-    return sentry_preflight.build_result(preflight_args)
+    return sentry_light_profiles.run_preflight(args)
 
 
 def init_session(skill_name: str, skill_hash: str, skill_type: str, mode: str, preflight: dict, runtime: str) -> Path:
@@ -207,61 +197,12 @@ def run_delegated_ci(args, release: bool = False) -> tuple[int, dict]:
     return sentry_delegated_ci.run_delegated_ci(args, SCRIPT_DIR, release=release)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run SkillSentry by lightweight profile")
-    parser.add_argument("--profile", choices=PROFILES, default="lint")
-    parser.add_argument("--skill", help="Skill name, directory, or SKILL.md path")
-    parser.add_argument("--session-dir", help="Existing session directory for debug profile")
-    parser.add_argument("--reuse-session", help="Existing session directory for local profile artifact reuse")
-    parser.add_argument("--cases", help="Existing evals.json/cases.cache.json path")
-    parser.add_argument("--mode", choices=sorted(PIPELINES), default="smoke")
-    parser.add_argument("--threshold", type=float, default=0.8)
-    parser.add_argument("--output-dir", default="./ci-eval-results")
-    parser.add_argument("--model", default="claude-sonnet-4-6")
-    parser.add_argument("--executor-model", default=None)
-    parser.add_argument("--timeout", type=int, default=1800)
-    parser.add_argument("--timeout-per-eval", type=int, default=120)
-    parser.add_argument("--runtime", choices=["auto", "cli", "openclaw"], default="auto")
-    parser.add_argument("--config", default=str(sentry_preflight.DEFAULT_CONFIG))
-    parser.add_argument("--github-output", action="store_true")
-    parser.add_argument("--dry-run", action="store_true", help="Plan a local run without creating a session or running heavy steps")
-    parser.add_argument("--force-executor", action="store_true", help="Rerun local executor even when manifest matches")
-    parser.add_argument("--force-grader", action="store_true", help="Rerun local grader even when manifest matches")
-    parser.add_argument("--format", choices=["text", "json"], default="text")
-    parser.add_argument("--verbose", "-v", action="store_true")
-    return parser.parse_args()
+def parse_args():
+    return sentry_run_cli.parse_args()
 
 
 def main() -> int:
-    args = parse_args()
-    if args.profile != "debug" and not args.skill:
-        timings = ProfileTimings()
-        payload = profile_payload(args.profile, "ERROR", error="--skill is required unless --profile debug", timings=timings.snapshot())
-        print(json.dumps(payload, ensure_ascii=False, indent=2) if args.format == "json" else payload["error"])
-        return 2
-
-    if args.profile == "preflight":
-        code, payload = run_profile_preflight(args)
-    elif args.profile == "lint":
-        code, payload = run_profile_lint(args)
-    elif args.profile == "plan":
-        code, payload = run_profile_plan(args)
-    elif args.profile == "debug":
-        code, payload = run_profile_debug(args)
-    elif args.profile == "local":
-        code, payload = run_profile_local(args)
-    elif args.profile == "ci":
-        code, payload = run_delegated_ci(args, release=False)
-    elif args.profile == "release":
-        code, payload = run_delegated_ci(args, release=True)
-    else:
-        code, payload = 2, profile_payload(args.profile, "ERROR", error=f"unknown profile: {args.profile}")
-
-    if args.format == "json":
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-    else:
-        print(sentry_run_output.render_text(payload), end="")
-    return code
+    return sentry_run_cli.main()
 
 
 if __name__ == "__main__":
