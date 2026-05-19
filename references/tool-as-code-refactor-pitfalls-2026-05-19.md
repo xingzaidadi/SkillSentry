@@ -404,7 +404,7 @@ python scripts/verify_deterministic.py --format json
   diagnostics, exit contract, Checks, self-test workflow, dashboard
 
 python scripts/verify_deterministic.py --full --format json
-  core checks plus sentry_run local reuse mutation checks, preflight, case
+  core checks plus sentry_run CLI/local reuse mutation checks, preflight, case
   feasibility, failure report, and all CI modes
 ```
 
@@ -414,10 +414,13 @@ directories that are not available in a clean checkout.
 Also keep routine and exhaustive verifier modes separate. `verify_sentry_run.py`
 used to run every local reuse edge case in the default core path, making the
 aggregate check spend most of its time in repeated local profile subprocesses.
-The default now checks help, plan, lint, debug, local dry-run, and delegated CI
-JSON. The deeper local reuse mutation matrix runs only under
-`verify_sentry_run.py --full`, which `verify_deterministic.py --full` selects
-automatically.
+The first split moved the local reuse mutation matrix under
+`verify_sentry_run.py --full`. The second split made the default verifier call
+profile functions in-process for plan/local dry-run and validate delegated CI
+command construction without spawning `sentry_ci.py`. CLI help, lint/debug
+subprocess smoke, delegated CI JSON, and the deeper local reuse mutation matrix
+run only under `verify_sentry_run.py --full`, which
+`verify_deterministic.py --full` selects automatically.
 
 ## CI Self-Test Split
 
@@ -457,6 +460,30 @@ enable the live workflow after reauthenticating with `workflow` scope.
 After reauthenticating GitHub CLI with `workflow` scope, the live workflow was
 enabled and the verifier was tightened to fail if the live file and template
 diverge.
+
+The first push-triggered self-test completed successfully:
+
+```text
+run: 26096451955
+workflow: SkillSentry Self-Test
+job: Deterministic self-test
+conclusion: success
+core step: python scripts/verify_deterministic.py --format json
+```
+
+The manual full dispatch also completed successfully:
+
+```text
+run: 26096792647
+workflow_dispatch input: full=true
+conclusion: success
+full step: python scripts/verify_deterministic.py --full --format json
+```
+
+GitHub emitted a Node.js 20 deprecation annotation for `actions/checkout@v4` and
+`actions/setup-python@v5`; it was not a failure. Keep an eye on those actions
+before GitHub's Node 24 runner deadline, but do not treat it as a SkillSentry
+contract issue.
 
 ## When Continuing
 

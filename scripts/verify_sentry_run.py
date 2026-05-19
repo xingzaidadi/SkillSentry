@@ -23,6 +23,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import sentry_run
+import sentry_delegated_ci
+import sentry_preflight
 
 
 def save_json(path: Path, payload) -> None:
@@ -104,7 +106,20 @@ def verify_expected_artifact_outputs(root: Path, errors: list[str]) -> None:
         errors.append("sentry_run expected grading outputs should follow ArtifactRegistry identities")
 
 
-def verify_cli_help_and_compat(errors: list[str]) -> None:
+def verify_cli_help_and_compat(errors: list[str], *, full: bool = False) -> None:
+    if not callable(getattr(sentry_run, "run_profile_plan", None)):
+        errors.append("sentry_run compatibility facade should export run_profile_plan")
+    if not callable(getattr(sentry_run, "run_profile_local", None)):
+        errors.append("sentry_run compatibility facade should export run_profile_local")
+    if "local" not in getattr(sentry_run, "PROFILES", []):
+        errors.append("sentry_run compatibility facade should export PROFILES with local")
+    compat_plan = sentry_run.build_profile_plan("local")
+    if compat_plan.get("summary", {}).get("heavy_step_count") != 2:
+        errors.append("sentry_run compatibility facade should expose summarized profile plans")
+
+    if not full:
+        return
+
     completed = subprocess.run(
         [sys.executable, str(SCRIPT_DIR / "sentry_run.py"), "--help"],
         cwd=SCRIPT_DIR.parent,
@@ -124,16 +139,6 @@ def verify_cli_help_and_compat(errors: list[str]) -> None:
     ):
         if marker not in help_text:
             errors.append(f"sentry_run --help missing marker: {marker}")
-
-    if not callable(getattr(sentry_run, "run_profile_plan", None)):
-        errors.append("sentry_run compatibility facade should export run_profile_plan")
-    if not callable(getattr(sentry_run, "run_profile_local", None)):
-        errors.append("sentry_run compatibility facade should export run_profile_local")
-    if "local" not in getattr(sentry_run, "PROFILES", []):
-        errors.append("sentry_run compatibility facade should export PROFILES with local")
-    compat_plan = sentry_run.build_profile_plan("local")
-    if compat_plan.get("summary", {}).get("heavy_step_count") != 2:
-        errors.append("sentry_run compatibility facade should expose summarized profile plans")
 
 
 def verify_default_session_root(errors: list[str]) -> None:
@@ -193,6 +198,41 @@ def run_profile(
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
 
 
+def make_args(
+    *,
+    skill: Path | None = None,
+    cases: Path | None = None,
+    session: Path | None = None,
+    reuse_session: Path | str | None = None,
+    output_dir: Path | None = None,
+    force_executor: bool = False,
+    force_grader: bool = False,
+    dry_run: bool = False,
+    output_format: str = "json",
+):
+    return argparse.Namespace(
+        skill=str(skill) if skill is not None else None,
+        session_dir=str(session) if session is not None else None,
+        reuse_session=str(reuse_session) if reuse_session is not None else None,
+        cases=str(cases) if cases is not None else None,
+        mode="smoke",
+        threshold=0.8,
+        output_dir=str(output_dir or "ci-eval-results"),
+        model="sonnet",
+        executor_model="sonnet",
+        timeout=1800,
+        timeout_per_eval=10,
+        runtime="auto",
+        config=str(sentry_preflight.DEFAULT_CONFIG),
+        github_output=False,
+        dry_run=dry_run,
+        force_executor=force_executor,
+        force_grader=force_grader,
+        format=output_format,
+        verbose=False,
+    )
+
+
 def verify_lint(root: Path, env: dict, skill: Path, cases: Path, errors: list[str]) -> Path | None:
     completed = run_profile(root, env, "lint", skill=skill, cases=cases)
     if completed.returncode != 0:
@@ -230,14 +270,13 @@ def verify_debug(root: Path, env: dict, session_dir: Path, errors: list[str]) ->
 def verify_plan_and_dry_run(root: Path, env: dict, skill: Path, cases: Path, errors: list[str]) -> None:
     count_file = Path(env["SKILLSENTRY_FAKE_CLAUDE_COUNT"])
     before = fake_count(count_file)
-    completed = run_profile(root, env, "plan", skill=skill, cases=cases)
+    code, payload = sentry_run.run_profile_plan(make_args(skill=skill, cases=cases))
     after = fake_count(count_file)
-    if completed.returncode != 0:
-        errors.append(f"plan exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+    if code != 0:
+        errors.append(f"plan exited {code}: {payload.get('error', '')}")
         return
     if after != before:
         errors.append("plan profile should not call fake claude")
-    payload = json.loads(completed.stdout)
     if payload.get("profile") != "plan" or payload.get("dry_run") is not True:
         errors.append("plan profile should return a dry_run plan payload")
     if "executor-with" not in payload.get("plan", {}).get("heavy_steps", []):
@@ -249,14 +288,13 @@ def verify_plan_and_dry_run(root: Path, env: dict, skill: Path, cases: Path, err
         errors.append("plan profile should mark quick mode as heavy")
 
     before = fake_count(count_file)
-    completed = run_profile(root, env, "local", skill=skill, cases=cases, dry_run=True)
+    code, payload = sentry_run.run_profile_local(make_args(skill=skill, cases=cases, dry_run=True))
     after = fake_count(count_file)
-    if completed.returncode != 0:
-        errors.append(f"local dry-run exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+    if code != 0:
+        errors.append(f"local dry-run exited {code}: {payload.get('error', '')}")
         return
     if after != before:
         errors.append("local dry-run should not call fake claude")
-    payload = json.loads(completed.stdout)
     if payload.get("dry_run") is not True:
         errors.append("local dry-run should mark dry_run=true")
     if payload.get("session_dir"):
@@ -667,6 +705,18 @@ def verify_delegated_ci_json(root: Path, env: dict, errors: list[str]) -> None:
         errors.append("delegated ci payload missing captured stdout")
 
 
+def verify_delegated_ci_command(root: Path, errors: list[str]) -> None:
+    args = make_args(skill=root / "missing-skill", output_dir=root / "ci-output")
+    cmd = sentry_delegated_ci.build_delegated_command(args, SCRIPT_DIR, release=False)
+    command_text = " ".join(cmd)
+    for marker in ("sentry_ci.py", "--skill", "--mode", "smoke", "--output-dir"):
+        if marker not in command_text:
+            errors.append(f"delegated ci command missing {marker!r}")
+    release_cmd = sentry_delegated_ci.build_delegated_command(args, SCRIPT_DIR, release=True)
+    if "standard" not in release_cmd:
+        errors.append("release delegated command should promote default smoke mode to standard")
+
+
 def verify(*, full: bool = False) -> tuple[bool, list[str]]:
     errors: list[str] = []
     with tempfile.TemporaryDirectory(prefix="skillsentry-run-") as tmp:
@@ -686,17 +736,19 @@ def verify(*, full: bool = False) -> tuple[bool, list[str]]:
         (fixture_session_root / f"{today}_002").mkdir()
 
         verify_expected_artifact_outputs(root, errors)
-        verify_cli_help_and_compat(errors)
+        verify_cli_help_and_compat(errors, full=full)
         verify_default_session_root(errors)
         verify_plan_and_dry_run(root, env, skill, cases, errors)
-        lint_session = verify_lint(root, env, skill, cases, errors)
-        if lint_session is not None:
-            if not lint_session.name.endswith("_003"):
-                errors.append(f"lint session should ignore non-numeric session names and use _003, got {lint_session.name}")
-            verify_debug(root, env, lint_session, errors)
         if full:
+            lint_session = verify_lint(root, env, skill, cases, errors)
+            if lint_session is not None:
+                if not lint_session.name.endswith("_003"):
+                    errors.append(f"lint session should ignore non-numeric session names and use _003, got {lint_session.name}")
+                verify_debug(root, env, lint_session, errors)
             verify_local(root, env, skill, cases, errors, full=True)
-        verify_delegated_ci_json(root, env, errors)
+            verify_delegated_ci_json(root, env, errors)
+        else:
+            verify_delegated_ci_command(root, errors)
     return not errors, errors
 
 
