@@ -395,6 +395,21 @@ outside the repo, executor/grader artifacts exist, the manifest is written, and 
 second `--reuse-session auto` run reuses prepared cases, executor, and grader
 without invoking Claude again.
 
+The final closure was to add `scripts/verify_deterministic.py` as the aggregate
+self-check:
+
+```text
+python scripts/verify_deterministic.py --format json
+  core checks: contract lint, executor/grader/run/local dogfood, report, timing,
+  diagnostics, exit contract, Checks, dashboard
+
+python scripts/verify_deterministic.py --full --format json
+  core checks plus preflight, case feasibility, failure report, and all CI modes
+```
+
+Keep historical gate fixtures separate because they depend on archived session
+directories that are not available in a clean checkout.
+
 ## When Continuing
 
 Safe next steps:

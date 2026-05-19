@@ -145,7 +145,7 @@ bash install.sh
 
 `scripts/verify_ci_modes.py` 会模拟 heavy LLM 步骤,并让真实 state/sync/comparator/analyzer/gate/publish 代码跑完 `smoke / quick / regression / standard / full` 五种模式,用于确认不是只支持 smoke。
 
-`scripts/verify_ci_preflight.py` 会验证 CI 启动前的环境事实被写入 session 和 diagnostics。`scripts/verify_ci_feasibility.py` 会验证 `sentry_case_lint.py` 能独立检查 `evals.json` 并写入 `session.json.case_warnings`。`scripts/verify_sentry_executor.py` 用 fake `claude` 验证 `sentry_executor.py` 的 CLI、session 更新和 mcp_based without_skill skip。`scripts/verify_sentry_grader.py` 用确定性失败响应验证 `sentry_grader.py` 的 CLI、summary/report 产物和 session 更新。`scripts/verify_sentry_run.py` 用 fake `claude` 验证 `sentry_run.py` 的 `lint/debug/local` profiles。`scripts/verify_local_dogfood.py` 用 fake Claude CLI 验证 local 首跑、默认 session root、manifest 产物和 `--reuse-session auto` 复用;加 `--real` 时会使用本机真实 Claude CLI 和真实 skill 做 smoke dogfood。`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。`scripts/verify_ci_failure_report.py` 会验证 preflight/pipeline 失败时仍会生成稳定 `report.html` artifact。`scripts/verify_sentry_report.py` 会验证独立 report 工具可从 session 或 `eval_result.json` 重新生成 HTML,且不会覆盖真实交互报告。`scripts/verify_sentry_timing.py` 会验证独立 timing 工具可从 `eval_result.json`、`sentry-run-result.json` 或 session 读取耗时,并排序慢 step、executor 用例、已有 grader 用例耗时和 local 复用决策。`scripts/verify_ci_exit_contract.py` 会验证 `PASS=0`、`CONDITIONAL PASS=1`、`FAIL=1`、`ERROR=2` 和 GitHub output 字段。`scripts/verify_ci_checks_integration.py` 会验证 workflow/Checks 使用 `sentry_ci.py` 的新输出契约。
+`scripts/verify_deterministic.py` 是本体确定性自检聚合入口;默认 core 模式串行运行 contract lint、executor/grader/run/local dogfood、report、timing、diagnostics、exit contract、Checks 和 dashboard 回归,`--full` 会额外运行 preflight、case feasibility、failure report 和五种 CI mode 编排。`scripts/verify_ci_preflight.py` 会验证 CI 启动前的环境事实被写入 session 和 diagnostics。`scripts/verify_ci_feasibility.py` 会验证 `sentry_case_lint.py` 能独立检查 `evals.json` 并写入 `session.json.case_warnings`。`scripts/verify_sentry_executor.py` 用 fake `claude` 验证 `sentry_executor.py` 的 CLI、session 更新和 mcp_based without_skill skip。`scripts/verify_sentry_grader.py` 用确定性失败响应验证 `sentry_grader.py` 的 CLI、summary/report 产物和 session 更新。`scripts/verify_sentry_run.py` 用 fake `claude` 验证 `sentry_run.py` 的 `lint/debug/local` profiles。`scripts/verify_local_dogfood.py` 用 fake Claude CLI 验证 local 首跑、默认 session root、manifest 产物和 `--reuse-session auto` 复用;加 `--real` 时会使用本机真实 Claude CLI 和真实 skill 做 smoke dogfood。`scripts/verify_ci_diagnostics.py` 会验证 CI JSON、GitHub summary Markdown 和最小 HTML 报告都包含执行诊断,不再只输出 verdict/grade。`scripts/verify_ci_failure_report.py` 会验证 preflight/pipeline 失败时仍会生成稳定 `report.html` artifact。`scripts/verify_sentry_report.py` 会验证独立 report 工具可从 session 或 `eval_result.json` 重新生成 HTML,且不会覆盖真实交互报告。`scripts/verify_sentry_timing.py` 会验证独立 timing 工具可从 `eval_result.json`、`sentry-run-result.json` 或 session 读取耗时,并排序慢 step、executor 用例、已有 grader 用例耗时和 local 复用决策。`scripts/verify_ci_exit_contract.py` 会验证 `PASS=0`、`CONDITIONAL PASS=1`、`FAIL=1`、`ERROR=2` 和 GitHub output 字段。`scripts/verify_ci_checks_integration.py` 会验证 workflow/Checks 使用 `sentry_ci.py` 的新输出契约。
 
 `scripts/verify_dashboard.py` 会验证 dashboard 扫描历史 `session.json` 时能读取 UTF-8 BOM 文件,避免 Windows 生成的 session 被统计时静默跳过。
 
@@ -161,11 +161,13 @@ python scripts/sentry_ci.py --skill tests/fixtures/ci_modes/fixture-skill/SKILL.
 也可以用 local dogfood 入口专门验证本地轻路径和复用:
 
 ```bash
+python scripts/verify_deterministic.py --format json
+python scripts/verify_deterministic.py --full --format json
 python scripts/verify_local_dogfood.py --format json
 python scripts/verify_local_dogfood.py --real --format json
 ```
 
-第一条使用 fake Claude CLI,不联网、不依赖账号余额;第二条使用本机真实 Claude CLI 和真实 skill,用于改动 local profile 后做一次端到端 smoke。
+`verify_deterministic.py` 是推荐的本体自检入口;默认 core 模式约 1 分钟,`--full` 会多跑 CI mode 等宽回归。`verify_local_dogfood.py` 第一条使用 fake Claude CLI,不联网、不依赖账号余额;第二条使用本机真实 Claude CLI 和真实 skill,用于改动 local profile 后做一次端到端 smoke。
 
 ---
 
@@ -300,6 +302,7 @@ SkillSentry/
 │   ├── sentry_publish.py       # publish 步骤稳定 JSON wrapper
 │   ├── sentry_contract_lint.py # SkillSentry 当前口径自检
 │   ├── sentry_article_lint.py  # 文章当前口径自检
+│   ├── verify_deterministic.py # 本体确定性自检聚合入口
 │   ├── verify_ci_preflight.py  # CI 预检证据回归
 │   ├── verify_ci_feasibility.py # CI 用例可执行性 warning 回归
 │   ├── verify_sentry_executor.py # executor wrapper 回归
