@@ -274,22 +274,32 @@ def load_executor_summary(session_dir: Path, variant: str) -> dict:
     return payload
 
 
-def current_case_ids(session_dir: Path) -> list[str]:
+def current_case_info(session_dir: Path) -> dict:
     evals_file = session_dir / "evals.json"
     if not evals_file.exists():
-        return []
+        return {"case_ids": [], "fallback_case_ids": []}
     try:
         payload = load_json(evals_file)
     except (FileNotFoundError, json.JSONDecodeError):
-        return []
+        return {"case_ids": [], "fallback_case_ids": []}
     case_ids = []
+    fallback_case_ids = []
     for idx, case in enumerate(sentry_case_lint.extract_cases(payload), 1):
         if not isinstance(case, dict):
             continue
-        eval_id = str(case.get("id", f"eval-{idx}"))
+        if case.get("id"):
+            eval_id = str(case.get("id"))
+        else:
+            eval_id = f"eval-{idx}"
+            if case.get("case_id"):
+                fallback_case_ids.append(str(case.get("case_id")))
         if eval_id not in case_ids:
             case_ids.append(eval_id)
-    return case_ids
+    return {"case_ids": case_ids, "fallback_case_ids": fallback_case_ids}
+
+
+def current_case_ids(session_dir: Path) -> list[str]:
+    return _as_list(current_case_info(session_dir).get("case_ids"))
 
 
 def summarize_executor_variant(summary: dict, variant: str, top: int, case_ids: list[str] | None = None) -> dict:
@@ -371,7 +381,8 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
     if session_dir is None:
         return {"available": False, "reason": "session_dir_unavailable"}
 
-    case_ids = current_case_ids(session_dir)
+    case_info = current_case_info(session_dir)
+    case_ids = _as_list(case_info.get("case_ids"))
     variants = []
     for variant in ("with_skill", "without_skill"):
         try:
@@ -398,12 +409,14 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
         "session_dir": str(session_dir),
         "variants": variants,
         "expected_cases": len(case_ids) if case_ids else None,
+        "fallback_case_ids": _as_list(case_info.get("fallback_case_ids")),
         "slowest_cases": slowest_cases,
     }
 
 
 def find_grading_files(session_dir: Path) -> list[Path]:
-    case_ids = current_case_ids(session_dir)
+    case_info = current_case_info(session_dir)
+    case_ids = _as_list(case_info.get("case_ids"))
     if case_ids:
         files = [session_dir / eval_id / "grading.json" for eval_id in case_ids]
         return sorted(path for path in files if path.exists())
@@ -433,7 +446,8 @@ def grader_timing(session_dir: Path | None, top: int) -> dict:
     if session_dir is None:
         return {"available": False, "reason": "session_dir_unavailable"}
 
-    case_ids = current_case_ids(session_dir)
+    case_info = current_case_info(session_dir)
+    case_ids = _as_list(case_info.get("case_ids"))
     grading_files = find_grading_files(session_dir)
     expected_total = len(case_ids) if case_ids else len(grading_files)
     found_ids = {path.parent.name for path in grading_files}
@@ -444,6 +458,7 @@ def grader_timing(session_dir: Path | None, top: int) -> dict:
             "reason": "grading_files_unavailable",
             "session_dir": str(session_dir),
             "expected_cases": expected_total,
+            "fallback_case_ids": _as_list(case_info.get("fallback_case_ids")),
             "missing_cases": len(missing_ids),
             "missing_case_ids": missing_ids[:top],
         }
@@ -479,6 +494,7 @@ def grader_timing(session_dir: Path | None, top: int) -> dict:
             "session_dir": str(session_dir),
             "grading_files": len(grading_files),
             "expected_cases": expected_total,
+            "fallback_case_ids": _as_list(case_info.get("fallback_case_ids")),
             "missing_cases": len(missing_ids),
             "missing_case_ids": missing_ids[:top],
             "timed": 0,
@@ -490,6 +506,7 @@ def grader_timing(session_dir: Path | None, top: int) -> dict:
         "session_dir": str(session_dir),
         "grading_files": len(grading_files),
         "expected_cases": expected_total,
+        "fallback_case_ids": _as_list(case_info.get("fallback_case_ids")),
         "missing_cases": len(missing_ids),
         "missing_case_ids": missing_ids[:top],
     })
@@ -529,6 +546,9 @@ def timing_hints(executor: dict, grader: dict) -> list[str]:
         missing = int(_number(grader.get("missing_cases")))
         if missing > 0:
             hints.append(f"grader timing is missing {missing} current case file(s)")
+    fallback_case_ids = _as_list(executor.get("fallback_case_ids")) or _as_list(grader.get("fallback_case_ids"))
+    if fallback_case_ids:
+        hints.append("some cases use case_id without id; timing follows eval-N artifact directories")
     return hints
 
 
