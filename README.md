@@ -171,6 +171,7 @@ python scripts/sentry_run.py --skill my-skill --profile lint --cases evals.json
 python scripts/sentry_run.py --session-dir sessions/<skill>/<run> --profile debug
 python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json --dry-run
 python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json
+python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json --reuse-session auto
 python scripts/sentry_run.py --skill my-skill --profile local --cases evals.json --reuse-session sessions/<skill>/<run>
 ```
 

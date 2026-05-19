@@ -113,6 +113,13 @@ def file_hash(path: Path) -> str | None:
     return h.hexdigest()
 
 
+def session_root() -> Path:
+    root = Path(os.environ.get("SKILLSENTRY_SESSION_ROOT", "")).expanduser()
+    if str(root):
+        return root
+    return Path.home() / ".claude" / "skills" / "SkillSentry" / "sessions"
+
+
 def manifest_path(session_dir: Path) -> Path:
     return sentry_artifacts.ArtifactRegistry(session_dir).manifest_path()
 
@@ -383,6 +390,50 @@ def local_dry_run_reuse(session_dir: Path, cases_file: Path, args, preflight: di
     }
 
 
+def find_auto_reuse_session(args, preflight: dict, cases_file: Path) -> dict:
+    base = session_root() / str(preflight.get("skill_dir_name") or "")
+    result = {
+        "mode": "auto",
+        "selected": False,
+        "session_dir": None,
+        "candidates": [],
+    }
+    if not base.exists():
+        result["reason"] = "session_root_missing"
+        return result
+
+    candidates = sorted((item for item in base.iterdir() if item.is_dir()), key=lambda item: item.name, reverse=True)
+    for candidate in candidates[:20]:
+        if not (candidate / "session.json").exists():
+            continue
+        try:
+            forecast = local_dry_run_reuse(candidate, cases_file, args, preflight)
+        except Exception as exc:
+            result["candidates"].append({
+                "session_dir": str(candidate),
+                "reusable": False,
+                "reason": f"error:{type(exc).__name__}",
+            })
+            continue
+        summary = forecast.get("summary", {}) if isinstance(forecast, dict) else {}
+        reusable = bool(summary.get("all_reused"))
+        candidate_result = {
+            "session_dir": str(candidate),
+            "reusable": reusable,
+            "rerun_steps": summary.get("rerun_steps", []),
+            "miss_reasons": summary.get("miss_reasons", {}),
+        }
+        result["candidates"].append(candidate_result)
+        if reusable:
+            result["selected"] = True
+            result["session_dir"] = str(candidate)
+            result["reason"] = "matched"
+            return result
+
+    result["reason"] = "no_reusable_session"
+    return result
+
+
 def run_preflight(args) -> tuple[int, dict]:
     preflight_args = argparse.Namespace(
         skill=args.skill,
@@ -395,9 +446,7 @@ def run_preflight(args) -> tuple[int, dict]:
 
 
 def init_session(skill_name: str, skill_hash: str, skill_type: str, mode: str, preflight: dict, runtime: str) -> Path:
-    root = Path(os.environ.get("SKILLSENTRY_SESSION_ROOT", "")).expanduser()
-    if not str(root):
-        root = Path.home() / ".claude" / "skills" / "SkillSentry" / "sessions"
+    root = session_root()
     base = root / skill_name
     base.mkdir(parents=True, exist_ok=True)
     today = datetime.now().strftime("%Y-%m-%d")
@@ -717,10 +766,13 @@ def run_profile_local(args) -> tuple[int, dict]:
         plan = build_profile_plan("local")
         reuse_forecast = None
         if args.reuse_session:
-            session_dir = Path(args.reuse_session).expanduser()
-            if not session_dir.exists():
-                return 2, profile_payload("local", "ERROR", preflight=preflight, error=f"reuse session not found: {session_dir}", timings=timings.snapshot())
-            reuse_forecast = local_dry_run_reuse(session_dir, cases_file, args, preflight)
+            if args.reuse_session == "auto":
+                reuse_forecast = find_auto_reuse_session(args, preflight, cases_file)
+            else:
+                session_dir = Path(args.reuse_session).expanduser()
+                if not session_dir.exists():
+                    return 2, profile_payload("local", "ERROR", preflight=preflight, error=f"reuse session not found: {session_dir}", timings=timings.snapshot())
+                reuse_forecast = local_dry_run_reuse(session_dir, cases_file, args, preflight)
         payload = profile_payload(
             "local",
             "OK",
@@ -733,9 +785,24 @@ def run_profile_local(args) -> tuple[int, dict]:
         )
         return 0, payload
 
+    auto_reuse = None
     try:
         with timings.phase("session"):
-            session_dir = resolve_local_session(args, preflight)
+            if args.reuse_session == "auto":
+                auto_reuse = find_auto_reuse_session(args, preflight, cases_file)
+                if auto_reuse.get("selected") and auto_reuse.get("session_dir"):
+                    session_dir = Path(str(auto_reuse["session_dir"]))
+                else:
+                    session_dir = init_session(
+                        preflight["skill_dir_name"],
+                        preflight["skill_hash"],
+                        preflight["skill_type"],
+                        args.mode,
+                        preflight,
+                        preflight.get("runtime", args.runtime),
+                    )
+            else:
+                session_dir = resolve_local_session(args, preflight)
     except FileNotFoundError as exc:
         return 2, profile_payload("local", "ERROR", preflight=preflight, error=str(exc), timings=timings.snapshot())
     with timings.phase("session_metadata"):
@@ -860,6 +927,7 @@ def run_profile_local(args) -> tuple[int, dict]:
         "local",
         "OK" if grader.get("status") == "OK" else "ERROR",
         session_dir=str(session_dir),
+        auto_reuse=auto_reuse,
         preflight=preflight,
         cases=prepared,
         executor=executor,

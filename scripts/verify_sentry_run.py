@@ -111,7 +111,7 @@ def run_profile(
     skill: Path | None = None,
     cases: Path | None = None,
     session: Path | None = None,
-    reuse_session: Path | None = None,
+    reuse_session: Path | str | None = None,
     output_dir: Path | None = None,
     force_executor: bool = False,
     force_grader: bool = False,
@@ -299,6 +299,20 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     session = load_json(session_dir / "session.json")
     if session.get("cases", {}).get("reused") is not True:
         errors.append("local reuse should write session.cases.reused=true")
+
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session="auto")
+    if completed.returncode != 0:
+        errors.append(f"local auto reuse exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    after = fake_count(count_file)
+    if after != before:
+        errors.append(f"local auto reuse should not call fake claude again: before={before}, after={after}")
+    auto_payload = json.loads(completed.stdout)
+    if auto_payload.get("auto_reuse", {}).get("session_dir") != str(session_dir):
+        errors.append("local auto reuse should select the matching latest session")
+    if auto_payload.get("executor", {}).get("reused") is not True or auto_payload.get("grader", {}).get("reused") is not True:
+        errors.append("local auto reuse should reuse executor and grader")
     text_completed = run_profile(root, env, "local", skill=skill, cases=cases, reuse_session=session_dir, output_format="text")
     if text_completed.returncode != 0:
         errors.append(f"local reuse text exited {text_completed.returncode}: {text_completed.stderr.strip()} {text_completed.stdout.strip()}")
