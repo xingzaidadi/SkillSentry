@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import sentry_artifacts
+import sentry_run_summary
 import sentry_reuse
 
 
@@ -123,99 +124,23 @@ def summarize_reuse_decisions(reuse_decisions: list[dict]) -> dict:
 
 
 def timing_from_eval_result(path: Path) -> tuple[dict, dict]:
-    payload = load_json(path)
-    return _as_dict(payload.get("timings")), {
-        "source": str(path),
-        "kind": "eval_result",
-        "verdict": payload.get("verdict"),
-        "status": payload.get("status"),
-        "artifacts": _as_dict(payload.get("artifacts")),
-    }
+    summary = sentry_run_summary.from_eval_result(path)
+    return summary.timings, summary.meta
 
 
 def timing_from_session(path: Path) -> tuple[dict, dict]:
-    session_file = path / "session.json" if path.is_dir() else path
-    session = load_json(session_file)
-    timing = _as_dict(session.get("ci_timing"))
-    steps = _as_list(session.get("ci_step_timings"))
-    phases = _as_list(session.get("ci_phase_timings"))
-    run_result = session_file.parent / "sentry-run-result.json"
-    if not timing and not steps and not phases and run_result.exists():
-        return timing_from_sentry_run_result(run_result, load_json(run_result))
-    return {
-        "total_ms": timing.get("total_ms"),
-        "steps": steps,
-        "phases": phases,
-        "failed_steps": timing.get("failed_steps", []),
-    }, {
-        "source": str(session_file),
-        "kind": "session",
-        "skill": session.get("skill"),
-        "mode": session.get("mode"),
-        "last_step": session.get("last_step"),
-    }
+    summary = sentry_run_summary.from_session(path)
+    return summary.timings, summary.meta
 
 
 def timing_from_sentry_run_result(path: Path, payload: dict) -> tuple[dict, dict]:
-    timings = _as_dict(payload.get("timings"))
-    phases_ms = _as_dict(timings.get("phases_ms"))
-    phases = [
-        {"phase": str(name), "status": "OK", "duration_ms": _milliseconds(duration)}
-        for name, duration in phases_ms.items()
-        if _milliseconds(duration) is not None
-    ]
-    reuse_summary = _as_dict(payload.get("reuse_summary"))
-    reuse_decisions = _as_list(reuse_summary.get("steps"))
-    for key in ("executor", "grader"):
-        section = _as_dict(payload.get(key))
-        if not section:
-            continue
-        reuse = _as_dict(section.get("reuse"))
-        if any(item.get("step") == (section.get("step") or key) for item in reuse_decisions):
-            continue
-        reuse_decisions.append(
-            {
-                "step": section.get("step") or key,
-                "reused": section.get("reused"),
-                "reason": reuse.get("reason"),
-                "reusable": reuse.get("reusable"),
-            }
-        )
-    if not reuse_summary and reuse_decisions:
-        reuse_summary = summarize_reuse_decisions(reuse_decisions)
-    return {
-        "total_ms": timings.get("total_ms"),
-        "steps": [],
-        "phases": phases,
-        "failed_steps": [],
-    }, {
-        "source": str(path),
-        "kind": "sentry_run_result",
-        "profile": payload.get("profile"),
-        "status": payload.get("status"),
-        "session_dir": payload.get("session_dir"),
-        "reuse_summary": reuse_summary,
-        "reuse_decisions": reuse_decisions,
-    }
+    summary = sentry_run_summary.from_sentry_run_result(path, payload)
+    return summary.timings, summary.meta
 
 
 def load_timing(path: Path) -> tuple[dict, dict]:
-    if path.is_dir() or path.name == "session.json":
-        return timing_from_session(path)
-    payload = load_json(path)
-    if "profile" in payload and "timings" in payload:
-        return timing_from_sentry_run_result(path, payload)
-    if "timings" in payload:
-        return _as_dict(payload.get("timings")), {
-            "source": str(path),
-            "kind": "eval_result",
-            "verdict": payload.get("verdict"),
-            "status": payload.get("status"),
-            "artifacts": _as_dict(payload.get("artifacts")),
-        }
-    if "ci_step_timings" in payload or "ci_timing" in payload:
-        return timing_from_session(path)
-    raise ValueError(f"unsupported timing input: {path}")
+    summary = sentry_run_summary.load(path)
+    return summary.timings, summary.meta
 
 
 def sorted_items(items: list, name_key: str) -> list[dict]:
@@ -228,41 +153,7 @@ def sorted_items(items: list, name_key: str) -> list[dict]:
 
 
 def resolve_session_dir(input_path: Path, meta: dict) -> Path | None:
-    if meta.get("kind") == "session":
-        source = Path(str(meta.get("source") or ""))
-        if source.name == "session.json":
-            return source.parent
-        return source if source.is_dir() else None
-    if meta.get("kind") == "sentry_run_result":
-        session_dir = meta.get("session_dir")
-        if isinstance(session_dir, str) and session_dir:
-            raw_candidate = Path(session_dir)
-            candidates = [raw_candidate]
-            if not raw_candidate.is_absolute():
-                candidates.extend([input_path.parent / raw_candidate, Path.cwd() / raw_candidate])
-            for candidate in candidates:
-                if (candidate / "session.json").exists():
-                    return candidate
-        if (input_path.parent / "session.json").exists():
-            return input_path.parent
-
-    artifacts = _as_dict(meta.get("artifacts"))
-    session_report = artifacts.get("session_report_html")
-    if isinstance(session_report, str) and session_report:
-        report_path = Path(session_report)
-        candidates = [report_path]
-        if not report_path.is_absolute():
-            candidates.append(input_path.parent / report_path)
-            candidates.append(Path.cwd() / report_path)
-        for candidate in candidates:
-            if candidate.exists() and candidate.name == "report.html":
-                session_dir = candidate.parent
-                if (session_dir / "session.json").exists():
-                    return session_dir
-
-    if (input_path.parent / "session.json").exists():
-        return input_path.parent
-    return None
+    return sentry_run_summary.resolve_session_dir(input_path, meta)
 
 
 def load_executor_summary(session_dir: Path, variant: str) -> dict:

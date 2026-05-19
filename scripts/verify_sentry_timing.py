@@ -14,6 +14,7 @@ import sentry_timing
 import sentry_state
 import sentry_case_identity
 import sentry_artifacts
+import sentry_run_summary
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -383,6 +384,9 @@ def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
     session_payload = sentry_timing.analyze(session_dir, top=2)
     if session_payload.get("source", {}).get("kind") != "sentry_run_result":
         errors.append("local session dir should fall back to sentry-run-result.json timing")
+    run_summary = sentry_run_summary.load(session_dir)
+    if run_summary.kind != "sentry_run_result" or run_summary.session_dir != session_dir:
+        errors.append("RunSummary should normalize local session dir fallback to sentry-run-result")
     if session_payload.get("top_phases", [{}])[0].get("phase") != "executor":
         errors.append("local session dir fallback should preserve profile phase timings")
     run_result_without_session_dir = dict(run_result)
