@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the deterministic self-test GitHub Actions workflow template stays lightweight."""
+"""Verify the deterministic self-test GitHub Actions workflow stays lightweight."""
 
 from __future__ import annotations
 
@@ -15,16 +15,26 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 ROOT = Path(__file__).resolve().parent.parent
-WORKFLOW = ROOT / "references" / "workflows" / "skillsentry-self-test.yml"
+WORKFLOW_TEMPLATE = ROOT / "references" / "workflows" / "skillsentry-self-test.yml"
+LIVE_WORKFLOW = ROOT / ".github" / "workflows" / "skillsentry-self-test.yml"
 EVAL_WORKFLOW = ROOT / ".github" / "workflows" / "skill-eval.yml"
 
 
 def verify() -> tuple[bool, list[str]]:
     errors: list[str] = []
-    if not WORKFLOW.exists():
-        return False, [f"self-test workflow template missing: {WORKFLOW.relative_to(ROOT)}"]
+    if not WORKFLOW_TEMPLATE.exists():
+        errors.append(f"self-test workflow template missing: {WORKFLOW_TEMPLATE.relative_to(ROOT)}")
+    if not LIVE_WORKFLOW.exists():
+        errors.append(f"live self-test workflow missing: {LIVE_WORKFLOW.relative_to(ROOT)}")
+    if errors:
+        return False, errors
 
-    text = WORKFLOW.read_text(encoding="utf-8")
+    template_text = WORKFLOW_TEMPLATE.read_text(encoding="utf-8")
+    live_text = LIVE_WORKFLOW.read_text(encoding="utf-8")
+    if live_text != template_text:
+        errors.append("live self-test workflow should match references/workflows/skillsentry-self-test.yml")
+
+    text = live_text
     required = [
         "name: SkillSentry Self-Test",
         "workflow_dispatch:",
@@ -50,7 +60,7 @@ def verify() -> tuple[bool, list[str]]:
     ]
     for marker in forbidden:
         if marker in text:
-            errors.append(f"self-test workflow template should not contain {marker!r}")
+            errors.append(f"self-test workflow should not contain {marker!r}")
 
     if EVAL_WORKFLOW.exists():
         eval_text = EVAL_WORKFLOW.read_text(encoding="utf-8")
@@ -61,7 +71,7 @@ def verify() -> tuple[bool, list[str]]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Verify SkillSentry self-test workflow template")
+    parser = argparse.ArgumentParser(description="Verify SkillSentry self-test workflow")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     return parser.parse_args()
 

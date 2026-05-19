@@ -1,0 +1,51 @@
+name: SkillSentry Self-Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'references/**'
+      - 'README.md'
+      - 'SKILL.md'
+      - '.github/workflows/skillsentry-self-test.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'references/**'
+      - 'README.md'
+      - 'SKILL.md'
+      - '.github/workflows/skillsentry-self-test.yml'
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Run full deterministic self-check'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-self-test:
+    name: Deterministic self-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run deterministic self-check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.full }}" = "true" ]; then
+            python scripts/verify_deterministic.py --full --format json
+          else
+            python scripts/verify_deterministic.py --format json
+          fi

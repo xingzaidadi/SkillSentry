@@ -401,7 +401,7 @@ self-check:
 ```text
 python scripts/verify_deterministic.py --format json
   core checks: contract lint, executor/grader/run/local dogfood, report, timing,
-  diagnostics, exit contract, Checks, self-test workflow template, dashboard
+  diagnostics, exit contract, Checks, self-test workflow, dashboard
 
 python scripts/verify_deterministic.py --full --format json
   core checks plus sentry_run local reuse mutation checks, preflight, case
@@ -421,7 +421,7 @@ automatically.
 
 ## CI Self-Test Split
 
-SkillSentry should keep two different GitHub Actions responsibilities:
+SkillSentry keeps two different GitHub Actions responsibilities:
 
 - `.github/workflows/skill-eval.yml` evaluates changed user skills and should
   keep using the real SkillSentry CI contract.
@@ -444,15 +444,19 @@ manual workflow_dispatch with full=true:
 ```
 
 `scripts/verify_self_test_workflow.py` guards this split. It checks that the
-self-test workflow template in `references/workflows/skillsentry-self-test.yml`
-calls the deterministic aggregate, includes the intended path triggers, uses
-Python 3.11, and does not introduce `--real`, Claude CLI install,
-`ANTHROPIC_API_KEY`, or `sentry_ci.py`.
+live self-test workflow and the template in
+`references/workflows/skillsentry-self-test.yml` match, call the deterministic
+aggregate, include the intended path triggers, use Python 3.11, and do not
+introduce `--real`, Claude CLI install, `ANTHROPIC_API_KEY`, or `sentry_ci.py`.
 
 GitHub rejected the first attempt to push the live `.github/workflows/` file
-because the current OAuth credential does not have `workflow` scope. Keep the
-template in the repository until a maintainer with that scope copies it into
-`.github/workflows/skillsentry-self-test.yml`.
+because the current OAuth credential did not have `workflow` scope. The
+workaround was to commit the template under `references/workflows/` first, then
+enable the live workflow after reauthenticating with `workflow` scope.
+
+After reauthenticating GitHub CLI with `workflow` scope, the live workflow was
+enabled and the verifier was tightened to fail if the live file and template
+diverge.
 
 ## When Continuing
 
