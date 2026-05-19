@@ -31,6 +31,7 @@ CORE_CHECKS: list[list[str]] = [
     ["verify_ci_diagnostics.py", "--format", "json"],
     ["verify_ci_exit_contract.py", "--format", "json"],
     ["verify_ci_checks_integration.py", "--format", "json"],
+    ["verify_self_test_workflow.py", "--format", "json"],
     ["verify_dashboard.py", "--format", "json"],
 ]
 

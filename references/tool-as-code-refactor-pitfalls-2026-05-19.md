@@ -401,7 +401,7 @@ self-check:
 ```text
 python scripts/verify_deterministic.py --format json
   core checks: contract lint, executor/grader/run/local dogfood, report, timing,
-  diagnostics, exit contract, Checks, dashboard
+  diagnostics, exit contract, Checks, self-test workflow template, dashboard
 
 python scripts/verify_deterministic.py --full --format json
   core checks plus preflight, case feasibility, failure report, and all CI modes
@@ -410,13 +410,49 @@ python scripts/verify_deterministic.py --full --format json
 Keep historical gate fixtures separate because they depend on archived session
 directories that are not available in a clean checkout.
 
+## CI Self-Test Split
+
+SkillSentry should keep two different GitHub Actions responsibilities:
+
+- `.github/workflows/skill-eval.yml` evaluates changed user skills and should
+  keep using the real SkillSentry CI contract.
+- `.github/workflows/skillsentry-self-test.yml` verifies SkillSentry's own
+  deterministic regression suite when `scripts/`, `references/`, `README.md`,
+  `SKILL.md`, or the workflow itself changes.
+
+Do not put the self-check suite into `skill-eval.yml`. That workflow is the
+product path for evaluating user skills, and mixing internal tests into it makes
+runtime, permissions, secrets, and failure meaning harder to reason about.
+
+The self-test workflow deliberately avoids real LLM execution:
+
+```text
+push/pull_request:
+  python scripts/verify_deterministic.py --format json
+
+manual workflow_dispatch with full=true:
+  python scripts/verify_deterministic.py --full --format json
+```
+
+`scripts/verify_self_test_workflow.py` guards this split. It checks that the
+self-test workflow template in `references/workflows/skillsentry-self-test.yml`
+calls the deterministic aggregate, includes the intended path triggers, uses
+Python 3.11, and does not introduce `--real`, Claude CLI install,
+`ANTHROPIC_API_KEY`, or `sentry_ci.py`.
+
+GitHub rejected the first attempt to push the live `.github/workflows/` file
+because the current OAuth credential does not have `workflow` scope. Keep the
+template in the repository until a maintainer with that scope copies it into
+`.github/workflows/skillsentry-self-test.yml`.
+
 ## When Continuing
 
 Safe next steps:
 
-- Add more focused tests around CLI help and compatibility facade imports.
 - Add sample output snapshots for the documented entrypoints if text output
   starts drifting again.
+- Add narrow fixture tests for future extraction slices before changing shared
+  contracts.
 
 Avoid for now:
 
