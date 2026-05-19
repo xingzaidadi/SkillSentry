@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import sentry_diagnostics
 from sentry_gate import build_gate
-from sentry_profile_runtime import ProfileTimings, profile_payload
+from sentry_profile_runtime import ProfileTimings, profile_payload, save_json
 import sentry_report
-
-
-def save_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def run_profile_debug(args) -> tuple[int, dict]:

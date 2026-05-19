@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 def utc_now() -> str:
@@ -39,3 +41,8 @@ def profile_payload(profile: str, status: str, **extra) -> dict:
     }
     payload.update(extra)
     return payload
+
+
+def save_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

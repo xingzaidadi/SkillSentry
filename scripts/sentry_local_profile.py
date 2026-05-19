@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import sentry_case_prepare
@@ -10,15 +9,10 @@ import sentry_diagnostics
 from sentry_gate import build_gate
 import sentry_light_profiles
 import sentry_local_steps
-from sentry_profile_runtime import ProfileTimings, profile_payload, utc_now
+from sentry_profile_runtime import ProfileTimings, profile_payload, save_json, utc_now
 import sentry_profile_state
 import sentry_reuse_core
 import sentry_run_plan
-
-
-def save_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def local_dry_run_reuse(session_dir: Path, cases_file: Path, args, preflight: dict) -> dict:

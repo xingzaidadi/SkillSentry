@@ -3,20 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import json
-from pathlib import Path
 
 import sentry_case_prepare
 import sentry_preflight
-from sentry_profile_runtime import ProfileTimings, profile_payload, utc_now
+from sentry_profile_runtime import ProfileTimings, profile_payload, save_json, utc_now
 import sentry_profile_state
 import sentry_reuse_core
 import sentry_run_plan
-
-
-def save_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def run_preflight(args) -> tuple[int, dict]:

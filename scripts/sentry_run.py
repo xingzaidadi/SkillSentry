@@ -28,7 +28,7 @@ import sentry_delegated_ci
 import sentry_light_profiles
 import sentry_local_profile
 import sentry_preflight
-from sentry_profile_runtime import ProfileTimings, profile_payload, utc_now
+from sentry_profile_runtime import ProfileTimings, profile_payload, save_json as profile_save_json, utc_now
 import sentry_profile_state
 import sentry_reuse_core
 import sentry_run_output
@@ -42,8 +42,7 @@ PROFILES = sorted(LIGHT_PROFILES | HEAVY_PROFILES)
 
 
 def save_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    profile_save_json(path, payload)
 
 
 def load_json(path: Path):
