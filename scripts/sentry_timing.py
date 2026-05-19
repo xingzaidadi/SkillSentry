@@ -614,7 +614,10 @@ def main() -> int:
             for variant in _as_list(executor.get("variants")):
                 duration = _as_dict(variant.get("duration_ms"))
                 missing = variant.get("missing_cases", 0)
+                missing_ids = _as_list(variant.get("missing_case_ids"))
                 missing_suffix = f" missing={missing}" if missing else ""
+                if missing_ids:
+                    missing_suffix += f" missing_ids={','.join(str(item) for item in missing_ids)}"
                 print(
                     f"- {variant.get('variant')}: timed {variant.get('timed')}/{variant.get('total')} "
                     f"avg={duration.get('avg')}ms p50={duration.get('p50')}ms "
@@ -634,7 +637,10 @@ def main() -> int:
         if grader.get("available"):
             duration = _as_dict(grader.get("duration_ms"))
             missing = grader.get("missing_cases", 0)
+            missing_ids = _as_list(grader.get("missing_case_ids"))
             missing_suffix = f" missing={missing}" if missing else ""
+            if missing_ids:
+                missing_suffix += f" missing_ids={','.join(str(item) for item in missing_ids)}"
             print(
                 "grader timing: "
                 f"timed {grader.get('timed')}/{grader.get('total')} "

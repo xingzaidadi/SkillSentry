@@ -405,6 +405,8 @@ def verify_cli(root: Path, errors: list[str]) -> None:
         errors.append(f"sentry_timing.py text missing cases exited {text_missing.returncode}: {text_missing.stderr.strip()} {text_missing.stdout.strip()}")
     if "missing=1" not in text_missing.stdout:
         errors.append("text output should include missing current case count")
+    if "missing_ids=eval-2" not in text_missing.stdout:
+        errors.append("text output should include missing current case id sample")
     if "timing hints:" not in text_missing.stdout:
         errors.append("text output should include timing hints for missing current cases")
 
