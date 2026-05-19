@@ -485,6 +485,61 @@ GitHub emitted a Node.js 20 deprecation annotation for `actions/checkout@v4` and
 before GitHub's Node 24 runner deadline, but do not treat it as a SkillSentry
 contract issue.
 
+## Second Dogfood: Codegen Skill
+
+A second real dogfood used `java-codegen` to avoid validating only the Obsidian
+Markdown happy path. The case asked the skill to turn an oral SAP workflow into
+a SOP draft, without generating Java project files:
+
+```text
+skill: java-codegen
+cases: 1
+assertions: exact_match for 系统 / 操作步骤 / 待确认
+cases file: C:\Users\MI\Desktop\SkillSentry_Dogfood\java-codegen-evals.json
+session root: C:\Users\MI\Desktop\SkillSentry_Dogfood\sessions
+```
+
+The lint path passed with no case warnings. The first local run proved executor
+health: Claude CLI produced a SOP response successfully in about 30 seconds, and
+all local artifacts were written. Grading initially failed because the Anthropic
+SDK account returned an insufficient-balance error. That is an environment
+dependency, not an executor failure.
+
+The recovery path was to enable the existing Claude CLI grader fallback:
+
+```text
+SKILLSENTRY_CI_LLM_FALLBACK=claude
+python scripts/sentry_run.py --profile local --reuse-session auto --force-grader ...
+```
+
+Because `--force-grader` intentionally prevents full reuse selection, the run
+created a fresh session and reran executor + grader. With CLI fallback, the
+result passed:
+
+```text
+session: java-codegen\2026-05-19_003
+exact_match: 3/3
+grade: S
+verdict: PASS
+executor duration: about 36.7s
+grader duration: about 9.1s
+```
+
+The final reuse run selected that session automatically and reused every heavy
+step:
+
+```text
+auto_reuse: selected=true, reason=matched
+reused_steps: prepare_cases, executor-with, grader-report
+rerun_steps: []
+profile timing: about 29.6ms
+```
+
+Lesson: local dogfood should record both runtime and grader environment facts.
+When SDK balance is unavailable but Claude CLI is authenticated, set
+`SKILLSENTRY_CI_LLM_FALLBACK=claude` for real smoke dogfood instead of treating
+the skill output as failed.
+
 ## When Continuing
 
 Safe next steps:
