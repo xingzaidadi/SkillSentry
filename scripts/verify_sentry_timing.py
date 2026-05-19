@@ -207,6 +207,14 @@ def verify_session(root: Path, errors: list[str]) -> None:
     if not any("case_id without id" in hint for hint in case_id_payload.get("timing_hints", [])):
         errors.append("case_id-only timing should explain eval-N fallback")
 
+    case_id_missing_executor_dir = root / "case-id-missing-executor-session"
+    case_id_missing_executor_dir.mkdir()
+    sentry_state.save_session(case_id_missing_executor_dir, {"skill": "timing-fixture", "mode": "local"})
+    save_json(case_id_missing_executor_dir / "evals.json", make_case_id_cases())
+    case_id_missing_payload = sentry_timing.analyze(case_id_missing_executor_dir, top=5)
+    if case_id_missing_payload.get("executor_timing", {}).get("fallback_case_ids") != ["case-1", "case-2"]:
+        errors.append("missing executor timing should preserve case_id fallback context")
+
     partial_executor_dir = root / "partial-executor-session"
     partial_executor_dir.mkdir()
     sentry_state.save_session(partial_executor_dir, {"skill": "timing-fixture", "mode": "local"})

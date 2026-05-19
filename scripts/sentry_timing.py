@@ -398,6 +398,7 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
             "reason": "executor_results_unavailable",
             "session_dir": str(session_dir),
             "expected_cases": len(case_ids) if case_ids else None,
+            "fallback_case_ids": _as_list(case_info.get("fallback_case_ids")),
         }
 
     slowest_cases = []
