@@ -80,6 +80,13 @@ def make_duplicate_cases() -> list[dict]:
     ]
 
 
+def make_case_id_cases() -> list[dict]:
+    return [
+        {"case_id": "case-1", "prompt": "fast"},
+        {"case_id": "case-2", "prompt": "slow"},
+    ]
+
+
 def verify_eval_result(root: Path, errors: list[str]) -> None:
     session_dir = root / "eval-result-session"
     session_dir.mkdir()
@@ -185,6 +192,18 @@ def verify_session(root: Path, errors: list[str]) -> None:
         errors.append("duplicate case ids should not inflate executor expected case count")
     if duplicate_payload.get("grader_timing", {}).get("expected_cases") != 2:
         errors.append("duplicate case ids should not inflate grader expected case count")
+
+    case_id_dir = root / "case-id-session"
+    case_id_dir.mkdir()
+    sentry_state.save_session(case_id_dir, {"skill": "timing-fixture", "mode": "local"})
+    save_json(case_id_dir / "evals.json", make_case_id_cases())
+    save_json(case_id_dir / "executor_results.json", {"results": [{"eval_id": "case-1", "status": "success", "duration": 0.2}]})
+    save_json(case_id_dir / "case-1" / "grading.json", make_grading_payload("case-1", 300.0))
+    case_id_payload = sentry_timing.analyze(case_id_dir, top=5)
+    if case_id_payload.get("executor_timing", {}).get("expected_cases") != 2:
+        errors.append("case_id cases should count as current executor cases")
+    if case_id_payload.get("grader_timing", {}).get("missing_case_ids") != ["case-2"]:
+        errors.append("case_id cases should report missing grader case ids")
 
     partial_executor_dir = root / "partial-executor-session"
     partial_executor_dir.mkdir()
