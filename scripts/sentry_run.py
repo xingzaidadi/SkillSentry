@@ -23,13 +23,13 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 import sentry_artifacts
 import sentry_case_prepare
+import sentry_debug_profile
 import sentry_delegated_ci
 import sentry_diagnostics
 import sentry_grader
 import sentry_preflight
 from sentry_profile_runtime import ProfileTimings, profile_payload, utc_now
 import sentry_profile_state
-import sentry_report
 import sentry_reuse_core
 import sentry_run_output
 import sentry_run_plan
@@ -256,39 +256,7 @@ def run_profile_plan(args) -> tuple[int, dict]:
 
 
 def run_profile_debug(args) -> tuple[int, dict]:
-    timings = ProfileTimings()
-    if not args.session_dir:
-        return 2, profile_payload("debug", "ERROR", error="--session-dir is required for profile=debug", timings=timings.snapshot())
-    session_dir = Path(args.session_dir).expanduser()
-    if not session_dir.exists():
-        return 2, profile_payload("debug", "ERROR", error=f"session dir not found: {session_dir}", timings=timings.snapshot())
-
-    with timings.phase("gate"):
-        gate = build_gate(session_dir)
-    save_json(session_dir / "gate-result.json", gate)
-    with timings.phase("diagnostics"):
-        diagnostics = sentry_diagnostics.collect_diagnostics(session_dir, gate)
-    save_json(session_dir / "diagnostics.json", diagnostics)
-    with timings.phase("report"):
-        report = sentry_report.ensure_session_report(
-            session_dir,
-            gate,
-            title="SkillSentry Debug Report",
-            generated_by="sentry_run.py",
-            footer="Debug profile recalculates gate, diagnostics, and report from existing artifacts.",
-            replace_generated_only=False,
-        )
-    payload = profile_payload(
-        "debug",
-        "OK",
-        session_dir=str(session_dir),
-        gate=gate,
-        diagnostics=diagnostics,
-        artifacts={"report_html": str(report), "diagnostics_json": str(session_dir / "diagnostics.json")},
-        timings=timings.snapshot(),
-    )
-    save_json(session_dir / "sentry-run-result.json", payload)
-    return 0, payload
+    return sentry_debug_profile.run_profile_debug(args)
 
 
 def run_profile_local(args) -> tuple[int, dict]:
