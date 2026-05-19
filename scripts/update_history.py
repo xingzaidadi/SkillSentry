@@ -43,7 +43,7 @@ def collect_grading_results(session_dir: Path) -> list[dict]:
         grading_file = eval_dir / "grading.json"
         if grading_file.exists():
             try:
-                with open(grading_file, encoding="utf-8") as f:
+                with open(grading_file, encoding="utf-8-sig") as f:
                     results.append({"eval": eval_dir.name, "data": json.load(f)})
             except json.JSONDecodeError:
                 pass
@@ -83,7 +83,7 @@ def compute_entry(grading_results: list[dict], mode: str, session_dir: Path, ski
     rules_cache = sentry_base / "inputs" / skill / "rules.cache.json"
     if rules_cache.exists():
         try:
-            with open(rules_cache, encoding="utf-8") as fp:
+            with open(rules_cache, encoding="utf-8-sig") as fp:
                 skill_hash = json.load(fp).get("skill_hash", "")[:8]
         except Exception:
             pass
@@ -127,7 +127,7 @@ def load_history(history_file: Path) -> list[dict]:
     if not history_file.exists():
         return []
     try:
-        with open(history_file, encoding="utf-8") as f:
+        with open(history_file, encoding="utf-8-sig") as f:
             data = json.load(f)
             return data if isinstance(data, list) else []
     except (json.JSONDecodeError, IOError):

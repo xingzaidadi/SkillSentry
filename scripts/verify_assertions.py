@@ -225,7 +225,7 @@ def main():
         print(f"ERROR: transcript 文件不存在或为空: {args.transcript}", file=sys.stderr)
         sys.exit(1)
 
-    assertions_raw = json.loads(Path(args.assertions).read_text(encoding="utf-8"))
+    assertions_raw = json.loads(Path(args.assertions).read_text(encoding="utf-8-sig"))
     tool_calls     = extract_tool_calls(transcript)
 
     results = []

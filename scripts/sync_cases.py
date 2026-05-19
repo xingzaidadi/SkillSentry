@@ -46,7 +46,7 @@ def load_config(config_path: str | None) -> dict:
         print(f"❌ 配置文件不存在：{p}")
         print("请先配置 config.json，参考指南")
         sys.exit(1)
-    with open(p, "r", encoding="utf-8") as f:
+    with open(p, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -104,7 +104,7 @@ def get_tenant_token(cfg: dict) -> str:
     # 检查缓存
     if TOKEN_CACHE.exists():
         try:
-            with open(TOKEN_CACHE, "r") as f:
+            with open(TOKEN_CACHE, "r", encoding="utf-8-sig") as f:
                 cached = json.load(f)
             if cached.get("expire", 0) > time.time() + 60:
                 return cached["token"]
@@ -341,7 +341,7 @@ def cmd_push_cases(args):
     if not evals_file.exists():
         print(f"❌ 找不到 {evals_file}")
         sys.exit(1)
-    with open(evals_file, "r", encoding="utf-8") as f:
+    with open(evals_file, "r", encoding="utf-8-sig") as f:
         evals = json.load(f)
 
     eval_cases = evals if isinstance(evals, list) else evals.get("evals", evals.get("cases", []))
@@ -352,7 +352,7 @@ def cmd_push_cases(args):
         if item.is_dir() and item.name.startswith("eval-"):
             grading_file = item / "grading.json"
             if grading_file.exists():
-                with open(grading_file, "r", encoding="utf-8") as f:
+                with open(grading_file, "r", encoding="utf-8-sig") as f:
                     grading_map[item.name] = json.load(f)
 
     # 拉取 Bitable 中已有的 case_id
@@ -437,7 +437,7 @@ def cmd_push_run(args):
     if not evals_file.exists():
         print(f"❌ 找不到 {evals_file}")
         sys.exit(1)
-    with open(evals_file, "r", encoding="utf-8") as f:
+    with open(evals_file, "r", encoding="utf-8-sig") as f:
         evals = json.load(f)
     eval_cases = evals if isinstance(evals, list) else evals.get("evals", evals.get("cases", []))
 
@@ -455,7 +455,7 @@ def cmd_push_run(args):
         is_golden = case.get("priority") == "P0" or case.get("source") == "golden"
 
         if grading_file.exists():
-            with open(grading_file, "r", encoding="utf-8") as f:
+            with open(grading_file, "r", encoding="utf-8-sig") as f:
                 grading = json.load(f)
             verdict = grading.get("verdict") or grading.get("result", "")
             is_pass = verdict.upper() in ("PASS", "CONDITIONAL PASS", "TRUE")
@@ -508,7 +508,7 @@ def cmd_push_run(args):
     skill_hash = ""
     skill_label = ""
     if baseline_file.exists():
-        with open(baseline_file, "r", encoding="utf-8") as f:
+        with open(baseline_file, "r", encoding="utf-8-sig") as f:
             baseline = json.load(f)
         skill_hash = baseline.get("skill_hash", "")
         skill_label = baseline.get("skill_label", "")
@@ -594,7 +594,7 @@ def cmd_init(args):
         print("请先运行 pull 或手动准备 cases.cache.json")
         sys.exit(1)
 
-    with open(cache_file, "r", encoding="utf-8") as f:
+    with open(cache_file, "r", encoding="utf-8-sig") as f:
         cases = json.load(f)
 
     if not cases:

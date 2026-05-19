@@ -10,7 +10,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def load_json(path):
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 def find_session_dir(skill_name, sessions_base=None):

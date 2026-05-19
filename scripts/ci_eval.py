@@ -76,7 +76,7 @@ def collect_grading_results(session_dir: Path) -> list[dict]:
         grading_file = eval_dir / "grading.json"
         if grading_file.exists():
             try:
-                with open(grading_file, encoding="utf-8") as f:
+                with open(grading_file, encoding="utf-8-sig") as f:
                     results.append({"eval": eval_dir.name, "data": json.load(f)})
             except json.JSONDecodeError:
                 print(f"⚠️  {grading_file} 解析失败，跳过", file=sys.stderr)

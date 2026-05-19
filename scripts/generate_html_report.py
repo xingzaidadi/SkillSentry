@@ -193,7 +193,7 @@ MCP_STATUS_COLOR = {"success": "#788c5d", "error": "#c44", "warn": "#d97757"}
 def load_json(path):
     if os.path.exists(path):
         try:
-            return json.load(open(path, encoding="utf-8"))
+            return json.load(open(path, encoding="utf-8-sig"))
         except Exception:
             return None
     return None
