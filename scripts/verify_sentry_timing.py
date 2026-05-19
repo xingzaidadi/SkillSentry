@@ -13,6 +13,7 @@ from pathlib import Path
 import sentry_timing
 import sentry_state
 import sentry_case_identity
+import sentry_artifacts
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -103,6 +104,39 @@ def verify_case_identity(errors: list[str]) -> None:
     wrapped_identities = sentry_case_identity.identities_from_payload(wrapped)
     if sentry_case_identity.case_ids(wrapped_identities) != ["case-a", "eval-2"]:
         errors.append("case identity should support wrapped case payloads")
+
+
+def verify_artifact_registry(root: Path, errors: list[str]) -> None:
+    wrapped_dir = root / "registry-wrapped-session"
+    wrapped_dir.mkdir()
+    save_json(wrapped_dir / "evals.json", {"cases": [{"id": "case-a"}, {"case_id": "logical-b"}]})
+    registry = sentry_artifacts.ArtifactRegistry(wrapped_dir)
+    if registry.case_ids() != ["case-a", "eval-2"]:
+        errors.append("artifact registry should support wrapped case payloads")
+
+    case_id_dir = root / "registry-case-id-session"
+    case_id_dir.mkdir()
+    save_json(case_id_dir / "evals.json", make_case_id_cases())
+    case_id_registry = sentry_artifacts.ArtifactRegistry(case_id_dir)
+    if case_id_registry.case_info() != {"case_ids": ["eval-1", "eval-2"], "fallback_case_ids": ["case-1", "case-2"]}:
+        errors.append("artifact registry should preserve case_id-only fallback context")
+
+    current_dir = root / "registry-current-grading-session"
+    current_dir.mkdir()
+    save_json(current_dir / "evals.json", make_cases())
+    save_json(current_dir / "eval-1" / "grading.json", make_grading_payload("eval-1", 100.0))
+    save_json(current_dir / "eval-stale" / "grading.json", make_grading_payload("eval-stale", 9999.0))
+    current_files = [path.parent.name for path in sentry_artifacts.ArtifactRegistry(current_dir).current_grading_files()]
+    if current_files != ["eval-1"]:
+        errors.append("artifact registry should ignore stale grading files when evals.json exists")
+
+    legacy_dir = root / "registry-legacy-grading-session"
+    legacy_dir.mkdir()
+    save_json(legacy_dir / "eval-1" / "grading.json", make_grading_payload("eval-1", 100.0))
+    save_json(legacy_dir / "without_skill" / "eval-2" / "grading.json", make_grading_payload("eval-2", 9999.0))
+    legacy_files = [path.parent.name for path in sentry_artifacts.ArtifactRegistry(legacy_dir).current_grading_files()]
+    if legacy_files != ["eval-1"]:
+        errors.append("artifact registry legacy grading scan should exclude without_skill artifacts")
 
 
 def verify_eval_result(root: Path, errors: list[str]) -> None:
@@ -484,6 +518,7 @@ def verify() -> tuple[bool, list[str]]:
     verify_case_identity(errors)
     with tempfile.TemporaryDirectory(prefix="skillsentry-timing-verify-") as tmp:
         root = Path(tmp)
+        verify_artifact_registry(root, errors)
         verify_eval_result(root, errors)
         verify_session(root, errors)
         verify_sentry_run_result(root, errors)

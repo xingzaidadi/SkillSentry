@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-import sentry_case_identity
+import sentry_artifacts
 import sentry_reuse
 
 
@@ -266,27 +266,11 @@ def resolve_session_dir(input_path: Path, meta: dict) -> Path | None:
 
 
 def load_executor_summary(session_dir: Path, variant: str) -> dict:
-    filename = "executor_results.json" if variant == "with_skill" else f"executor_{variant}_results.json"
-    path = session_dir / filename
-    payload = load_json(path)
-    if not isinstance(payload, dict):
-        return {}
-    return payload
+    return sentry_artifacts.ArtifactRegistry(session_dir).executor_summary(variant)
 
 
 def current_case_info(session_dir: Path) -> dict:
-    evals_file = session_dir / "evals.json"
-    if not evals_file.exists():
-        return {"case_ids": [], "fallback_case_ids": []}
-    try:
-        payload = load_json(evals_file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"case_ids": [], "fallback_case_ids": []}
-    identities = sentry_case_identity.identities_from_payload(payload)
-    return {
-        "case_ids": sentry_case_identity.case_ids(identities),
-        "fallback_case_ids": sentry_case_identity.fallback_case_ids(identities),
-    }
+    return sentry_artifacts.ArtifactRegistry(session_dir).case_info()
 
 
 def current_case_ids(session_dir: Path) -> list[str]:
@@ -407,18 +391,7 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
 
 
 def find_grading_files(session_dir: Path) -> list[Path]:
-    case_info = current_case_info(session_dir)
-    case_ids = _as_list(case_info.get("case_ids"))
-    if case_ids:
-        files = [session_dir / eval_id / "grading.json" for eval_id in case_ids]
-        return sorted(path for path in files if path.exists())
-
-    files = []
-    for path in session_dir.rglob("grading.json"):
-        if "without_skill" in set(path.parts):
-            continue
-        files.append(path)
-    return sorted(files)
+    return sentry_artifacts.ArtifactRegistry(session_dir).current_grading_files()
 
 
 def grading_duration_ms(payload: dict) -> float | None:
