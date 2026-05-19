@@ -34,6 +34,7 @@ import sentry_preflight
 import sentry_profile_state
 import sentry_report
 import sentry_reuse_core
+import sentry_run_output
 import sentry_run_plan
 import sentry_state
 from sentry_executor import execute_executor_step
@@ -658,69 +659,7 @@ def main() -> int:
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        print(f"sentry run: {payload['status']} | profile: {payload['profile']}")
-        if payload.get("session_dir"):
-            print(f"session: {payload['session_dir']}")
-        timings = payload.get("timings", {})
-        if isinstance(timings, dict) and timings.get("total_ms") is not None:
-            print(f"duration_ms: {timings['total_ms']}")
-        if payload.get("error"):
-            print(f"- {payload['error']}")
-        if payload.get("warning"):
-            print(f"- {payload['warning']}")
-        plan = payload.get("plan")
-        if isinstance(plan, dict) and plan.get("steps"):
-            print("plan:")
-            for item in plan["steps"]:
-                markers = []
-                if item.get("heavy"):
-                    markers.append("heavy")
-                if item.get("requires_llm"):
-                    markers.append("llm")
-                if item.get("requires_network"):
-                    markers.append("network")
-                suffix = f" [{', '.join(markers)}]" if markers else ""
-                print(f"- {item.get('step')}: {item.get('tool')}{suffix}")
-            if plan.get("heavy_steps"):
-                print("heavy steps: " + ", ".join(str(item) for item in plan.get("heavy_steps", [])))
-            if plan.get("network_steps"):
-                print("network steps: " + ", ".join(str(item) for item in plan.get("network_steps", [])))
-        reuse_summary = payload.get("reuse_summary", {})
-        if isinstance(reuse_summary, dict) and reuse_summary.get("steps"):
-            print("reuse:")
-            for item in reuse_summary["steps"]:
-                if not isinstance(item, dict):
-                    continue
-                action = "reused" if item.get("reused") else "reran"
-                details = []
-                if item.get("missing_outputs_count"):
-                    details.append(f"missing_outputs={item.get('missing_outputs_count')}")
-                if item.get("recorded_status") is not None:
-                    details.append(f"recorded_status={item.get('recorded_status')}")
-                if item.get("recorded_type") is not None:
-                    details.append(f"recorded_type={item.get('recorded_type')}")
-                if item.get("expected_input_hash") and item.get("recorded_input_hash"):
-                    details.append("input_hash_changed")
-                if item.get("expected_cases_hash") and item.get("prepared_cases_hash"):
-                    details.append("cases_hash_changed")
-                suffix = f"; {', '.join(details)}" if details else ""
-                print(f"- {item.get('step')}: {action} ({item.get('reason')}{suffix})")
-            hints = reuse_summary.get("hints")
-            if isinstance(hints, list) and hints:
-                print("reuse hints:")
-                for hint in hints:
-                    print(f"- {hint}")
-        reuse_forecast = payload.get("reuse_forecast")
-        if isinstance(reuse_forecast, dict) and isinstance(reuse_forecast.get("summary"), dict):
-            forecast_summary = reuse_forecast["summary"]
-            if forecast_summary.get("steps"):
-                print("reuse forecast:")
-                for item in forecast_summary["steps"]:
-                    action = "would reuse" if item.get("reused") else "would rerun"
-                    print(f"- {item.get('step')}: {action} ({item.get('reason')})")
-        artifacts = payload.get("artifacts", {})
-        if isinstance(artifacts, dict) and artifacts.get("report_html"):
-            print(f"report: {artifacts['report_html']}")
+        print(sentry_run_output.render_text(payload), end="")
     return code
 
 
