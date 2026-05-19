@@ -350,6 +350,34 @@ user-facing side of the refactor:
 The important pattern is that "make the tool feel lighter" is not only a runtime
 optimization. It also means users can see the weight of a run before starting it.
 
+## Dogfood Findings
+
+The `obsidian-markdown` dogfood run exposed two practical issues that the
+deterministic unit-style regression suite did not fully reveal until a real
+Claude CLI run happened:
+
+- Empty `SKILLSENTRY_SESSION_ROOT` must not become `Path(".")`. On Python,
+  `Path("")` means the current working directory, which caused local profile
+  artifacts to appear inside the repository. The fixed default is
+  `~/.claude/data/skill-eval/sessions`, matching preflight and the documented
+  data/code separation contract.
+- SDK-style model names are not always valid Claude CLI names. The local
+  executor uses the Claude CLI, so `claude-sonnet-4-6` is normalized to the CLI
+  alias `sonnet` before subprocess execution. This preserves the public default
+  while avoiding CLI `Not supported model` failures.
+
+Dogfood result:
+
+```text
+skill: obsidian-markdown
+cases: 3
+exact_match: 9/9
+verdict: PASS
+grade: S
+first local run: about 41.5s
+second --reuse-session auto run: all heavy steps reused, profile timing about 38ms
+```
+
 ## When Continuing
 
 Safe next steps:
