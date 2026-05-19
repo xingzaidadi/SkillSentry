@@ -291,7 +291,7 @@ def assert_timings(payload: dict, profile: str, required_phases: tuple[str, ...]
             errors.append(f"{profile} missing timing phase: {phase}")
 
 
-def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[str]) -> None:
+def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[str], *, full: bool = False) -> None:
     completed = run_profile(root, env, "local", skill=skill, cases=cases)
     if completed.returncode != 0:
         errors.append(f"local exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
@@ -372,6 +372,9 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append(f"local reuse text exited {text_completed.returncode}: {text_completed.stderr.strip()} {text_completed.stdout.strip()}")
     elif "reuse:" not in text_completed.stdout or "prepare_cases: reused (matched)" not in text_completed.stdout:
         errors.append(f"local reuse text output missing reuse summary: {text_completed.stdout!r}")
+
+    if not full:
+        return
 
     stale_response = session_dir / "eval-stale" / "with_skill" / "outputs" / "response.md"
     stale_response.parent.mkdir(parents=True, exist_ok=True)
@@ -664,7 +667,7 @@ def verify_delegated_ci_json(root: Path, env: dict, errors: list[str]) -> None:
         errors.append("delegated ci payload missing captured stdout")
 
 
-def verify() -> tuple[bool, list[str]]:
+def verify(*, full: bool = False) -> tuple[bool, list[str]]:
     errors: list[str] = []
     with tempfile.TemporaryDirectory(prefix="skillsentry-run-") as tmp:
         root = Path(tmp)
@@ -691,21 +694,23 @@ def verify() -> tuple[bool, list[str]]:
             if not lint_session.name.endswith("_003"):
                 errors.append(f"lint session should ignore non-numeric session names and use _003, got {lint_session.name}")
             verify_debug(root, env, lint_session, errors)
-        verify_local(root, env, skill, cases, errors)
+        if full:
+            verify_local(root, env, skill, cases, errors, full=True)
         verify_delegated_ci_json(root, env, errors)
     return not errors, errors
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Verify sentry_run.py profiles")
+    parser.add_argument("--full", action="store_true", help="Also run exhaustive local reuse mutation checks")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    ok, errors = verify()
-    payload = {"status": "PASS" if ok else "FAIL", "errors": errors}
+    ok, errors = verify(full=args.full)
+    payload = {"status": "PASS" if ok else "FAIL", "mode": "full" if args.full else "core", "errors": errors}
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:

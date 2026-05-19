@@ -43,6 +43,18 @@ FULL_ONLY_CHECKS: list[list[str]] = [
 ]
 
 
+def selected_checks(full: bool) -> list[list[str]]:
+    checks: list[list[str]] = []
+    for check in CORE_CHECKS:
+        if full and check[0] == "verify_sentry_run.py":
+            checks.append(["verify_sentry_run.py", "--full", *check[1:]])
+        else:
+            checks.append(check)
+    if full:
+        checks.extend(FULL_ONLY_CHECKS)
+    return checks
+
+
 def run_check(args: list[str]) -> dict:
     started = time.time()
     cmd = [sys.executable, str(SCRIPT_DIR / args[0]), *args[1:]]
@@ -85,7 +97,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    checks = CORE_CHECKS + (FULL_ONLY_CHECKS if args.full else [])
+    checks = selected_checks(args.full)
     results: list[dict] = []
     for check in checks:
         result = run_check(check)

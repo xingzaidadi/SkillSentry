@@ -404,11 +404,20 @@ python scripts/verify_deterministic.py --format json
   diagnostics, exit contract, Checks, self-test workflow template, dashboard
 
 python scripts/verify_deterministic.py --full --format json
-  core checks plus preflight, case feasibility, failure report, and all CI modes
+  core checks plus sentry_run local reuse mutation checks, preflight, case
+  feasibility, failure report, and all CI modes
 ```
 
 Keep historical gate fixtures separate because they depend on archived session
 directories that are not available in a clean checkout.
+
+Also keep routine and exhaustive verifier modes separate. `verify_sentry_run.py`
+used to run every local reuse edge case in the default core path, making the
+aggregate check spend most of its time in repeated local profile subprocesses.
+The default now checks help, plan, lint, debug, local dry-run, and delegated CI
+JSON. The deeper local reuse mutation matrix runs only under
+`verify_sentry_run.py --full`, which `verify_deterministic.py --full` selects
+automatically.
 
 ## CI Self-Test Split
 
