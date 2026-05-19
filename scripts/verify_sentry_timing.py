@@ -72,6 +72,14 @@ def make_cases() -> list[dict]:
     ]
 
 
+def make_duplicate_cases() -> list[dict]:
+    return [
+        {"id": "eval-1", "prompt": "fast"},
+        {"id": "eval-1", "prompt": "duplicate"},
+        {"id": "eval-2", "prompt": "slow"},
+    ]
+
+
 def verify_eval_result(root: Path, errors: list[str]) -> None:
     session_dir = root / "eval-result-session"
     session_dir.mkdir()
@@ -164,6 +172,19 @@ def verify_session(root: Path, errors: list[str]) -> None:
     partial_executor = partial_payload.get("executor_timing", {})
     if partial_executor.get("available") is not False or partial_executor.get("expected_cases") != 2:
         errors.append("partial executor timing should report expected current cases when summary is missing")
+
+    duplicate_dir = root / "duplicate-case-session"
+    duplicate_dir.mkdir()
+    sentry_state.save_session(duplicate_dir, {"skill": "timing-fixture", "mode": "local"})
+    save_json(duplicate_dir / "evals.json", make_duplicate_cases())
+    save_json(duplicate_dir / "executor_results.json", make_executor_payload())
+    save_json(duplicate_dir / "eval-1" / "grading.json", make_grading_payload("eval-1", 300.0))
+    save_json(duplicate_dir / "eval-2" / "grading.json", make_grading_payload("eval-2", 900.0))
+    duplicate_payload = sentry_timing.analyze(duplicate_dir, top=5)
+    if duplicate_payload.get("executor_timing", {}).get("expected_cases") != 2:
+        errors.append("duplicate case ids should not inflate executor expected case count")
+    if duplicate_payload.get("grader_timing", {}).get("expected_cases") != 2:
+        errors.append("duplicate case ids should not inflate grader expected case count")
 
     partial_executor_dir = root / "partial-executor-session"
     partial_executor_dir.mkdir()

@@ -286,7 +286,9 @@ def current_case_ids(session_dir: Path) -> list[str]:
     for idx, case in enumerate(sentry_case_lint.extract_cases(payload), 1):
         if not isinstance(case, dict):
             continue
-        case_ids.append(str(case.get("id", f"eval-{idx}")))
+        eval_id = str(case.get("id", f"eval-{idx}"))
+        if eval_id not in case_ids:
+            case_ids.append(eval_id)
     return case_ids
 
 
