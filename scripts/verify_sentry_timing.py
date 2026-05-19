@@ -159,6 +159,9 @@ def verify_session(root: Path, errors: list[str]) -> None:
     partial_grader = partial_payload.get("grader_timing", {})
     if partial_grader.get("total") != 2 or partial_grader.get("timed") != 1:
         errors.append("partial grader timing should report total current cases and timed grading files")
+    partial_executor = partial_payload.get("executor_timing", {})
+    if partial_executor.get("available") is not False or partial_executor.get("expected_cases") != 2:
+        errors.append("partial executor timing should report expected current cases when summary is missing")
 
 
 def verify_sentry_run_result(root: Path, errors: list[str]) -> None:

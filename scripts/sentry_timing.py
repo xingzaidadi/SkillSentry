@@ -373,7 +373,12 @@ def executor_timing(session_dir: Path | None, top: int) -> dict:
             variants.append(summarize_executor_variant(summary, variant, top, case_ids=case_ids))
 
     if not variants:
-        return {"available": False, "reason": "executor_results_unavailable", "session_dir": str(session_dir)}
+        return {
+            "available": False,
+            "reason": "executor_results_unavailable",
+            "session_dir": str(session_dir),
+            "expected_cases": len(case_ids) if case_ids else None,
+        }
 
     slowest_cases = []
     for variant in variants:
