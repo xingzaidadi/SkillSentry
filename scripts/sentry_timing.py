@@ -591,10 +591,12 @@ def main() -> int:
             print("executor timing:")
             for variant in _as_list(executor.get("variants")):
                 duration = _as_dict(variant.get("duration_ms"))
+                missing = variant.get("missing_cases", 0)
+                missing_suffix = f" missing={missing}" if missing else ""
                 print(
                     f"- {variant.get('variant')}: timed {variant.get('timed')}/{variant.get('total')} "
                     f"avg={duration.get('avg')}ms p50={duration.get('p50')}ms "
-                    f"p95={duration.get('p95')}ms max={duration.get('max')}ms"
+                    f"p95={duration.get('p95')}ms max={duration.get('max')}ms{missing_suffix}"
                 )
             print("slowest executor cases:")
             for item in _as_list(executor.get("slowest_cases")):
@@ -609,11 +611,13 @@ def main() -> int:
         grader = _as_dict(payload.get("grader_timing"))
         if grader.get("available"):
             duration = _as_dict(grader.get("duration_ms"))
+            missing = grader.get("missing_cases", 0)
+            missing_suffix = f" missing={missing}" if missing else ""
             print(
                 "grader timing: "
                 f"timed {grader.get('timed')}/{grader.get('total')} "
                 f"avg={duration.get('avg')}ms p50={duration.get('p50')}ms "
-                f"p95={duration.get('p95')}ms max={duration.get('max')}ms"
+                f"p95={duration.get('p95')}ms max={duration.get('max')}ms{missing_suffix}"
             )
             print("slowest grader cases:")
             for item in _as_list(grader.get("slowest_cases")):

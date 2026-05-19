@@ -383,6 +383,27 @@ def verify_cli(root: Path, errors: list[str]) -> None:
     if "expected_cases=2" not in text_expected.stdout:
         errors.append("text output should include expected_cases for unavailable executor/grader timing")
 
+    save_json(missing_artifacts / "executor_results.json", {"results": [{"eval_id": "eval-1", "status": "success", "duration": 0.2}]})
+    save_json(missing_artifacts / "eval-1" / "grading.json", make_grading_payload("eval-1", 300.0))
+    text_missing = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "sentry_timing.py"),
+            "--input",
+            str(missing_artifacts),
+            "--format",
+            "text",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if text_missing.returncode != 0:
+        errors.append(f"sentry_timing.py text missing cases exited {text_missing.returncode}: {text_missing.stderr.strip()} {text_missing.stdout.strip()}")
+    if "missing=1" not in text_missing.stdout:
+        errors.append("text output should include missing current case count")
+
 
 def verify() -> tuple[bool, list[str]]:
     errors: list[str] = []
