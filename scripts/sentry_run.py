@@ -13,9 +13,6 @@ import json
 import shutil
 import subprocess
 import sys
-import time
-from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -31,6 +28,7 @@ import sentry_artifacts
 import sentry_diagnostics
 import sentry_grader
 import sentry_preflight
+from sentry_profile_runtime import ProfileTimings, profile_payload, utc_now
 import sentry_profile_state
 import sentry_report
 import sentry_reuse_core
@@ -45,30 +43,6 @@ from sentry_pipeline import PIPELINES
 LIGHT_PROFILES = {"preflight", "lint", "debug", "plan"}
 HEAVY_PROFILES = {"local", "ci", "release"}
 PROFILES = sorted(LIGHT_PROFILES | HEAVY_PROFILES)
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class ProfileTimings:
-    def __init__(self) -> None:
-        self.started = time.perf_counter()
-        self.phases: dict[str, float] = {}
-
-    @contextmanager
-    def phase(self, name: str):
-        started = time.perf_counter()
-        try:
-            yield
-        finally:
-            self.phases[name] = round((time.perf_counter() - started) * 1000, 1)
-
-    def snapshot(self) -> dict:
-        return {
-            "total_ms": round((time.perf_counter() - self.started) * 1000, 1),
-            "phases_ms": dict(self.phases),
-        }
 
 
 def save_json(path: Path, payload: dict) -> None:
@@ -122,16 +96,6 @@ def unique_paths(paths: list[Path]) -> list[Path]:
 
 def combine_hash(*parts) -> str:
     return sentry_reuse_core.combine_hash(*parts)
-
-
-def profile_payload(profile: str, status: str, **extra) -> dict:
-    payload = {
-        "status": status,
-        "profile": profile,
-        "updated_at": utc_now(),
-    }
-    payload.update(extra)
-    return payload
 
 
 def build_mode_plan(mode: str) -> dict:
