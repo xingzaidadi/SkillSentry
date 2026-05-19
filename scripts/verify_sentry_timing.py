@@ -198,6 +198,8 @@ def verify_session(root: Path, errors: list[str]) -> None:
     missing_variant = missing_executor_payload.get("executor_timing", {}).get("variants", [{}])[0]
     if missing_variant.get("missing_cases") != 1 or missing_variant.get("missing_case_ids") != ["eval-2"]:
         errors.append("executor timing should report missing current case ids")
+    if not any("executor with_skill is missing 1" in hint for hint in missing_executor_payload.get("timing_hints", [])):
+        errors.append("executor timing should include missing current case hint")
 
 
 def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
@@ -403,6 +405,8 @@ def verify_cli(root: Path, errors: list[str]) -> None:
         errors.append(f"sentry_timing.py text missing cases exited {text_missing.returncode}: {text_missing.stderr.strip()} {text_missing.stdout.strip()}")
     if "missing=1" not in text_missing.stdout:
         errors.append("text output should include missing current case count")
+    if "timing hints:" not in text_missing.stdout:
+        errors.append("text output should include timing hints for missing current cases")
 
 
 def verify() -> tuple[bool, list[str]]:

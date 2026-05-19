@@ -516,12 +516,28 @@ def recommendation(step: dict) -> str:
     return "Investigate this stage before adding skip or cache behavior."
 
 
+def timing_hints(executor: dict, grader: dict) -> list[str]:
+    hints = []
+    if _number(executor.get("expected_cases")) > 0:
+        for variant in _as_list(executor.get("variants")):
+            missing = int(_number(variant.get("missing_cases")))
+            if missing > 0:
+                hints.append(f"executor {variant.get('variant')} is missing {missing} current case result(s)")
+    if _number(grader.get("expected_cases")) > 0:
+        missing = int(_number(grader.get("missing_cases")))
+        if missing > 0:
+            hints.append(f"grader timing is missing {missing} current case file(s)")
+    return hints
+
+
 def analyze(path: Path, top: int = 5) -> dict:
     timings, meta = load_timing(path)
     steps = sorted_items(_as_list(timings.get("steps")), "step")
     phases = sorted_items(_as_list(timings.get("phases")), "phase")
     slowest = steps[0] if steps else (phases[0] if phases else {})
     session_dir = resolve_session_dir(path, meta)
+    executor = executor_timing(session_dir, top)
+    grader = grader_timing(session_dir, top)
     return {
         "status": "OK",
         "source": meta,
@@ -532,8 +548,9 @@ def analyze(path: Path, top: int = 5) -> dict:
         "reuse_summary": _as_dict(meta.get("reuse_summary")),
         "reuse_decisions": _as_list(meta.get("reuse_decisions")),
         "reuse_hints": reuse_hints(_as_dict(meta.get("reuse_summary")), _as_list(meta.get("reuse_decisions"))),
-        "executor_timing": executor_timing(session_dir, top),
-        "grader_timing": grader_timing(session_dir, top),
+        "executor_timing": executor,
+        "grader_timing": grader,
+        "timing_hints": timing_hints(executor, grader),
         "recommendation": recommendation(slowest),
     }
 
@@ -585,6 +602,11 @@ def main() -> int:
         if reuse_hints_text:
             print("reuse hints:")
             for item in reuse_hints_text:
+                print(f"- {item}")
+        timing_hints_text = _as_list(payload.get("timing_hints"))
+        if timing_hints_text:
+            print("timing hints:")
+            for item in timing_hints_text:
                 print(f"- {item}")
         executor = _as_dict(payload.get("executor_timing"))
         if executor.get("available"):
