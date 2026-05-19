@@ -364,6 +364,8 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
     for marker in ("reuse hints:", "Required outputs are missing"):
         if marker not in text_completed.stdout:
             errors.append(f"local missing response text output missing {marker!r}")
+    if "missing_outputs=" not in text_completed.stdout:
+        errors.append("local missing response text output should include missing output count")
 
     # Missing per-eval grading artifacts must invalidate grader reuse.
     grading_file = session_dir / "eval-1" / "grading.json"

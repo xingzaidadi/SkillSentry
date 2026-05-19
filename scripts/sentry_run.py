@@ -852,7 +852,19 @@ def main() -> int:
                 if not isinstance(item, dict):
                     continue
                 action = "reused" if item.get("reused") else "reran"
-                print(f"- {item.get('step')}: {action} ({item.get('reason')})")
+                details = []
+                if item.get("missing_outputs_count"):
+                    details.append(f"missing_outputs={item.get('missing_outputs_count')}")
+                if item.get("recorded_status") is not None:
+                    details.append(f"recorded_status={item.get('recorded_status')}")
+                if item.get("recorded_type") is not None:
+                    details.append(f"recorded_type={item.get('recorded_type')}")
+                if item.get("expected_input_hash") and item.get("recorded_input_hash"):
+                    details.append("input_hash_changed")
+                if item.get("expected_cases_hash") and item.get("prepared_cases_hash"):
+                    details.append("cases_hash_changed")
+                suffix = f"; {', '.join(details)}" if details else ""
+                print(f"- {item.get('step')}: {action} ({item.get('reason')}{suffix})")
             hints = reuse_summary.get("hints")
             if isinstance(hints, list) and hints:
                 print("reuse hints:")
