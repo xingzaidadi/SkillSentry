@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -23,8 +22,8 @@ if hasattr(sys.stdout, "reconfigure"):
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-import sentry_case_lint
 import sentry_artifacts
+import sentry_case_prepare
 import sentry_diagnostics
 import sentry_grader
 import sentry_preflight
@@ -34,7 +33,6 @@ import sentry_report
 import sentry_reuse_core
 import sentry_run_output
 import sentry_run_plan
-import sentry_state
 from sentry_executor import execute_executor_step
 from sentry_gate import build_gate
 from sentry_pipeline import PIPELINES
@@ -177,40 +175,7 @@ def reusable_prepared_cases(session_dir: Path, cases_file: Path, target: Path, c
 
 
 def prepare_cases(session_dir: Path, cases_file: Path) -> dict:
-    if not cases_file.exists():
-        return {
-            "status": "ERROR",
-            "error": f"cases file not found: {cases_file}",
-            "step": "prepare_cases",
-            "reused": False,
-            "reuse": {"step": "prepare_cases", "reusable": False, "reason": "cases_file_not_found"},
-        }
-    target = session_dir / "evals.json"
-    cases_hash = file_hash(cases_file)
-    reuse_state = prepared_cases_reuse_state(session_dir, target, cases_hash)
-    reused = reusable_prepared_cases(session_dir, cases_file, target, cases_hash, reuse_state)
-    if reused is not None:
-        return reused
-
-    if not (target.exists() and same_path(cases_file, target)):
-        shutil.copy2(cases_file, target)
-    lint = sentry_case_lint.lint_cases_file(target)
-    sentry_case_lint.record_case_lint_result(session_dir, lint)
-    cases_total = lint.get("total", 0)
-    session = sentry_state.load_session(session_dir)
-    session["cases"] = {"total": cases_total, "types": {}, "reused": False}
-    session["updated_at"] = utc_now()
-    sentry_state.save_session(session_dir, session)
-    return {
-        "status": "OK",
-        "cases_file": str(target),
-        "source": str(cases_file),
-        "cases_hash": cases_hash,
-        "case_lint": lint,
-        "step": "prepare_cases",
-        "reused": False,
-        "reuse": reuse_state,
-    }
+    return sentry_case_prepare.prepare_cases(session_dir, cases_file)
 
 
 def expected_response_outputs(evals_file: Path, session_dir: Path, variant: str = "with_skill") -> list[Path]:
