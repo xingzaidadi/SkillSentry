@@ -104,6 +104,38 @@ def verify_expected_artifact_outputs(root: Path, errors: list[str]) -> None:
         errors.append("sentry_run expected grading outputs should follow ArtifactRegistry identities")
 
 
+def verify_cli_help_and_compat(errors: list[str]) -> None:
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT_DIR / "sentry_run.py"), "--help"],
+        cwd=SCRIPT_DIR.parent,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if completed.returncode != 0:
+        errors.append(f"sentry_run --help exited {completed.returncode}: {completed.stderr.strip()}")
+        return
+    help_text = completed.stdout
+    for marker in (
+        "Examples:",
+        "--profile plan --mode quick",
+        "--reuse-session auto",
+        "preflight/lint/plan/debug avoid executor/grader",
+    ):
+        if marker not in help_text:
+            errors.append(f"sentry_run --help missing marker: {marker}")
+
+    if not callable(getattr(sentry_run, "run_profile_plan", None)):
+        errors.append("sentry_run compatibility facade should export run_profile_plan")
+    if not callable(getattr(sentry_run, "run_profile_local", None)):
+        errors.append("sentry_run compatibility facade should export run_profile_local")
+    if "local" not in getattr(sentry_run, "PROFILES", []):
+        errors.append("sentry_run compatibility facade should export PROFILES with local")
+    compat_plan = sentry_run.build_profile_plan("local")
+    if compat_plan.get("summary", {}).get("heavy_step_count") != 2:
+        errors.append("sentry_run compatibility facade should expose summarized profile plans")
+
+
 def run_profile(
     root: Path,
     env: dict,
@@ -637,6 +669,7 @@ def verify() -> tuple[bool, list[str]]:
         (fixture_session_root / f"{today}_002").mkdir()
 
         verify_expected_artifact_outputs(root, errors)
+        verify_cli_help_and_compat(errors)
         verify_plan_and_dry_run(root, env, skill, cases, errors)
         lint_session = verify_lint(root, env, skill, cases, errors)
         if lint_session is not None:

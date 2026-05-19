@@ -23,13 +23,28 @@ PROFILES = sorted(LIGHT_PROFILES | HEAVY_PROFILES)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run SkillSentry by lightweight profile")
-    parser.add_argument("--profile", choices=PROFILES, default="lint")
+    parser = argparse.ArgumentParser(
+        description="Run SkillSentry by profile: light local checks, reusable local runs, or delegated CI.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  python scripts/sentry_run.py --skill <skill> --profile preflight
+  python scripts/sentry_run.py --skill <skill> --profile plan --mode quick
+  python scripts/sentry_run.py --skill <skill> --profile local --cases evals.json --dry-run
+  python scripts/sentry_run.py --skill <skill> --profile local --cases evals.json --reuse-session auto
+  python scripts/sentry_run.py --skill <skill> --profile ci --mode quick
+
+Profile weight:
+  preflight/lint/plan/debug avoid executor/grader.
+  local runs with_skill executor + grader/report, and can reuse matching artifacts.
+  ci/release delegate to sentry_ci.py for the full release contract.
+""",
+    )
+    parser.add_argument("--profile", choices=PROFILES, default="lint", help="Profile to run; default lint is deterministic and light")
     parser.add_argument("--skill", help="Skill name, directory, or SKILL.md path")
     parser.add_argument("--session-dir", help="Existing session directory for debug profile")
-    parser.add_argument("--reuse-session", help="Existing session directory for local profile artifact reuse")
+    parser.add_argument("--reuse-session", help="Existing session directory, or 'auto', for local profile artifact reuse")
     parser.add_argument("--cases", help="Existing evals.json/cases.cache.json path")
-    parser.add_argument("--mode", choices=sorted(PIPELINES), default="smoke")
+    parser.add_argument("--mode", choices=sorted(PIPELINES), default="smoke", help="Pipeline mode for plan/ci/release profiles")
     parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--output-dir", default="./ci-eval-results")
     parser.add_argument("--model", default="claude-sonnet-4-6")
@@ -39,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runtime", choices=["auto", "cli", "openclaw"], default="auto")
     parser.add_argument("--config", default=str(sentry_preflight.DEFAULT_CONFIG))
     parser.add_argument("--github-output", action="store_true")
-    parser.add_argument("--dry-run", action="store_true", help="Plan a local run without creating a session or running heavy steps")
+    parser.add_argument("--dry-run", action="store_true", help="Render the plan/reuse forecast without starting executor/grader/CI heavy steps")
     parser.add_argument("--force-executor", action="store_true", help="Rerun local executor even when manifest matches")
     parser.add_argument("--force-grader", action="store_true", help="Rerun local grader even when manifest matches")
     parser.add_argument("--format", choices=["text", "json"], default="text")
