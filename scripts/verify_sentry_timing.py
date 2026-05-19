@@ -12,6 +12,7 @@ from pathlib import Path
 
 import sentry_timing
 import sentry_state
+import sentry_case_identity
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -85,6 +86,23 @@ def make_case_id_cases() -> list[dict]:
         {"case_id": "case-1", "prompt": "fast"},
         {"case_id": "case-2", "prompt": "slow"},
     ]
+
+
+def verify_case_identity(errors: list[str]) -> None:
+    identities = sentry_case_identity.identities_from_payload(make_duplicate_cases())
+    if sentry_case_identity.case_ids(identities) != ["eval-1", "eval-2"]:
+        errors.append("case identity should dedupe artifact ids in evals order")
+
+    case_id_identities = sentry_case_identity.identities_from_payload(make_case_id_cases())
+    if sentry_case_identity.case_ids(case_id_identities) != ["eval-1", "eval-2"]:
+        errors.append("case_id-only identities should use eval-N artifact ids")
+    if sentry_case_identity.fallback_case_ids(case_id_identities) != ["case-1", "case-2"]:
+        errors.append("case_id-only identities should preserve logical fallback ids")
+
+    wrapped = {"cases": [{"id": "case-a", "name": "A"}, {"case_id": "logical-b", "name": "B"}]}
+    wrapped_identities = sentry_case_identity.identities_from_payload(wrapped)
+    if sentry_case_identity.case_ids(wrapped_identities) != ["case-a", "eval-2"]:
+        errors.append("case identity should support wrapped case payloads")
 
 
 def verify_eval_result(root: Path, errors: list[str]) -> None:
@@ -463,6 +481,7 @@ def verify_cli(root: Path, errors: list[str]) -> None:
 
 def verify() -> tuple[bool, list[str]]:
     errors: list[str] = []
+    verify_case_identity(errors)
     with tempfile.TemporaryDirectory(prefix="skillsentry-timing-verify-") as tmp:
         root = Path(tmp)
         verify_eval_result(root, errors)

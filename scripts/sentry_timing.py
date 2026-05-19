@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-import sentry_case_lint
+import sentry_case_identity
 import sentry_reuse
 
 
@@ -282,20 +282,11 @@ def current_case_info(session_dir: Path) -> dict:
         payload = load_json(evals_file)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"case_ids": [], "fallback_case_ids": []}
-    case_ids = []
-    fallback_case_ids = []
-    for idx, case in enumerate(sentry_case_lint.extract_cases(payload), 1):
-        if not isinstance(case, dict):
-            continue
-        if case.get("id"):
-            eval_id = str(case.get("id"))
-        else:
-            eval_id = f"eval-{idx}"
-            if case.get("case_id"):
-                fallback_case_ids.append(str(case.get("case_id")))
-        if eval_id not in case_ids:
-            case_ids.append(eval_id)
-    return {"case_ids": case_ids, "fallback_case_ids": fallback_case_ids}
+    identities = sentry_case_identity.identities_from_payload(payload)
+    return {
+        "case_ids": sentry_case_identity.case_ids(identities),
+        "fallback_case_ids": sentry_case_identity.fallback_case_ids(identities),
+    }
 
 
 def current_case_ids(session_dir: Path) -> list[str]:
