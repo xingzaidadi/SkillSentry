@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -32,6 +31,7 @@ import sentry_artifacts
 import sentry_diagnostics
 import sentry_grader
 import sentry_preflight
+import sentry_profile_state
 import sentry_report
 import sentry_reuse_core
 import sentry_run_plan
@@ -84,10 +84,7 @@ def file_hash(path: Path) -> str | None:
 
 
 def session_root() -> Path:
-    root = Path(os.environ.get("SKILLSENTRY_SESSION_ROOT", "")).expanduser()
-    if str(root):
-        return root
-    return Path.home() / ".claude" / "skills" / "SkillSentry" / "sessions"
+    return sentry_profile_state.session_root()
 
 
 def manifest_path(session_dir: Path) -> Path:
@@ -183,103 +180,27 @@ def run_preflight(args) -> tuple[int, dict]:
 
 
 def init_session(skill_name: str, skill_hash: str, skill_type: str, mode: str, preflight: dict, runtime: str) -> Path:
-    root = session_root()
-    base = root / skill_name
-    base.mkdir(parents=True, exist_ok=True)
-    today = datetime.now().strftime("%Y-%m-%d")
-    existing_numbers = []
-    for item in base.iterdir():
-        if not item.is_dir():
-            continue
-        prefix = f"{today}_"
-        if not item.name.startswith(prefix):
-            continue
-        suffix = item.name[len(prefix):]
-        if suffix.isdigit():
-            existing_numbers.append(int(suffix))
-    next_num = max(existing_numbers, default=0) + 1
-    session_name = f"{today}_{next_num:03d}"
-    session_dir = base / session_name
-    session_dir.mkdir(parents=True, exist_ok=True)
-    sentry_state.save_session(
-        session_dir,
-        {
-            "skill": skill_name,
-            "mode": mode,
-            "skill_type": skill_type,
-            "skill_hash": skill_hash,
-            "runtime": runtime,
-            "preflight": preflight,
-            "mcp_backend": "unavailable",
-            "started_at": utc_now(),
-            "updated_at": utc_now(),
-            "last_step": "init",
-            "completed_steps": [],
-            "milestones": {},
-            "sync": {"pull": None, "push_cases": None, "push_results": None, "push_run": None},
-            "profile_run": True,
-        },
-    )
-    return session_dir
+    return sentry_profile_state.init_session(skill_name, skill_hash, skill_type, mode, preflight, runtime, utc_now())
 
 
 def resolve_local_session(args, preflight: dict) -> Path:
-    if args.reuse_session:
-        session_dir = Path(args.reuse_session).expanduser()
-        if not session_dir.exists():
-            raise FileNotFoundError(f"reuse session not found: {session_dir}")
-        return session_dir
-    return init_session(
-        preflight["skill_dir_name"],
-        preflight["skill_hash"],
-        preflight["skill_type"],
-        args.mode,
-        preflight,
-        preflight.get("runtime", args.runtime),
-    )
+    return sentry_profile_state.resolve_local_session(args, preflight, utc_now())
 
 
 def refresh_session_metadata(session_dir: Path, args, preflight: dict) -> None:
-    session_file = session_dir / "session.json"
-    if not session_file.exists():
-        return
-    session = sentry_state.load_session(session_dir)
-    session.update(
-        {
-            "skill": preflight["skill_dir_name"],
-            "mode": args.mode,
-            "skill_type": preflight["skill_type"],
-            "skill_hash": preflight["skill_hash"],
-            "runtime": preflight.get("runtime", args.runtime),
-            "preflight": preflight,
-            "profile_run": True,
-            "updated_at": utc_now(),
-        }
-    )
-    sentry_state.save_session(session_dir, session)
+    sentry_profile_state.refresh_session_metadata(session_dir, args, preflight, utc_now())
 
 
 def cached_cases_from_preflight(preflight: dict) -> Path | None:
-    cache = preflight.get("cases_cache", {}) if isinstance(preflight, dict) else {}
-    inputs_dir = Path(cache.get("inputs_dir", "")).expanduser()
-    for name in ("cases.cache.json", "evals.json"):
-        candidate = inputs_dir / name
-        if candidate.exists():
-            return candidate
-    return None
+    return sentry_profile_state.cached_cases_from_preflight(preflight)
 
 
 def resolve_cases(args, preflight: dict) -> Path | None:
-    if args.cases:
-        return Path(args.cases).expanduser()
-    return cached_cases_from_preflight(preflight)
+    return sentry_profile_state.resolve_cases(args, preflight)
 
 
 def same_path(left: Path, right: Path) -> bool:
-    try:
-        return left.resolve() == right.resolve()
-    except OSError:
-        return False
+    return sentry_profile_state.same_path(left, right)
 
 
 def prepared_cases_reuse_state(session_dir: Path, target: Path, cases_hash: str | None) -> dict:
