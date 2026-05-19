@@ -138,6 +138,14 @@ def make_session(root: Path) -> Path:
         },
     )
     save_json(
+        session_dir / "eval-stale" / "grading.json",
+        {
+            "eval_id": "eval-stale",
+            "duration_ms": 9999.0,
+            "summary": {"grader_error": "stale grader error should be ignored"},
+        },
+    )
+    save_json(
         session_dir / "publish-result.json",
         {"status": "OK", "message": "local publish result ready", "artifacts": [], "updated_at": "2026-01-01T00:00:00+00:00"},
     )
@@ -229,6 +237,8 @@ def verify() -> tuple[bool, list[str]]:
             errors.append("case_warnings_count: expected 1")
         if diagnostics.get("executor", {}).get("timeouts") != 1:
             errors.append("executor.timeouts: expected 1")
+        if len(diagnostics.get("grader_errors", [])) != 1:
+            errors.append("grader_errors: expected stale grading artifacts to be ignored")
         if diagnostics.get("sync", {}).get("pull") != "skipped_no_config":
             errors.append("sync.pull: expected skipped_no_config")
         if diagnostics.get("timings", {}).get("total_ms") != 100.0:

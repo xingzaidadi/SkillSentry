@@ -29,6 +29,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import sentry_case_lint
+import sentry_artifacts
 import sentry_diagnostics
 import sentry_grader
 import sentry_preflight
@@ -89,7 +90,7 @@ def file_hash(path: Path) -> str | None:
 
 
 def manifest_path(session_dir: Path) -> Path:
-    return session_dir / "manifest.json"
+    return sentry_artifacts.ArtifactRegistry(session_dir).manifest_path()
 
 
 def load_manifest(session_dir: Path) -> dict:
@@ -143,7 +144,7 @@ def step_reuse_state(session_dir: Path, step: str, input_hash: str, required: li
         state["recorded_input_hash"] = step_data.get("input_hash")
         state["expected_input_hash"] = input_hash
         return state
-    missing = [str(path) for path in required if not path.exists()]
+    missing = [str(path) for path in sentry_artifacts.ArtifactRegistry.missing_outputs(required)]
     if missing:
         state["reason"] = "missing_outputs"
         state["missing_outputs"] = missing
@@ -468,27 +469,11 @@ def prepare_cases(session_dir: Path, cases_file: Path) -> dict:
 
 
 def expected_response_outputs(evals_file: Path, session_dir: Path, variant: str = "with_skill") -> list[Path]:
-    payload = load_json(evals_file)
-    cases = sentry_case_lint.extract_cases(payload)
-    outputs: list[Path] = []
-    for idx, case in enumerate(cases, 1):
-        if not isinstance(case, dict):
-            continue
-        eval_id = case.get("id", f"eval-{idx}")
-        outputs.append(session_dir / str(eval_id) / variant / "outputs" / "response.md")
-    return outputs
+    return sentry_artifacts.ArtifactRegistry(session_dir, evals_file=evals_file).response_outputs(variant)
 
 
 def expected_grading_outputs(evals_file: Path, session_dir: Path) -> list[Path]:
-    payload = load_json(evals_file)
-    cases = sentry_case_lint.extract_cases(payload)
-    outputs: list[Path] = []
-    for idx, case in enumerate(cases, 1):
-        if not isinstance(case, dict):
-            continue
-        eval_id = case.get("id", f"eval-{idx}")
-        outputs.append(session_dir / str(eval_id) / "grading.json")
-    return outputs
+    return sentry_artifacts.ArtifactRegistry(session_dir, evals_file=evals_file).grading_outputs()
 
 
 def run_profile_preflight(args) -> tuple[int, dict]:
@@ -623,7 +608,7 @@ def run_profile_local(args) -> tuple[int, dict]:
             model,
             args.timeout_per_eval,
         )
-        executor_outputs = [session_dir / "executor_results.json"] + expected_response_outputs(evals_file, session_dir)
+        executor_outputs = sentry_artifacts.ArtifactRegistry(session_dir, evals_file=evals_file).required_outputs("executor-with")
         executor_reuse = step_reuse_state(session_dir, "executor-with", executor_hash, executor_outputs)
         if not args.force_executor and executor_reuse.get("reusable"):
             executor = {
@@ -673,7 +658,7 @@ def run_profile_local(args) -> tuple[int, dict]:
     with timings.phase("grader"):
         response_hashes = [(str(path), file_hash(path)) for path in expected_response_outputs(evals_file, session_dir)]
         grader_hash = combine_hash("grader-report", file_hash(evals_file), response_hashes, args.model)
-        grader_outputs = [session_dir / "grading-summary.json", session_dir / "report.html"] + expected_grading_outputs(evals_file, session_dir)
+        grader_outputs = sentry_artifacts.ArtifactRegistry(session_dir, evals_file=evals_file).required_outputs("grader-report")
         grader_reuse = step_reuse_state(session_dir, "grader-report", grader_hash, grader_outputs)
         if not args.force_grader and grader_reuse.get("reusable"):
             gate = build_gate(session_dir)

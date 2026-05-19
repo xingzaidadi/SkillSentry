@@ -20,6 +20,9 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+import sentry_run
 
 
 def save_json(path: Path, payload) -> None:
@@ -75,6 +78,30 @@ def make_fixture(root: Path) -> tuple[Path, Path]:
         encoding="utf-8-sig",
     )
     return skill, cases
+
+
+def verify_expected_artifact_outputs(root: Path, errors: list[str]) -> None:
+    session_dir = root / "artifact-output-session"
+    session_dir.mkdir()
+    evals_file = session_dir / "evals.json"
+    save_json(
+        evals_file,
+        [
+            {"case_id": "logical-1", "prompt": "one"},
+            {"id": "case-2", "prompt": "two"},
+        ],
+    )
+    responses = sentry_run.expected_response_outputs(evals_file, session_dir)
+    response_suffixes = [str(path.relative_to(session_dir)).replace("\\", "/") for path in responses]
+    if response_suffixes != [
+        "eval-1/with_skill/outputs/response.md",
+        "case-2/with_skill/outputs/response.md",
+    ]:
+        errors.append("sentry_run expected response outputs should follow ArtifactRegistry identities")
+    grading = sentry_run.expected_grading_outputs(evals_file, session_dir)
+    grading_suffixes = [str(path.relative_to(session_dir)).replace("\\", "/") for path in grading]
+    if grading_suffixes != ["eval-1/grading.json", "case-2/grading.json"]:
+        errors.append("sentry_run expected grading outputs should follow ArtifactRegistry identities")
 
 
 def run_profile(
@@ -550,6 +577,7 @@ def verify() -> tuple[bool, list[str]]:
         (fixture_session_root / f"{today}_scratch").mkdir()
         (fixture_session_root / f"{today}_002").mkdir()
 
+        verify_expected_artifact_outputs(root, errors)
         lint_session = verify_lint(root, env, skill, cases, errors)
         if lint_session is not None:
             if not lint_session.name.endswith("_003"):

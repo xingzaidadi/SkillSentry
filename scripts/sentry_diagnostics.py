@@ -8,10 +8,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+import sentry_artifacts
+
 
 def load_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
+        return sentry_artifacts.load_json(path)
     except (FileNotFoundError, json.JSONDecodeError):
         return None
 
@@ -130,7 +132,8 @@ def _duration_stats_text(payload: dict) -> str:
 
 
 def collect_executor(session_dir: Path, session: dict) -> dict:
-    summary = load_json(session_dir / "executor_results.json")
+    registry = sentry_artifacts.ArtifactRegistry(session_dir)
+    summary = load_json(registry.executor_summary_path("with_skill"))
     if not isinstance(summary, dict):
         summary = _as_dict(_as_dict(session.get("executor")).get("with_skill"))
 
@@ -171,12 +174,10 @@ def collect_executor(session_dir: Path, session: dict) -> dict:
 
 
 def collect_executor_case_timing(session_dir: Path) -> dict:
+    registry = sentry_artifacts.ArtifactRegistry(session_dir)
     variants = []
-    for variant, filename in (
-        ("with_skill", "executor_results.json"),
-        ("without_skill", "executor_without_skill_results.json"),
-    ):
-        summary = load_json(session_dir / filename)
+    for variant in ("with_skill", "without_skill"):
+        summary = load_json(registry.executor_summary_path(variant))
         if not isinstance(summary, dict):
             continue
         rows = []
@@ -214,9 +215,7 @@ def collect_executor_case_timing(session_dir: Path) -> dict:
 
 def collect_grader_errors(session_dir: Path) -> list[dict]:
     errors = []
-    for path in sorted(session_dir.rglob("grading.json")):
-        if "without_skill" in set(path.parts):
-            continue
+    for path in sentry_artifacts.ArtifactRegistry(session_dir).current_grading_files():
         data = load_json(path)
         if not isinstance(data, dict):
             errors.append(
@@ -259,7 +258,7 @@ def grading_duration_ms(payload: dict) -> float | None:
 
 
 def collect_grader_case_timing(session_dir: Path) -> dict:
-    grading_files = [path for path in sorted(session_dir.rglob("grading.json")) if "without_skill" not in set(path.parts)]
+    grading_files = sentry_artifacts.ArtifactRegistry(session_dir).current_grading_files()
     rows = []
     for path in grading_files:
         payload = load_json(path)
