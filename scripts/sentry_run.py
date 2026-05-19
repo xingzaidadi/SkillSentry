@@ -38,12 +38,36 @@ import sentry_reuse
 import sentry_state
 from sentry_executor import execute_executor_step
 from sentry_gate import build_gate
-from sentry_pipeline import PIPELINES
+from sentry_pipeline import PIPELINES, plan as pipeline_plan
 
 
-LIGHT_PROFILES = {"preflight", "lint", "debug"}
+LIGHT_PROFILES = {"preflight", "lint", "debug", "plan"}
 HEAVY_PROFILES = {"local", "ci", "release"}
 PROFILES = sorted(LIGHT_PROFILES | HEAVY_PROFILES)
+
+PROFILE_STEPS: dict[str, list[dict]] = {
+    "preflight": [
+        {"step": "preflight", "tool": "sentry-preflight", "step_type": "deterministic"},
+    ],
+    "lint": [
+        {"step": "preflight", "tool": "sentry-preflight", "step_type": "deterministic"},
+        {"step": "session", "tool": "sentry-state", "step_type": "deterministic"},
+        {"step": "prepare_cases", "tool": "sentry-case-lint", "step_type": "deterministic"},
+    ],
+    "debug": [
+        {"step": "gate", "tool": "sentry-gate", "step_type": "deterministic"},
+        {"step": "diagnostics", "tool": "sentry-diagnostics", "step_type": "deterministic"},
+        {"step": "report", "tool": "sentry-report", "step_type": "deterministic"},
+    ],
+    "local": [
+        {"step": "preflight", "tool": "sentry-preflight", "step_type": "deterministic"},
+        {"step": "session", "tool": "sentry-state", "step_type": "deterministic"},
+        {"step": "prepare_cases", "tool": "sentry-case-lint", "step_type": "deterministic"},
+        {"step": "executor-with", "tool": "sentry-executor", "step_type": "llm_required"},
+        {"step": "grader-report", "tool": "sentry-grader", "step_type": "llm_required"},
+        {"step": "diagnostics", "tool": "sentry-diagnostics", "step_type": "deterministic"},
+    ],
+}
 
 
 def utc_now() -> str:
@@ -258,6 +282,105 @@ def profile_payload(profile: str, status: str, **extra) -> dict:
     }
     payload.update(extra)
     return payload
+
+
+def enrich_plan_step(step: dict) -> dict:
+    item = dict(step)
+    step_type = str(item.get("step_type") or "")
+    requires_llm = step_type == "llm_required"
+    requires_network = step_type == "sync"
+    item["heavy"] = bool(requires_llm)
+    item["requires_llm"] = requires_llm
+    item["requires_network"] = requires_network
+    return item
+
+
+def summarize_plan_steps(steps: list[dict]) -> dict:
+    heavy_steps = [item.get("step") for item in steps if item.get("heavy")]
+    network_steps = [item.get("step") for item in steps if item.get("requires_network")]
+    llm_steps = [item.get("step") for item in steps if item.get("requires_llm")]
+    return {
+        "heavy_steps": heavy_steps,
+        "llm_steps": llm_steps,
+        "network_steps": network_steps,
+        "requires_llm": bool(llm_steps),
+        "requires_network": bool(network_steps),
+    }
+
+
+def build_mode_plan(mode: str) -> dict:
+    raw = pipeline_plan(mode)
+    steps = [enrich_plan_step(item) for item in raw.get("steps", []) if isinstance(item, dict)]
+    payload = {
+        "kind": "pipeline",
+        "mode": mode,
+        "pipeline": raw.get("pipeline", []),
+        "steps": steps,
+    }
+    payload.update(summarize_plan_steps(steps))
+    return payload
+
+
+def build_profile_plan(profile: str) -> dict:
+    steps = [enrich_plan_step(item) for item in PROFILE_STEPS.get(profile, [])]
+    payload = {
+        "kind": "profile",
+        "profile": profile,
+        "pipeline": [item.get("step") for item in steps],
+        "steps": steps,
+    }
+    payload.update(summarize_plan_steps(steps))
+    return payload
+
+
+def local_dry_run_reuse(session_dir: Path, cases_file: Path, args, preflight: dict) -> dict:
+    evals_file = session_dir / "evals.json"
+    cases_hash = file_hash(cases_file)
+    decisions = []
+    try:
+        prepared = prepared_cases_reuse_state(session_dir, evals_file, cases_hash)
+    except (FileNotFoundError, json.JSONDecodeError):
+        prepared = {"step": "prepare_cases", "reusable": False, "reason": "missing_prepared_cases"}
+    decisions.append(prepared)
+
+    if not evals_file.exists():
+        return {
+            "session_dir": str(session_dir),
+            "steps": decisions,
+            "summary": summarize_reuse_decisions({"step": "prepare_cases", "reused": False, "reuse": prepared}),
+        }
+
+    model = args.executor_model or args.model
+    skill_path = Path(preflight["skill_path"])
+    executor_hash = combine_hash(
+        "executor-with",
+        file_hash(evals_file),
+        file_hash(skill_path),
+        model,
+        args.timeout_per_eval,
+    )
+    registry = sentry_artifacts.ArtifactRegistry(session_dir, evals_file=evals_file)
+    executor_reuse = step_reuse_state(session_dir, "executor-with", executor_hash, registry.required_outputs("executor-with"))
+    if args.force_executor:
+        executor_reuse = {"step": "executor-with", "reusable": False, "reason": "force_executor"}
+    decisions.append(executor_reuse)
+
+    response_hashes = [(str(path), file_hash(path)) for path in expected_response_outputs(evals_file, session_dir)]
+    grader_hash = combine_hash("grader-report", file_hash(evals_file), response_hashes, args.model)
+    grader_reuse = step_reuse_state(session_dir, "grader-report", grader_hash, registry.required_outputs("grader-report"))
+    if args.force_grader:
+        grader_reuse = {"step": "grader-report", "reusable": False, "reason": "force_grader"}
+    decisions.append(grader_reuse)
+
+    sections = [
+        {"step": item.get("step"), "reused": item.get("reusable"), "reuse": item}
+        for item in decisions
+    ]
+    return {
+        "session_dir": str(session_dir),
+        "steps": decisions,
+        "summary": summarize_reuse_decisions(*sections),
+    }
 
 
 def run_preflight(args) -> tuple[int, dict]:
@@ -528,6 +651,23 @@ def run_profile_lint(args) -> tuple[int, dict]:
     return 0 if prepared.get("status") == "OK" else 1, payload
 
 
+def run_profile_plan(args) -> tuple[int, dict]:
+    timings = ProfileTimings()
+    with timings.phase("preflight"):
+        code, preflight = run_preflight(args)
+    plan = build_mode_plan(args.mode)
+    payload = profile_payload(
+        "plan",
+        "OK" if code == 0 else "ERROR",
+        mode=args.mode,
+        preflight=preflight,
+        plan=plan,
+        dry_run=True,
+        timings=timings.snapshot(),
+    )
+    return code, payload
+
+
 def run_profile_debug(args) -> tuple[int, dict]:
     timings = ProfileTimings()
     if not args.session_dir:
@@ -573,6 +713,25 @@ def run_profile_local(args) -> tuple[int, dict]:
     cases_file = resolve_cases(args, preflight)
     if not cases_file:
         return 2, profile_payload("local", "ERROR", preflight=preflight, error="profile=local requires --cases or cached evals", timings=timings.snapshot())
+    if args.dry_run:
+        plan = build_profile_plan("local")
+        reuse_forecast = None
+        if args.reuse_session:
+            session_dir = Path(args.reuse_session).expanduser()
+            if not session_dir.exists():
+                return 2, profile_payload("local", "ERROR", preflight=preflight, error=f"reuse session not found: {session_dir}", timings=timings.snapshot())
+            reuse_forecast = local_dry_run_reuse(session_dir, cases_file, args, preflight)
+        payload = profile_payload(
+            "local",
+            "OK",
+            preflight=preflight,
+            cases_file=str(cases_file),
+            dry_run=True,
+            plan=plan,
+            reuse_forecast=reuse_forecast,
+            timings=timings.snapshot(),
+        )
+        return 0, payload
 
     try:
         with timings.phase("session"):
@@ -787,6 +946,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runtime", choices=["auto", "cli", "openclaw"], default="auto")
     parser.add_argument("--config", default=str(sentry_preflight.DEFAULT_CONFIG))
     parser.add_argument("--github-output", action="store_true")
+    parser.add_argument("--dry-run", action="store_true", help="Plan a local run without creating a session or running heavy steps")
     parser.add_argument("--force-executor", action="store_true", help="Rerun local executor even when manifest matches")
     parser.add_argument("--force-grader", action="store_true", help="Rerun local grader even when manifest matches")
     parser.add_argument("--format", choices=["text", "json"], default="text")
@@ -806,6 +966,8 @@ def main() -> int:
         code, payload = run_profile_preflight(args)
     elif args.profile == "lint":
         code, payload = run_profile_lint(args)
+    elif args.profile == "plan":
+        code, payload = run_profile_plan(args)
     elif args.profile == "debug":
         code, payload = run_profile_debug(args)
     elif args.profile == "local":
@@ -830,6 +992,23 @@ def main() -> int:
             print(f"- {payload['error']}")
         if payload.get("warning"):
             print(f"- {payload['warning']}")
+        plan = payload.get("plan")
+        if isinstance(plan, dict) and plan.get("steps"):
+            print("plan:")
+            for item in plan["steps"]:
+                markers = []
+                if item.get("heavy"):
+                    markers.append("heavy")
+                if item.get("requires_llm"):
+                    markers.append("llm")
+                if item.get("requires_network"):
+                    markers.append("network")
+                suffix = f" [{', '.join(markers)}]" if markers else ""
+                print(f"- {item.get('step')}: {item.get('tool')}{suffix}")
+            if plan.get("heavy_steps"):
+                print("heavy steps: " + ", ".join(str(item) for item in plan.get("heavy_steps", [])))
+            if plan.get("network_steps"):
+                print("network steps: " + ", ".join(str(item) for item in plan.get("network_steps", [])))
         reuse_summary = payload.get("reuse_summary", {})
         if isinstance(reuse_summary, dict) and reuse_summary.get("steps"):
             print("reuse:")
@@ -855,6 +1034,14 @@ def main() -> int:
                 print("reuse hints:")
                 for hint in hints:
                     print(f"- {hint}")
+        reuse_forecast = payload.get("reuse_forecast")
+        if isinstance(reuse_forecast, dict) and isinstance(reuse_forecast.get("summary"), dict):
+            forecast_summary = reuse_forecast["summary"]
+            if forecast_summary.get("steps"):
+                print("reuse forecast:")
+                for item in forecast_summary["steps"]:
+                    action = "would reuse" if item.get("reused") else "would rerun"
+                    print(f"- {item.get('step')}: {action} ({item.get('reason')})")
         artifacts = payload.get("artifacts", {})
         if isinstance(artifacts, dict) and artifacts.get("report_html"):
             print(f"report: {artifacts['report_html']}")

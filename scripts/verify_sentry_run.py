@@ -115,6 +115,7 @@ def run_profile(
     output_dir: Path | None = None,
     force_executor: bool = False,
     force_grader: bool = False,
+    dry_run: bool = False,
     output_format: str = "json",
 ):
     cmd = [
@@ -139,6 +140,8 @@ def run_profile(
         cmd.append("--force-executor")
     if force_grader:
         cmd.append("--force-grader")
+    if dry_run:
+        cmd.append("--dry-run")
     if profile == "local":
         cmd.extend(["--model", "sonnet", "--executor-model", "sonnet", "--timeout-per-eval", "10"])
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
@@ -176,6 +179,40 @@ def verify_debug(root: Path, env: dict, session_dir: Path, errors: list[str]) ->
     for required in ("gate-result.json", "diagnostics.json", "report.html", "sentry-run-result.json"):
         if not (session_dir / required).exists():
             errors.append(f"debug missing {required}")
+
+
+def verify_plan_and_dry_run(root: Path, env: dict, skill: Path, cases: Path, errors: list[str]) -> None:
+    count_file = Path(env["SKILLSENTRY_FAKE_CLAUDE_COUNT"])
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "plan", skill=skill, cases=cases)
+    after = fake_count(count_file)
+    if completed.returncode != 0:
+        errors.append(f"plan exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    if after != before:
+        errors.append("plan profile should not call fake claude")
+    payload = json.loads(completed.stdout)
+    if payload.get("profile") != "plan" or payload.get("dry_run") is not True:
+        errors.append("plan profile should return a dry_run plan payload")
+    if "executor-with" not in payload.get("plan", {}).get("heavy_steps", []):
+        errors.append("plan profile should mark executor-with as heavy")
+
+    before = fake_count(count_file)
+    completed = run_profile(root, env, "local", skill=skill, cases=cases, dry_run=True)
+    after = fake_count(count_file)
+    if completed.returncode != 0:
+        errors.append(f"local dry-run exited {completed.returncode}: {completed.stderr.strip()} {completed.stdout.strip()}")
+        return
+    if after != before:
+        errors.append("local dry-run should not call fake claude")
+    payload = json.loads(completed.stdout)
+    if payload.get("dry_run") is not True:
+        errors.append("local dry-run should mark dry_run=true")
+    if payload.get("session_dir"):
+        errors.append("local dry-run without --reuse-session should not create a session")
+    heavy_steps = payload.get("plan", {}).get("heavy_steps", [])
+    if heavy_steps != ["executor-with", "grader-report"]:
+        errors.append(f"local dry-run heavy steps changed: {heavy_steps!r}")
 
 
 def fake_count(path: Path) -> int:
@@ -578,6 +615,7 @@ def verify() -> tuple[bool, list[str]]:
         (fixture_session_root / f"{today}_002").mkdir()
 
         verify_expected_artifact_outputs(root, errors)
+        verify_plan_and_dry_run(root, env, skill, cases, errors)
         lint_session = verify_lint(root, env, skill, cases, errors)
         if lint_session is not None:
             if not lint_session.name.endswith("_003"):
