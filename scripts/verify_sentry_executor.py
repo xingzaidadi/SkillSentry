@@ -36,9 +36,19 @@ def load_json(path: Path):
 
 def make_fake_claude(bin_dir: Path) -> None:
     cmd = bin_dir / "claude.cmd"
-    cmd.write_text("@echo off\r\necho fake executor response\r\n", encoding="utf-8")
+    cmd.write_text(
+        "@echo off\r\n"
+        "if not \"%SKILLSENTRY_FAKE_CLAUDE_ARGS%\"==\"\" echo %*>>\"%SKILLSENTRY_FAKE_CLAUDE_ARGS%\"\r\n"
+        "echo fake executor response\r\n",
+        encoding="utf-8",
+    )
     sh = bin_dir / "claude"
-    sh.write_text("#!/bin/sh\necho fake executor response\n", encoding="utf-8")
+    sh.write_text(
+        "#!/bin/sh\n"
+        "if [ -n \"$SKILLSENTRY_FAKE_CLAUDE_ARGS\" ]; then echo \"$@\" >> \"$SKILLSENTRY_FAKE_CLAUDE_ARGS\"; fi\n"
+        "echo fake executor response\n",
+        encoding="utf-8",
+    )
     sh.chmod(sh.stat().st_mode | stat.S_IEXEC)
 
 
@@ -106,6 +116,13 @@ def verify_with_skill(root: Path, env: dict, errors: list[str]) -> None:
     session = sentry_state.load_session(session_dir)
     if session.get("executor", {}).get("success") != 1:
         errors.append("with_skill did not update session.executor.success")
+    args_log = Path(env["SKILLSENTRY_FAKE_CLAUDE_ARGS"])
+    if args_log.exists():
+        args_text = args_log.read_text(encoding="utf-8")
+        if "--model sonnet" not in args_text:
+            errors.append("executor should normalize default Claude CLI model to sonnet")
+        if "claude-sonnet-4-6" in args_text:
+            errors.append("executor should not pass unsupported default model to Claude CLI")
 
 
 def verify_without_skill(root: Path, env: dict, errors: list[str]) -> None:
@@ -158,6 +175,7 @@ def verify() -> tuple[bool, list[str]]:
         (root / "SKILL.md").write_text("---\nname: executor-fixture\n---\nRespond briefly.", encoding="utf-8")
         env = os.environ.copy()
         env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+        env["SKILLSENTRY_FAKE_CLAUDE_ARGS"] = str(root / "fake-claude-args.txt")
 
         verify_with_skill(root, env, errors)
         verify_without_skill(root, env, errors)

@@ -136,6 +136,20 @@ def verify_cli_help_and_compat(errors: list[str]) -> None:
         errors.append("sentry_run compatibility facade should expose summarized profile plans")
 
 
+def verify_default_session_root(errors: list[str]) -> None:
+    original = os.environ.pop("SKILLSENTRY_SESSION_ROOT", None)
+    try:
+        root = sentry_run.session_root()
+        expected = Path.home() / ".claude" / "data" / "skill-eval" / "sessions"
+        if root != expected:
+            errors.append(f"default session_root should be {expected}, got {root}")
+        if root == Path("."):
+            errors.append("default session_root should not resolve to the current working directory")
+    finally:
+        if original is not None:
+            os.environ["SKILLSENTRY_SESSION_ROOT"] = original
+
+
 def run_profile(
     root: Path,
     env: dict,
@@ -670,6 +684,7 @@ def verify() -> tuple[bool, list[str]]:
 
         verify_expected_artifact_outputs(root, errors)
         verify_cli_help_and_compat(errors)
+        verify_default_session_root(errors)
         verify_plan_and_dry_run(root, env, skill, cases, errors)
         lint_session = verify_lint(root, env, skill, cases, errors)
         if lint_session is not None:

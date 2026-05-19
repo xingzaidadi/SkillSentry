@@ -18,6 +18,18 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 
+CLI_MODEL_ALIASES = {
+    "claude-sonnet-4-6": "sonnet",
+}
+
+
+def normalize_cli_model(model: str | None) -> str | None:
+    """Map SDK-style defaults to Claude CLI aliases when the CLI is the runner."""
+    if not model:
+        return model
+    return CLI_MODEL_ALIASES.get(model, model)
+
+
 def build_eval_prompt(eval_config: dict, skill_content: str, variant: str = "with_skill") -> str:
     """构造单个 eval 的执行 prompt"""
     prompt = eval_config.get("prompt", "")
@@ -90,8 +102,9 @@ def execute_single_eval(
             "--output-format", "text",
             "-p",
         ]
-        if model:
-            cmd.extend(["--model", model])
+        cli_model = normalize_cli_model(model)
+        if cli_model:
+            cmd.extend(["--model", cli_model])
 
         proc = subprocess.run(
             cmd,

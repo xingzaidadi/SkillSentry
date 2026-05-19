@@ -11,10 +11,10 @@ import sentry_state
 
 
 def session_root() -> Path:
-    root = Path(os.environ.get("SKILLSENTRY_SESSION_ROOT", "")).expanduser()
-    if str(root):
-        return root
-    return Path.home() / ".claude" / "skills" / "SkillSentry" / "sessions"
+    configured = os.environ.get("SKILLSENTRY_SESSION_ROOT")
+    if configured and configured.strip():
+        return Path(configured).expanduser()
+    return Path.home() / ".claude" / "data" / "skill-eval" / "sessions"
 
 
 def init_session(skill_name: str, skill_hash: str, skill_type: str, mode: str, preflight: dict, runtime: str, updated_at: str) -> Path:
