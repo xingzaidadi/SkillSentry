@@ -160,6 +160,20 @@ python scripts/sentry_ci.py --skill tests/fixtures/ci_modes/fixture-skill/SKILL.
 
 ---
 
+## 入口怎么选
+
+日常本地排查先用 `sentry_run.py` 的轻量 profile；需要完整发布门禁或 GitHub 集成时直接用 `sentry_ci.py`。
+
+| 目标 | 推荐入口 | 说明 |
+|------|----------|------|
+| 只看 Skill 是否可定位、hash/cache/runtime 是否正常 | `python scripts/sentry_run.py --skill <skill> --profile preflight` | 不生成用例、不跑 executor/grader |
+| 日常静态检查和 evals 可执行性检查 | `python scripts/sentry_run.py --skill <skill> --profile lint --cases evals.json` | 只跑确定性轻检查 |
+| 先看本次会跑什么、不实际执行 | `python scripts/sentry_run.py --skill <skill> --profile plan --mode smoke` | 用于估算步骤和重步骤 |
+| 本地复跑已有 cases,优先复用上次结果 | `python scripts/sentry_run.py --skill <skill> --profile local --cases evals.json --reuse-session auto` | 只跑 with_skill + grader/report,可跳过命中的重步骤 |
+| CI、发布门禁、GitHub Checks | `python scripts/sentry_ci.py --skill <skill> --mode quick` | 保持完整 CI/release 契约 |
+
+---
+
 ## 轻量 Profile
 
 日常使用优先从 `sentry_run.py` 进入,避免默认跑完整 CI:
