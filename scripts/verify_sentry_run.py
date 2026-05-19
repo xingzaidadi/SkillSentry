@@ -196,6 +196,11 @@ def verify_plan_and_dry_run(root: Path, env: dict, skill: Path, cases: Path, err
         errors.append("plan profile should return a dry_run plan payload")
     if "executor-with" not in payload.get("plan", {}).get("heavy_steps", []):
         errors.append("plan profile should mark executor-with as heavy")
+    plan_summary = payload.get("plan", {}).get("summary", {})
+    if plan_summary.get("llm_step_count") != len(payload.get("plan", {}).get("llm_steps", [])):
+        errors.append("plan summary should count llm steps")
+    if payload.get("plan", {}).get("cost_level") != "heavy":
+        errors.append("plan profile should mark quick mode as heavy")
 
     before = fake_count(count_file)
     completed = run_profile(root, env, "local", skill=skill, cases=cases, dry_run=True)
@@ -213,6 +218,9 @@ def verify_plan_and_dry_run(root: Path, env: dict, skill: Path, cases: Path, err
     heavy_steps = payload.get("plan", {}).get("heavy_steps", [])
     if heavy_steps != ["executor-with", "grader-report"]:
         errors.append(f"local dry-run heavy steps changed: {heavy_steps!r}")
+    plan_summary = payload.get("plan", {}).get("summary", {})
+    if plan_summary.get("heavy_step_count") != 2 or payload.get("plan", {}).get("cost_level") != "heavy":
+        errors.append("local dry-run should summarize two heavy steps")
 
 
 def fake_count(path: Path) -> int:

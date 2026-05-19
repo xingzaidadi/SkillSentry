@@ -46,12 +46,28 @@ def summarize_plan_steps(steps: list[dict]) -> dict:
     heavy_steps = [item.get("step") for item in steps if item.get("heavy")]
     network_steps = [item.get("step") for item in steps if item.get("requires_network")]
     llm_steps = [item.get("step") for item in steps if item.get("requires_llm")]
+    deterministic_steps = [item.get("step") for item in steps if item.get("step_type") == "deterministic"]
+    if llm_steps:
+        cost_level = "heavy"
+    elif network_steps:
+        cost_level = "network"
+    else:
+        cost_level = "light"
     return {
         "heavy_steps": heavy_steps,
         "llm_steps": llm_steps,
         "network_steps": network_steps,
+        "deterministic_steps": deterministic_steps,
         "requires_llm": bool(llm_steps),
         "requires_network": bool(network_steps),
+        "cost_level": cost_level,
+        "summary": {
+            "step_count": len(steps),
+            "heavy_step_count": len(heavy_steps),
+            "llm_step_count": len(llm_steps),
+            "network_step_count": len(network_steps),
+            "deterministic_step_count": len(deterministic_steps),
+        },
     }
 
 

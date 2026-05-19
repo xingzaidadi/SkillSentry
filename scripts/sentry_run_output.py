@@ -18,6 +18,8 @@ def render_text(payload: dict) -> str:
     if payload.get("warning"):
         lines.append(f"- {payload['warning']}")
 
+    if payload.get("dry_run"):
+        lines.append("dry-run: inspected inputs and rendered the plan only; no executor/grader/CI heavy steps were started")
     lines.extend(_render_plan_lines(payload.get("plan")))
     lines.extend(_render_reuse_summary_lines(payload.get("reuse_summary", {})))
     lines.extend(_render_reuse_forecast_lines(payload.get("reuse_forecast")))
@@ -34,6 +36,15 @@ def _render_plan_lines(plan) -> list[str]:
         return []
 
     lines = ["plan:"]
+    summary = plan.get("summary")
+    if isinstance(summary, dict):
+        lines.append(
+            "summary: "
+            f"{summary.get('step_count', 0)} steps; "
+            f"{summary.get('llm_step_count', 0)} llm-heavy; "
+            f"{summary.get('network_step_count', 0)} network; "
+            f"cost_level={plan.get('cost_level', 'unknown')}"
+        )
     for item in plan["steps"]:
         markers = []
         if item.get("heavy"):
