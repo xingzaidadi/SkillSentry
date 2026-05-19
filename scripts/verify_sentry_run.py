@@ -417,6 +417,10 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("changed cases incorrectly reused executor")
     if changed_cases_payload.get("executor", {}).get("reuse", {}).get("reason") != "input_hash_changed":
         errors.append("changed cases should explain executor reuse miss as input_hash_changed")
+    if not changed_cases_payload.get("executor", {}).get("reuse", {}).get("expected_input_hash"):
+        errors.append("changed cases executor reuse miss should include expected_input_hash")
+    if not changed_cases_payload.get("executor", {}).get("reuse", {}).get("recorded_input_hash"):
+        errors.append("changed cases executor reuse miss should include recorded_input_hash")
     if changed_cases_payload.get("grader", {}).get("reused") is True:
         errors.append("changed cases incorrectly reused grader")
     if changed_cases_payload.get("grader", {}).get("reuse", {}).get("reason") != "input_hash_changed":
@@ -425,6 +429,10 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("changed cases incorrectly reused prepared cases")
     if changed_cases_payload.get("cases", {}).get("reuse", {}).get("reason") != "cases_hash_changed":
         errors.append("changed cases should explain prepared cases reuse miss as cases_hash_changed")
+    if not changed_cases_payload.get("cases", {}).get("reuse", {}).get("expected_cases_hash"):
+        errors.append("changed cases prepared reuse miss should include expected_cases_hash")
+    if not changed_cases_payload.get("cases", {}).get("reuse", {}).get("prepared_cases_hash"):
+        errors.append("changed cases prepared reuse miss should include prepared_cases_hash")
     if not any("Cases changed" in hint for hint in changed_cases_payload.get("reuse_summary", {}).get("hints", [])):
         errors.append("changed cases reuse summary should include cases changed hint")
 
@@ -446,6 +454,10 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("changed skill incorrectly reused executor")
     if changed_skill_payload.get("executor", {}).get("reuse", {}).get("reason") != "input_hash_changed":
         errors.append("changed skill should explain executor reuse miss as input_hash_changed")
+    if not changed_skill_payload.get("executor", {}).get("reuse", {}).get("expected_input_hash"):
+        errors.append("changed skill executor reuse miss should include expected_input_hash")
+    if not changed_skill_payload.get("executor", {}).get("reuse", {}).get("recorded_input_hash"):
+        errors.append("changed skill executor reuse miss should include recorded_input_hash")
     if not any("Inputs changed" in hint for hint in changed_skill_payload.get("reuse_summary", {}).get("hints", [])):
         errors.append("changed skill reuse summary should include inputs changed hint")
     session = load_json(session_dir / "session.json")

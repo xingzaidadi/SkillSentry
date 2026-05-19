@@ -140,6 +140,8 @@ def step_reuse_state(session_dir: Path, step: str, input_hash: str, required: li
         return state
     if step_data.get("input_hash") != input_hash:
         state["reason"] = "input_hash_changed"
+        state["recorded_input_hash"] = step_data.get("input_hash")
+        state["expected_input_hash"] = input_hash
         return state
     missing = [str(path) for path in required if not path.exists()]
     if missing:
@@ -375,6 +377,7 @@ def prepared_cases_reuse_state(session_dir: Path, target: Path, cases_hash: str 
     if target_hash != cases_hash:
         state["reason"] = "cases_hash_changed"
         state["prepared_cases_hash"] = target_hash
+        state["expected_cases_hash"] = cases_hash
         return state
     session = sentry_state.load_session(session_dir)
     case_lint = session.get("case_lint")
