@@ -26,15 +26,14 @@ import sentry_case_prepare
 import sentry_debug_profile
 import sentry_delegated_ci
 import sentry_diagnostics
-import sentry_grader
 import sentry_light_profiles
+import sentry_local_steps
 import sentry_preflight
 from sentry_profile_runtime import ProfileTimings, profile_payload, utc_now
 import sentry_profile_state
 import sentry_reuse_core
 import sentry_run_output
 import sentry_run_plan
-from sentry_executor import execute_executor_step
 from sentry_gate import build_gate
 from sentry_pipeline import PIPELINES
 
@@ -277,46 +276,15 @@ def run_profile_local(args) -> tuple[int, dict]:
         model = args.executor_model or args.model
         evals_file = session_dir / "evals.json"
         skill_path = Path(preflight["skill_path"])
-        executor_hash = combine_hash(
-            "executor-with",
-            file_hash(evals_file),
-            file_hash(skill_path),
-            model,
-            args.timeout_per_eval,
+        executor = sentry_local_steps.run_executor_with_reuse(
+            session_dir=session_dir,
+            evals_file=evals_file,
+            skill_path=skill_path,
+            model=model,
+            timeout_per_eval=args.timeout_per_eval,
+            force_executor=args.force_executor,
+            verbose=args.verbose,
         )
-        executor_outputs = sentry_artifacts.ArtifactRegistry(session_dir, evals_file=evals_file).required_outputs("executor-with")
-        executor_reuse = step_reuse_state(session_dir, "executor-with", executor_hash, executor_outputs)
-        if not args.force_executor and executor_reuse.get("reusable"):
-            executor = {
-                "status": "OK",
-                "step": "executor-with",
-                "variant": "with_skill",
-                "reused": True,
-                "reuse": executor_reuse,
-                "summary_file": str(session_dir / "executor_results.json"),
-                "summary": load_json(session_dir / "executor_results.json"),
-            }
-        else:
-            executor = execute_executor_step(
-                evals_file=evals_file,
-                skill_path=skill_path,
-                session_dir=session_dir,
-                model=model,
-                timeout_per_eval=args.timeout_per_eval,
-                variant="with_skill",
-                verbose=args.verbose,
-                update_session=True,
-            )
-            executor["reused"] = False
-            executor["reuse"] = {"step": "executor-with", "reusable": False, "reason": "force_executor"} if args.force_executor else executor_reuse
-            record_manifest_step(
-                session_dir,
-                "executor-with",
-                status=executor.get("status", "ERROR"),
-                input_hash=executor_hash,
-                outputs=executor_outputs,
-                extra={"model": model, "timeout_per_eval": args.timeout_per_eval},
-            )
     if executor.get("status") != "OK":
         payload = profile_payload(
             "local",
@@ -332,43 +300,13 @@ def run_profile_local(args) -> tuple[int, dict]:
         return 1, payload
 
     with timings.phase("grader"):
-        response_hashes = [(str(path), file_hash(path)) for path in expected_response_outputs(evals_file, session_dir)]
-        grader_hash = combine_hash("grader-report", file_hash(evals_file), response_hashes, args.model)
-        grader_outputs = sentry_artifacts.ArtifactRegistry(session_dir, evals_file=evals_file).required_outputs("grader-report")
-        grader_reuse = step_reuse_state(session_dir, "grader-report", grader_hash, grader_outputs)
-        if not args.force_grader and grader_reuse.get("reusable"):
-            gate = build_gate(session_dir)
-            grader = {
-                "status": "OK",
-                "step": "grader-report",
-                "model": args.model,
-                "reused": True,
-                "reuse": grader_reuse,
-                "artifacts": {
-                    "grading_summary": str(session_dir / "grading-summary.json"),
-                    "report_html": str(session_dir / "report.html"),
-                },
-                "gate": gate,
-            }
-        else:
-            grader = sentry_grader.execute_grader_report(
-                evals_file=evals_file,
-                session_dir=session_dir,
-                model=args.model,
-                verbose=args.verbose,
-                update_session=True,
-                write_report=True,
-            )
-            grader["reused"] = False
-            grader["reuse"] = {"step": "grader-report", "reusable": False, "reason": "force_grader"} if args.force_grader else grader_reuse
-            record_manifest_step(
-                session_dir,
-                "grader-report",
-                status=grader.get("status", "ERROR"),
-                input_hash=grader_hash,
-                outputs=grader_outputs,
-                extra={"model": args.model},
-            )
+        grader = sentry_local_steps.run_grader_with_reuse(
+            session_dir=session_dir,
+            evals_file=evals_file,
+            model=args.model,
+            force_grader=args.force_grader,
+            verbose=args.verbose,
+        )
     with timings.phase("diagnostics"):
         gate = grader.get("gate") or build_gate(session_dir)
         diagnostics = sentry_diagnostics.collect_diagnostics(session_dir, gate)
