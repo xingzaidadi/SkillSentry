@@ -326,17 +326,37 @@ b334dcc refactor: extract local profile runner
 757e15b refactor: share profile json writer
 a51fab1 refactor: extract run cli dispatcher
 1e458f2 refactor: extract run compatibility facade
+0fbd4a1 docs: add tool-as-code refactor pitfall guide
+2b3e2d6 docs: move runtime routing details to reference
+76e21be docs: clarify evaluation entrypoints
+c631374 feat: summarize run plan weight
 ```
+
+## Follow-up Closure
+
+After the initial guide was written, three small closure slices finished the
+user-facing side of the refactor:
+
+- `SKILL.md` became a router again. Detailed runtime routing moved to
+  `references/runtime-router-guide.md`, while the main skill file keeps only the
+  trigger, routing rules, core contracts, and forbidden changes.
+- `README.md` gained an entrypoint choice table, so users can distinguish local
+  light checks, local reusable runs, and full CI/release gates before reading the
+  longer profile reference.
+- `plan` and `local --dry-run` now expose `summary` and `cost_level` in the JSON
+  payload and render the step count, LLM-heavy count, network count, and dry-run
+  guarantee in text output.
+
+The important pattern is that "make the tool feel lighter" is not only a runtime
+optimization. It also means users can see the weight of a run before starting it.
 
 ## When Continuing
 
 Safe next steps:
 
-- Make `SKILL.md` more explicitly a router and point to the new reference/core
-  modules.
-- Improve README entrypoint guidance.
-- Improve `plan/dry-run` explanations.
 - Add more focused tests around CLI help and compatibility facade imports.
+- Add sample output snapshots for the documented entrypoints if text output
+  starts drifting again.
 
 Avoid for now:
 
