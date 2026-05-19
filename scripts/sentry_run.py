@@ -27,6 +27,7 @@ import sentry_debug_profile
 import sentry_delegated_ci
 import sentry_diagnostics
 import sentry_grader
+import sentry_light_profiles
 import sentry_preflight
 from sentry_profile_runtime import ProfileTimings, profile_payload, utc_now
 import sentry_profile_state
@@ -187,72 +188,15 @@ def expected_grading_outputs(evals_file: Path, session_dir: Path) -> list[Path]:
 
 
 def run_profile_preflight(args) -> tuple[int, dict]:
-    timings = ProfileTimings()
-    with timings.phase("preflight"):
-        code, preflight = run_preflight(args)
-    return code, profile_payload("preflight", "OK" if code == 0 else "ERROR", preflight=preflight, timings=timings.snapshot())
+    return sentry_light_profiles.run_profile_preflight(args)
 
 
 def run_profile_lint(args) -> tuple[int, dict]:
-    timings = ProfileTimings()
-    with timings.phase("preflight"):
-        code, preflight = run_preflight(args)
-    if code != 0:
-        return code, profile_payload("lint", "ERROR", preflight=preflight, timings=timings.snapshot())
-
-    with timings.phase("session"):
-        session_dir = init_session(
-            preflight["skill_dir_name"],
-            preflight["skill_hash"],
-            preflight["skill_type"],
-            args.mode,
-            preflight,
-            preflight.get("runtime", args.runtime),
-        )
-    cases_file = resolve_cases(args, preflight)
-    if not cases_file:
-        payload = profile_payload(
-            "lint",
-            "WARN",
-            session_dir=str(session_dir),
-            preflight=preflight,
-            warning="No evals.json/cases.cache.json found; only preflight completed.",
-            timings=timings.snapshot(),
-        )
-        save_json(session_dir / "sentry-run-result.json", payload)
-        return 0, payload
-
-    with timings.phase("prepare_cases"):
-        prepared = prepare_cases(session_dir, cases_file)
-    status = "OK" if prepared.get("status") == "OK" and prepared.get("case_lint", {}).get("warning_count", 0) == 0 else "WARN"
-    payload = profile_payload(
-        "lint",
-        status,
-        session_dir=str(session_dir),
-        preflight=preflight,
-        cases=prepared,
-        reuse_summary=summarize_reuse_decisions(prepared),
-        timings=timings.snapshot(),
-    )
-    save_json(session_dir / "sentry-run-result.json", payload)
-    return 0 if prepared.get("status") == "OK" else 1, payload
+    return sentry_light_profiles.run_profile_lint(args)
 
 
 def run_profile_plan(args) -> tuple[int, dict]:
-    timings = ProfileTimings()
-    with timings.phase("preflight"):
-        code, preflight = run_preflight(args)
-    plan = build_mode_plan(args.mode)
-    payload = profile_payload(
-        "plan",
-        "OK" if code == 0 else "ERROR",
-        mode=args.mode,
-        preflight=preflight,
-        plan=plan,
-        dry_run=True,
-        timings=timings.snapshot(),
-    )
-    return code, payload
+    return sentry_light_profiles.run_profile_plan(args)
 
 
 def run_profile_debug(args) -> tuple[int, dict]:
