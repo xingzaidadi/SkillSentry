@@ -292,6 +292,7 @@ def current_case_ids(session_dir: Path) -> list[str]:
 
 def summarize_executor_variant(summary: dict, variant: str, top: int, case_ids: list[str] | None = None) -> dict:
     current_cases = set(case_ids or [])
+    matching_items = []
     rows = []
     for item in _as_list(summary.get("results")):
         if not isinstance(item, dict):
@@ -299,6 +300,7 @@ def summarize_executor_variant(summary: dict, variant: str, top: int, case_ids: 
         eval_id = item.get("eval_id")
         if current_cases and str(eval_id) not in current_cases:
             continue
+        matching_items.append(item)
         duration_ms = _duration_ms(item.get("duration"))
         if duration_ms is None:
             continue
@@ -316,8 +318,8 @@ def summarize_executor_variant(summary: dict, variant: str, top: int, case_ids: 
     slowest = sorted(rows, key=lambda item: item.get("duration_ms", 0), reverse=True)
     if current_cases:
         total = len(current_cases)
-        success = sum(1 for item in rows if item.get("status") == "success")
-        failed = sum(1 for item in rows if item.get("status") == "failed")
+        success = sum(1 for item in matching_items if item.get("status") == "success")
+        failed = sum(1 for item in matching_items if item.get("status") == "failed")
     else:
         total = _number(summary.get("total"), len(_as_list(summary.get("results"))))
         success = _number(summary.get("success"), 0)

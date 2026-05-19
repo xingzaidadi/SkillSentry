@@ -163,6 +163,25 @@ def verify_session(root: Path, errors: list[str]) -> None:
     if partial_executor.get("available") is not False or partial_executor.get("expected_cases") != 2:
         errors.append("partial executor timing should report expected current cases when summary is missing")
 
+    partial_executor_dir = root / "partial-executor-session"
+    partial_executor_dir.mkdir()
+    sentry_state.save_session(partial_executor_dir, {"skill": "timing-fixture", "mode": "local"})
+    save_json(partial_executor_dir / "evals.json", make_cases())
+    save_json(
+        partial_executor_dir / "executor_results.json",
+        {
+            "results": [
+                {"eval_id": "eval-1", "name": "fast", "status": "success", "duration": 0.2},
+                {"eval_id": "eval-2", "name": "failed", "status": "failed"},
+                {"eval_id": "eval-stale", "name": "stale", "status": "failed", "duration": 99.0},
+            ],
+        },
+    )
+    partial_executor_payload = sentry_timing.analyze(partial_executor_dir, top=5)
+    partial_variant = partial_executor_payload.get("executor_timing", {}).get("variants", [{}])[0]
+    if partial_variant.get("total") != 2 or partial_variant.get("timed") != 1 or partial_variant.get("failed") != 1:
+        errors.append("partial executor timing should count failed current cases even without duration")
+
 
 def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
     session_dir = root / "run-result-session"
