@@ -324,6 +324,29 @@ def verify_cli(root: Path, errors: list[str]) -> None:
     if "executor timing: unavailable" not in text.stdout:
         errors.append("text output should explain unavailable executor timing")
 
+    missing_artifacts = root / "missing-artifacts-session"
+    missing_artifacts.mkdir()
+    sentry_state.save_session(missing_artifacts, {"skill": "timing-fixture", "mode": "local"})
+    save_json(missing_artifacts / "evals.json", make_cases())
+    text_expected = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "sentry_timing.py"),
+            "--input",
+            str(missing_artifacts),
+            "--format",
+            "text",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if text_expected.returncode != 0:
+        errors.append(f"sentry_timing.py text expected cases exited {text_expected.returncode}: {text_expected.stderr.strip()} {text_expected.stdout.strip()}")
+    if "expected_cases=2" not in text_expected.stdout:
+        errors.append("text output should include expected_cases for unavailable executor/grader timing")
+
 
 def verify() -> tuple[bool, list[str]]:
     errors: list[str] = []

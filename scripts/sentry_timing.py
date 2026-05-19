@@ -588,7 +588,9 @@ def main() -> int:
                     f"{item.get('duration_ms')}ms ({item.get('status', 'N/A')})"
                 )
         elif executor.get("session_dir"):
-            print(f"executor timing: unavailable ({executor.get('reason')})")
+            expected = executor.get("expected_cases")
+            suffix = f", expected_cases={expected}" if expected is not None else ""
+            print(f"executor timing: unavailable ({executor.get('reason')}{suffix})")
         grader = _as_dict(payload.get("grader_timing"))
         if grader.get("available"):
             duration = _as_dict(grader.get("duration_ms"))
@@ -602,7 +604,9 @@ def main() -> int:
             for item in _as_list(grader.get("slowest_cases")):
                 print(f"- {item.get('eval_id')}: {item.get('duration_ms')}ms ({item.get('status', 'N/A')})")
         elif grader.get("session_dir"):
-            print(f"grader timing: unavailable ({grader.get('reason')})")
+            expected = grader.get("expected_cases")
+            suffix = f", expected_cases={expected}" if expected is not None else ""
+            print(f"grader timing: unavailable ({grader.get('reason')}{suffix})")
         print(f"recommendation: {payload['recommendation']}")
     return 0
 
