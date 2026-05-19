@@ -305,6 +305,7 @@ SkillSentry/
 │   ├── verify_sentry_executor.py # executor wrapper 回归
 │   ├── verify_sentry_grader.py # grader wrapper 回归
 │   ├── verify_sentry_run.py    # profile 组合器回归
+│   ├── verify_local_dogfood.py # local 首跑/复用 dogfood 回归
 │   ├── verify_ci_modes.py      # 五种 CI 模式编排回归
 │   ├── verify_ci_diagnostics.py # CI 诊断输出回归
 │   ├── verify_ci_failure_report.py # CI 失败报告 artifact 回归
