@@ -13,6 +13,10 @@ import sys
 import time
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 def build_eval_prompt(eval_config: dict, skill_content: str, variant: str = "with_skill") -> str:
     """构造单个 eval 的执行 prompt"""

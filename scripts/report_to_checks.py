@@ -24,6 +24,10 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Push SkillSentry results to GitHub Checks")

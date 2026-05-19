@@ -21,6 +21,10 @@ import urllib.error
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # ─────────────────────────────────────────────
 # 路径常量
 # ─────────────────────────────────────────────

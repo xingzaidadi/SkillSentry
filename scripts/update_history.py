@@ -18,6 +18,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Append test run to history.json")

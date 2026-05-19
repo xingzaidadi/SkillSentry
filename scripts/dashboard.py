@@ -16,6 +16,10 @@ from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 def find_sessions_dir():
     """Find sessions directory."""

@@ -21,6 +21,10 @@ generate_html_report.py  v2.0
 import json, os, sys, argparse, glob, re
 from datetime import datetime
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # ── 准入阈值 ─────────────────────────────────────────────────────────────────
 ADMISSION = {
     "S": {"pass_rate": 0.95, "delta_min": 0.0, "stddev": 0.05,

@@ -34,6 +34,10 @@ import argparse
 import datetime
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 def load_file(path: str) -> str:
     p = Path(path)

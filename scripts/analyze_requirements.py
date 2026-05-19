@@ -10,6 +10,11 @@ SkillSentry 需求分析脚本 - Step 0 自动化
 import json, os, sys, argparse, hashlib, re
 from datetime import datetime
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+
 def md5_file(path):
     return hashlib.md5(open(path, 'rb').read()).hexdigest()
 
