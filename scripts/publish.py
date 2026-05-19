@@ -190,7 +190,8 @@ def fallback_history_update(workspace_dir: str, skill_name: str, mode: str,
                     g_file = eval_dir / "grading.json"
                 if g_file.exists():
                     try:
-                        g = json.load(open(g_file, encoding="utf-8-sig"))
+                        with open(g_file, encoding="utf-8-sig") as f:
+                            g = json.load(f)
                         s = g.get("summary", {})
                         total_passed += s.get("passed", 0)
                         total_total += s.get("total", 0)
@@ -259,7 +260,8 @@ def read_grading_summary(workspace_dir: str) -> dict:
             g_file = eval_dir / "grading.json"
         if g_file.exists():
             try:
-                g = json.load(open(g_file, encoding="utf-8-sig"))
+                with open(g_file, encoding="utf-8-sig") as f:
+                    g = json.load(f)
                 s = g.get("summary", {})
                 total_passed += s.get("passed", 0)
                 total_total += s.get("total", 0)
