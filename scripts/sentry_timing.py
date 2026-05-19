@@ -320,10 +320,13 @@ def summarize_executor_variant(summary: dict, variant: str, top: int, case_ids: 
         total = len(current_cases)
         success = sum(1 for item in matching_items if item.get("status") == "success")
         failed = sum(1 for item in matching_items if item.get("status") == "failed")
+        reported_ids = {str(item.get("eval_id")) for item in matching_items if item.get("eval_id") is not None}
+        missing_ids = sorted(current_cases - reported_ids)
     else:
         total = _number(summary.get("total"), len(_as_list(summary.get("results"))))
         success = _number(summary.get("success"), 0)
         failed = _number(summary.get("failed"), max(total - success, 0))
+        missing_ids = []
     duration_total = sum(durations)
     return {
         "variant": variant,
@@ -331,6 +334,8 @@ def summarize_executor_variant(summary: dict, variant: str, top: int, case_ids: 
         "success": int(success),
         "failed": int(failed),
         "timed": len(rows),
+        "missing_cases": len(missing_ids),
+        "missing_case_ids": missing_ids[:top],
         "duration_ms": {
             "total": _round(duration_total),
             "avg": _round(duration_total / len(durations)) if durations else None,
@@ -429,12 +434,16 @@ def grader_timing(session_dir: Path | None, top: int) -> dict:
     case_ids = current_case_ids(session_dir)
     grading_files = find_grading_files(session_dir)
     expected_total = len(case_ids) if case_ids else len(grading_files)
+    found_ids = {path.parent.name for path in grading_files}
+    missing_ids = sorted(set(case_ids) - found_ids) if case_ids else []
     if not grading_files:
         return {
             "available": False,
             "reason": "grading_files_unavailable",
             "session_dir": str(session_dir),
             "expected_cases": expected_total,
+            "missing_cases": len(missing_ids),
+            "missing_case_ids": missing_ids[:top],
         }
 
     rows = []
@@ -468,6 +477,8 @@ def grader_timing(session_dir: Path | None, top: int) -> dict:
             "session_dir": str(session_dir),
             "grading_files": len(grading_files),
             "expected_cases": expected_total,
+            "missing_cases": len(missing_ids),
+            "missing_case_ids": missing_ids[:top],
             "timed": 0,
         }
 
@@ -477,6 +488,8 @@ def grader_timing(session_dir: Path | None, top: int) -> dict:
         "session_dir": str(session_dir),
         "grading_files": len(grading_files),
         "expected_cases": expected_total,
+        "missing_cases": len(missing_ids),
+        "missing_case_ids": missing_ids[:top],
     })
     return summary
 

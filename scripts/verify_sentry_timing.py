@@ -159,6 +159,8 @@ def verify_session(root: Path, errors: list[str]) -> None:
     partial_grader = partial_payload.get("grader_timing", {})
     if partial_grader.get("total") != 2 or partial_grader.get("timed") != 1:
         errors.append("partial grader timing should report total current cases and timed grading files")
+    if partial_grader.get("missing_cases") != 1 or partial_grader.get("missing_case_ids") != ["eval-2"]:
+        errors.append("partial grader timing should report missing current case ids")
     partial_executor = partial_payload.get("executor_timing", {})
     if partial_executor.get("available") is not False or partial_executor.get("expected_cases") != 2:
         errors.append("partial executor timing should report expected current cases when summary is missing")
@@ -181,6 +183,21 @@ def verify_session(root: Path, errors: list[str]) -> None:
     partial_variant = partial_executor_payload.get("executor_timing", {}).get("variants", [{}])[0]
     if partial_variant.get("total") != 2 or partial_variant.get("timed") != 1 or partial_variant.get("failed") != 1:
         errors.append("partial executor timing should count failed current cases even without duration")
+    if partial_variant.get("missing_cases") != 0:
+        errors.append("partial executor timing should not treat untimed reported cases as missing")
+
+    missing_executor_dir = root / "missing-executor-case-session"
+    missing_executor_dir.mkdir()
+    sentry_state.save_session(missing_executor_dir, {"skill": "timing-fixture", "mode": "local"})
+    save_json(missing_executor_dir / "evals.json", make_cases())
+    save_json(
+        missing_executor_dir / "executor_results.json",
+        {"results": [{"eval_id": "eval-1", "name": "fast", "status": "success", "duration": 0.2}]},
+    )
+    missing_executor_payload = sentry_timing.analyze(missing_executor_dir, top=5)
+    missing_variant = missing_executor_payload.get("executor_timing", {}).get("variants", [{}])[0]
+    if missing_variant.get("missing_cases") != 1 or missing_variant.get("missing_case_ids") != ["eval-2"]:
+        errors.append("executor timing should report missing current case ids")
 
 
 def verify_sentry_run_result(root: Path, errors: list[str]) -> None:
