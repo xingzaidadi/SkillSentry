@@ -197,6 +197,16 @@ def summarize_reuse_decisions(*sections: dict) -> dict:
         if isinstance(missing_outputs, list) and missing_outputs:
             entry["missing_outputs_count"] = len(missing_outputs)
             entry["missing_outputs_sample"] = missing_outputs[:5]
+        for key in (
+            "recorded_input_hash",
+            "expected_input_hash",
+            "prepared_cases_hash",
+            "expected_cases_hash",
+            "recorded_status",
+            "recorded_type",
+        ):
+            if reuse.get(key) is not None:
+                entry[key] = reuse.get(key)
         steps.append(entry)
         if not reused:
             hint = sentry_reuse.hint_for_reason(reason)

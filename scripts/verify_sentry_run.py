@@ -435,6 +435,9 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("changed cases prepared reuse miss should include prepared_cases_hash")
     if not any("Cases changed" in hint for hint in changed_cases_payload.get("reuse_summary", {}).get("hints", [])):
         errors.append("changed cases reuse summary should include cases changed hint")
+    case_summary = next((item for item in changed_cases_payload.get("reuse_summary", {}).get("steps", []) if item.get("step") == "prepare_cases"), {})
+    if not case_summary.get("expected_cases_hash") or not case_summary.get("prepared_cases_hash"):
+        errors.append("changed cases reuse summary should include case hash details")
 
     # Changing SKILL.md must invalidate executor and refresh session metadata.
     before = fake_count(count_file)
@@ -460,6 +463,9 @@ def verify_local(root: Path, env: dict, skill: Path, cases: Path, errors: list[s
         errors.append("changed skill executor reuse miss should include recorded_input_hash")
     if not any("Inputs changed" in hint for hint in changed_skill_payload.get("reuse_summary", {}).get("hints", [])):
         errors.append("changed skill reuse summary should include inputs changed hint")
+    executor_summary = next((item for item in changed_skill_payload.get("reuse_summary", {}).get("steps", []) if item.get("step") == "executor-with"), {})
+    if not executor_summary.get("expected_input_hash") or not executor_summary.get("recorded_input_hash"):
+        errors.append("changed skill reuse summary should include input hash details")
     session = load_json(session_dir / "session.json")
     preflight_hash = changed_skill_payload.get("preflight", {}).get("skill_hash")
     if preflight_hash and session.get("skill_hash") != preflight_hash:
