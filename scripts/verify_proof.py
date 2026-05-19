@@ -16,6 +16,11 @@ SkillSentry 读取证明验证器
 import sys
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+
 def verify(text: str) -> bool:
     return "[sentry-proof]" in text
 
