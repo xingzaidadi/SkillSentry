@@ -34,7 +34,7 @@ jobs:
       skills: ${{ steps.detect.outputs.skills }}
       has_changes: ${{ steps.detect.outputs.has_changes }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 2
 
@@ -71,7 +71,7 @@ jobs:
         skill: ${{ fromJson(needs.detect-changed-skills.outputs.skills) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: 安装 Claude Code CLI
         run: |
@@ -79,7 +79,7 @@ jobs:
           claude --version
 
       - name: 设置 Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 

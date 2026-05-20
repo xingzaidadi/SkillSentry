@@ -481,9 +481,17 @@ full step: python scripts/verify_deterministic.py --full --format json
 ```
 
 GitHub emitted a Node.js 20 deprecation annotation for `actions/checkout@v4` and
-`actions/setup-python@v5`; it was not a failure. Keep an eye on those actions
-before GitHub's Node 24 runner deadline, but do not treat it as a SkillSentry
-contract issue.
+`actions/setup-python@v5`; it was not a failure, but it was a future CI risk.
+The follow-up was to upgrade SkillSentry workflows and the self-test template to
+Node 24 compatible action majors:
+
+```text
+actions/checkout@v6
+actions/setup-python@v6
+```
+
+`scripts/verify_workflow_action_versions.py` now scans `.github/workflows/` and
+`references/workflows/` so Node 20 era action majors do not come back silently.
 
 ## Second Dogfood: Codegen Skill
 
