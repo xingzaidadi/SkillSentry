@@ -46,6 +46,7 @@ v9.0 是契约收敛版,不是功能扩展版。
 | `scripts/sentry_pipeline.py` | 输出当前稳定口径 pipeline、下一步、步骤类型、工具和 required artifacts | 不执行步骤、不生成产物 |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,记录 milestone evidence | 不跳过 auto-exempt 用户确认 |
 | `scripts/sentry_gate.py` | 原方案 `sentry-score` 的当前落地形态;聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict | 不改写 grading 原始证据;不把门禁判断拆回 LLM 心算 |
+| `scripts/sentry_case_quality.py` | 用例质量后置统计;统计 evals.json 维度覆盖、硬门禁检查、断言 orphan 率,输出 `case-quality-result.json` | 不干预用例生成过程;不调 LLM;不联网 |
 | `scripts/sentry_case_lint.py` | 读取 `evals.json`/`cases.cache.json`,检查本地路径等可执行性风险并输出 `case_warnings` | 不调 LLM、不跑 executor、不把 warning 当作质量失败 |
 | `scripts/sentry_executor.py` | 包装 `ci_executor.py`,执行 with_skill/without_skill,输出稳定 JSON 并更新 session | 不重新实现 CLI runner、不调 grader、不做质量判断 |
 | `scripts/sentry_grader.py` | 包装 `ci_grader.py`,评审已有 with_skill response,写 `grading-summary.json`/`report.html` 并更新 session | 不跑 executor、不改写 grading 原始证据、不做发布同步 |
@@ -126,11 +127,11 @@ v9.0 是契约收敛版,不是功能扩展版。
 
 ```json
 {
-  "smoke": ["cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
-  "quick": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
+  "smoke": ["cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
+  "quick": ["static", "cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
   "regression": ["sync-pull", "executor-with", "grader-report", "sync-push-results", "publish"],
-  "standard": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"],
-  "full": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"]
+  "standard": ["static", "cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"],
+  "full": ["static", "cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"]
 }
 ```
 

@@ -15,11 +15,11 @@
 ```
 
 **各模式的 pipeline 数组（v9.0 当前契约）**：
-- smoke: `["cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
-- quick: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- smoke: `["cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
+- quick: `["static", "cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"]`
 - regression: `["sync-pull", "executor-with", "grader-report", "sync-push-results", "publish"]`
-- standard: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"]`
-- full: `["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"]`
+- standard: `["static", "cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"]`
+- full: `["static", "cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"]`
 
 主调度器每轮读 session.json.pipeline[current_index+1] 确定下一步。超出数组范围 = 测评结束。
 
@@ -133,6 +133,28 @@ python scripts/sentry_case_lint.py --cases evals.json --session-dir <session>
 
 共 {N} 个用例 | exact_match: {X} | semantic: {Y} | existence: {Z}
 ```
+
+---
+
+## case-quality-check (sentry-case-quality)
+
+| 维度 | 定义 |
+|------|------|
+| must_read | evals.json + requirements.cache.json（如存在） |
+| 输入 | session_dir（含 evals.json） |
+| 输出 | case-quality-result.json |
+| 准出 | 硬门禁 3 项全 pass（happy_path≥1, negative≥1, robustness≥1）→ 通过；任一 fail → blocked |
+| 降级 | 脚本执行失败 → warn 继续（不阻断 pipeline） |
+| 幂等 | 同一 evals.json 多次结果一致 |
+
+脚本入口:
+
+```bash
+python scripts/sentry_case_quality.py <session_dir> --mode <mode> --format json
+python scripts/sentry_case_quality.py <session_dir> --mode standard --output case-quality-result.json
+```
+
+该入口是 `no-llm, no-network` 确定性脚本,只统计已生成 evals.json 的覆盖分布,不干预用例生成过程。
 
 ---
 

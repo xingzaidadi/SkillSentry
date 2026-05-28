@@ -307,6 +307,8 @@ HiL-2：确认失败/超时时是否有中止逻辑？→ 无：标注 ⚠️
 
 缺少任一类 → 补齐后再输出。不得跳过此自检。
 
+> **后置质量检查**：Step 7 完成后，pipeline 会自动调用 `case-quality-check` 步骤（`scripts/sentry_case_quality.py`）进行确定性后置统计，验证维度覆盖和断言质量。sentry-cases 本身专注于生成，不需要额外输出覆盖率矩阵。
+
 **evals.json**：对象数组，每条用例含 `id`、`display_name`、`type`、`source`、`prompt`、`skip_without_skill`、`expectations[]{text, precision, rule_ref}`，以及以下可选字段（有则填，无则省略）：
 
 | 可选字段 | 类型 | 用途 | 何时填写 |

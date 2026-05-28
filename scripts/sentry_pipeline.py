@@ -22,11 +22,11 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 PIPELINES: dict[str, list[str]] = {
-    "smoke": ["cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
-    "quick": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
+    "smoke": ["cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
+    "quick": ["static", "cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "grader-report", "sync-push-results", "publish"],
     "regression": ["sync-pull", "executor-with", "grader-report", "sync-push-results", "publish"],
-    "standard": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"],
-    "full": ["static", "cases", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"],
+    "standard": ["static", "cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "grader-report", "sync-push-results", "gate", "publish"],
+    "full": ["static", "cases", "case-quality-check", "sync-pull", "sync-push-cases", "executor-with", "executor-without", "comparator", "analyzer", "grader-report", "sync-push-results", "gate", "publish"],
 }
 
 
@@ -61,6 +61,14 @@ STEP_DEFINITIONS: dict[str, StepDefinition] = {
         can_skip=False,
         skip_policy="Cases may be cache-reused, but evals.json must exist.",
         required_artifacts=("evals.json",),
+    ),
+    "case-quality-check": StepDefinition(
+        step="case-quality-check",
+        step_type="deterministic",
+        tool="sentry-case-quality",
+        can_skip=True,
+        skip_policy="Quality check is advisory; blocked verdict stops pipeline, warnings continue.",
+        required_artifacts=("case-quality-result.json",),
     ),
     "sync-pull": StepDefinition(
         step="sync-pull",
