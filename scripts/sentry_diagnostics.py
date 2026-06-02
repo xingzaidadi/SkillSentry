@@ -506,9 +506,12 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
     if not categories:
         notes.append("No CI execution diagnostics were recorded.")
 
+    case_quality = _as_dict(load_json(session_path / "case-quality-result.json"))
+
     return {
         "case_warnings_count": len(case_warnings),
         "case_warnings": case_warnings[:10],
+        "case_quality": case_quality,
         "preflight": preflight,
         "executor": executor,
         "grader_errors": grader_errors,
@@ -599,6 +602,100 @@ def render_markdown(diagnostics: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _render_case_quality_html(diagnostics: dict) -> str:
+    """Render case-quality-result.json as an HTML section."""
+    cq = _as_dict(diagnostics.get("case_quality"))
+    if not cq or not cq.get("verdict"):
+        return ""
+
+    verdict = cq.get("verdict", "unknown")
+    verdict_color = {"pass": "#27ae60", "pass_with_warnings": "#f39c12", "blocked": "#e74c3c"}.get(verdict, "#666")
+    block_reason = cq.get("block_reason") or ""
+
+    # Hard gates
+    hard_gate = _as_dict(cq.get("hard_gate"))
+    hard_items = _as_list(hard_gate.get("items"))
+    hard_rows = ""
+    for item in hard_items:
+        if not isinstance(item, dict):
+            continue
+        icon = "&#x2713;" if item.get("status") == "pass" else "&#x2717;"
+        color = "#27ae60" if item.get("status") == "pass" else "#e74c3c"
+        hard_rows += f'<tr><td style="color:{color}">{icon}</td><td>{html.escape(str(item.get("name", "")))}</td><td>{item.get("actual", 0)}</td></tr>'
+
+    # Soft warns
+    soft_warn = _as_dict(cq.get("soft_warn"))
+    soft_items = _as_list(soft_warn.get("items"))
+    soft_rows = ""
+    for item in soft_items:
+        if not isinstance(item, dict):
+            continue
+        status = item.get("status", "skip")
+        icon = {"pass": "&#x2713;", "warn": "&#x26A0;", "skip": "&#x2014;"}.get(status, "?")
+        color = {"pass": "#27ae60", "warn": "#f39c12", "skip": "#999"}.get(status, "#666")
+        soft_rows += f'<tr><td style="color:{color}">{icon}</td><td>{html.escape(str(item.get("name", "")))}</td><td>{item.get("actual", 0)}</td></tr>'
+
+    # Coverage dimensions
+    coverage = _as_dict(cq.get("coverage"))
+    dims = _as_dict(coverage.get("dimensions"))
+    dim_text = " | ".join(f"{k}={v}" for k, v in dims.items()) if dims else "N/A"
+
+    # Assertion quality
+    aq = _as_dict(cq.get("assertion_quality"))
+    orphan_rate = aq.get("orphan_rate", 0)
+    orphan_verdict = aq.get("orphan_verdict", "N/A")
+    orphan_color = {"pass": "#27ae60", "warn": "#f39c12", "fail": "#e74c3c"}.get(orphan_verdict, "#666")
+
+    # Dangling refs (Phase 5)
+    dangling_refs = _as_list(aq.get("dangling_refs"))
+    uncovered_rules = _as_list(aq.get("uncovered_rules"))
+    rule_coverage_rate = aq.get("rule_coverage_rate")
+
+    dangling_html = ""
+    if dangling_refs:
+        refs = ", ".join(html.escape(str(r)) for r in dangling_refs[:10])
+        dangling_html = f'<p style="color:#e74c3c"><strong>Dangling refs:</strong> {refs}</p>'
+
+    uncovered_html = ""
+    if uncovered_rules:
+        rules = ", ".join(html.escape(str(r)) for r in uncovered_rules[:10])
+        uncovered_html = f'<p style="color:#f39c12"><strong>Uncovered rules:</strong> {rules}</p>'
+
+    rule_cov_html = ""
+    if rule_coverage_rate is not None:
+        rc_verdict = aq.get("rule_coverage_verdict", "N/A")
+        rc_color = {"pass": "#27ae60", "warn": "#f39c12", "fail": "#e74c3c"}.get(rc_verdict, "#666")
+        rule_cov_html = f'<p>Rule coverage: <span style="color:{rc_color}">{rule_coverage_rate:.0%} ({rc_verdict})</span></p>'
+
+    # Suggestions
+    suggestions = _as_list(cq.get("suggestions"))
+    suggestion_items = "".join(f"<li>{html.escape(str(s))}</li>" for s in suggestions[:10])
+
+    block_html = f'<p style="color:#e74c3c"><strong>Block reason:</strong> {html.escape(block_reason)}</p>' if block_reason else ""
+
+    return f"""
+  <h3>Case Quality</h3>
+  <p><strong>Verdict:</strong> <span style="color:{verdict_color};font-weight:bold">{html.escape(verdict)}</span></p>
+  {block_html}
+  <table>
+    <tr><th colspan="3">Hard Gates ({hard_gate.get("passed", 0)}/{hard_gate.get("total", 0)})</th></tr>
+    <tr><th></th><th>Check</th><th>Actual</th></tr>
+    {hard_rows}
+  </table>
+  <table>
+    <tr><th colspan="3">Soft Warns ({soft_warn.get("passed", 0)}/{soft_warn.get("total", 0)})</th></tr>
+    <tr><th></th><th>Check</th><th>Actual</th></tr>
+    {soft_rows}
+  </table>
+  <p><strong>Dimensions:</strong> {html.escape(dim_text)} (total: {coverage.get("total_cases", 0)})</p>
+  <p><strong>Assertions:</strong> {aq.get("total", 0)} total, {aq.get("with_rule_ref", 0)} with rule_ref, {aq.get("orphan", 0)} orphan (<span style="color:{orphan_color}">{orphan_rate:.0%} {orphan_verdict}</span>)</p>
+  {rule_cov_html}
+  {dangling_html}
+  {uncovered_html}
+  {"<p><strong>Suggestions:</strong></p><ul>" + suggestion_items + "</ul>" if suggestion_items else ""}
+"""
+
+
 def render_html_section(diagnostics: dict) -> str:
     preflight = _as_dict(diagnostics.get("preflight"))
     executor = _as_dict(diagnostics.get("executor"))
@@ -619,6 +716,7 @@ def render_html_section(diagnostics: dict) -> str:
     if not hint_items:
         hint_items = "<li>none</li>"
     grader_errors = _as_list(diagnostics.get("grader_errors"))
+    case_quality_html = _render_case_quality_html(diagnostics)
     grader_items = "".join(
         "<li>"
         + html.escape(str(item.get("source", "grading")))
@@ -697,6 +795,7 @@ def render_html_section(diagnostics: dict) -> str:
     <tr><th>Publish</th><td>{html.escape(str(publish.get("status") or "N/A"))}</td></tr>
     <tr><th>CI timing</th><td>{html.escape(total_text)}ms</td></tr>
   </table>
+{case_quality_html}
   <h3>Notes</h3>
   <ul>{notes}</ul>
   <h3>Timing hints</h3>

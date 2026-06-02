@@ -40,6 +40,10 @@ MODE_THRESHOLDS = {
 
 ORPHAN_THRESHOLDS = {"pass": 0.30, "warn": 0.50}
 
+# ── Rule coverage thresholds ────────────────────────────────────────────────
+
+RULE_COVERAGE_THRESHOLDS = {"pass": 0.70, "warn": 0.50}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="SkillSentry case quality check")
@@ -75,10 +79,30 @@ def count_dimensions(evals: list[dict]) -> dict[str, int]:
 
 # ── Assertion quality ────────────────────────────────────────────────────────
 
-def analyze_assertions(evals: list[dict]) -> dict:
-    """Analyze assertion quality: rule_ref coverage and orphan rate."""
+def _extract_rule_ids(rules_cache: dict) -> set[str]:
+    """Extract rule identifiers from rules.cache.json.
+
+    Rules are stored as a plain string list. We generate IDs like R-01, R-02...
+    and also accept the raw rule text as a valid ref (for LLMs that quote the rule directly).
+    """
+    rules = rules_cache.get("rules") or []
+    if not isinstance(rules, list):
+        return set()
+    ids: set[str] = set()
+    for i, rule in enumerate(rules, 1):
+        ids.add(f"R-{i:02d}")
+        ids.add(f"R{i}")
+        ids.add(f"R-{i}")
+        if isinstance(rule, str) and rule.strip():
+            ids.add(rule.strip())
+    return ids
+
+
+def analyze_assertions(evals: list[dict], rules_cache: dict | None = None) -> dict:
+    """Analyze assertion quality: rule_ref coverage, orphan rate, and structural validation."""
     total = 0
     with_rule_ref = 0
+    ref_values: list[str] = []
 
     for case in evals:
         if not isinstance(case, dict):
@@ -90,8 +114,10 @@ def analyze_assertions(evals: list[dict]) -> dict:
             if not isinstance(exp, dict):
                 continue
             total += 1
-            if exp.get("rule_ref"):
+            ref = exp.get("rule_ref")
+            if ref:
                 with_rule_ref += 1
+                ref_values.append(str(ref).strip())
 
     orphan = total - with_rule_ref
     orphan_rate = orphan / total if total > 0 else 0.0
@@ -103,13 +129,56 @@ def analyze_assertions(evals: list[dict]) -> dict:
     else:
         orphan_verdict = "fail"
 
-    return {
+    result: dict = {
         "total": total,
         "with_rule_ref": with_rule_ref,
         "orphan": orphan,
         "orphan_rate": round(orphan_rate, 4),
         "orphan_verdict": orphan_verdict,
     }
+
+    # Phase 5: structural validation against rules.cache.json
+    if rules_cache and isinstance(rules_cache.get("rules"), list):
+        valid_ids = _extract_rule_ids(rules_cache)
+        rules_list = rules_cache.get("rules", [])
+        total_rules = len(rules_list)
+
+        # Find dangling refs (rule_ref values that don't match any known rule)
+        dangling: list[str] = []
+        referenced_indices: set[int] = set()
+        for ref in ref_values:
+            if ref in valid_ids:
+                # Map back to rule index
+                for i, rule in enumerate(rules_list):
+                    if ref == f"R-{i+1:02d}" or ref == f"R{i+1}" or ref == f"R-{i+1}" or ref == rule.strip():
+                        referenced_indices.add(i)
+                        break
+            else:
+                if ref not in dangling:
+                    dangling.append(ref)
+
+        # Find uncovered rules (rules with no assertion referencing them)
+        uncovered: list[str] = []
+        for i, rule in enumerate(rules_list):
+            if i not in referenced_indices:
+                label = f"R-{i+1:02d}"
+                uncovered.append(label)
+
+        rule_coverage_rate = (total_rules - len(uncovered)) / total_rules if total_rules > 0 else 1.0
+
+        if rule_coverage_rate >= RULE_COVERAGE_THRESHOLDS["pass"]:
+            rule_coverage_verdict = "pass"
+        elif rule_coverage_rate >= RULE_COVERAGE_THRESHOLDS["warn"]:
+            rule_coverage_verdict = "warn"
+        else:
+            rule_coverage_verdict = "fail"
+
+        result["dangling_refs"] = dangling[:20]
+        result["uncovered_rules"] = uncovered[:20]
+        result["rule_coverage_rate"] = round(rule_coverage_rate, 4)
+        result["rule_coverage_verdict"] = rule_coverage_verdict
+
+    return result
 
 
 # ── Gate checks ──────────────────────────────────────────────────────────────
@@ -175,6 +244,23 @@ def generate_suggestions(hard_gate: dict, soft_warn: dict, assertion_quality: di
     elif assertion_quality["orphan_verdict"] == "fail":
         suggestions.append(f"断言 orphan 率 {assertion_quality['orphan_rate']:.0%} 过高，断言设计质量不足")
 
+    # Phase 5: structural validation suggestions
+    dangling = assertion_quality.get("dangling_refs") or []
+    if dangling:
+        refs_text = ", ".join(dangling[:5])
+        suggestions.append(f"断言引用了不存在的规则: {refs_text}")
+
+    uncovered = assertion_quality.get("uncovered_rules") or []
+    if uncovered:
+        rules_text = ", ".join(uncovered[:5])
+        suffix = f" 等 {len(uncovered)} 条" if len(uncovered) > 5 else ""
+        suggestions.append(f"以下规则无断言覆盖: {rules_text}{suffix}")
+
+    rule_cov_verdict = assertion_quality.get("rule_coverage_verdict")
+    if rule_cov_verdict == "fail":
+        rate = assertion_quality.get("rule_coverage_rate", 0)
+        suggestions.append(f"规则覆盖率仅 {rate:.0%}，低于 50% 阈值，用例设计需大幅补充")
+
     return suggestions
 
 
@@ -206,7 +292,19 @@ def build_quality_result(session_dir: Path, mode: str) -> dict:
     dim_counts = count_dimensions(evals)
     hard_gate = check_hard_gates(dim_counts, hard_min)
     soft_warn = check_soft_warns(dim_counts, soft_min)
-    assertion_quality = analyze_assertions(evals)
+
+    # Load rules.cache.json for structural validation (Phase 5)
+    rules_cache = None
+    for candidate in [
+        session_dir / "rules.cache.json",
+        session_dir.parent / "rules.cache.json",
+    ]:
+        rc = load_json(candidate)
+        if rc and isinstance(rc, dict) and isinstance(rc.get("rules"), list):
+            rules_cache = rc
+            break
+
+    assertion_quality = analyze_assertions(evals, rules_cache)
     suggestions = generate_suggestions(hard_gate, soft_warn, assertion_quality)
 
     # Determine verdict
@@ -214,7 +312,12 @@ def build_quality_result(session_dir: Path, mode: str) -> dict:
         failed_items = [i["name"] for i in hard_gate["items"] if i["status"] == "fail"]
         verdict = "blocked"
         block_reason = f"硬门禁未通过: {', '.join(failed_items)}"
-    elif soft_warn["passed"] < soft_warn["total"] or assertion_quality["orphan_verdict"] != "pass":
+    elif (
+        soft_warn["passed"] < soft_warn["total"]
+        or assertion_quality["orphan_verdict"] != "pass"
+        or assertion_quality.get("rule_coverage_verdict") == "fail"
+        or assertion_quality.get("dangling_refs")
+    ):
         verdict = "pass_with_warnings"
         block_reason = None
     else:

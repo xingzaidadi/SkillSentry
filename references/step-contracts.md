@@ -140,12 +140,13 @@ python scripts/sentry_case_lint.py --cases evals.json --session-dir <session>
 
 | 维度 | 定义 |
 |------|------|
-| must_read | evals.json + requirements.cache.json（如存在） |
+| must_read | evals.json + rules.cache.json（如存在） |
 | 输入 | session_dir（含 evals.json） |
 | 输出 | case-quality-result.json |
 | 准出 | 硬门禁 3 项全 pass（happy_path≥1, negative≥1, robustness≥1）→ 通过；任一 fail → blocked |
 | 降级 | 脚本执行失败 → warn 继续（不阻断 pipeline） |
 | 幂等 | 同一 evals.json 多次结果一致 |
+| 扩展字段 | dangling_refs, uncovered_rules, rule_coverage_rate（需 rules.cache.json） |
 
 脚本入口:
 
