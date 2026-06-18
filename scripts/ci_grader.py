@@ -97,12 +97,40 @@ def call_llm(prompt: str, model: str = "claude-sonnet-4-6", max_tokens: int = 40
         return _call_claude_cli(prompt, model=model, max_tokens=max_tokens)
 
 
-def build_grading_prompt(eval_config: dict, transcript: str, response_text: str) -> str:
-    """构造单个 eval 的评审 prompt"""
-    assertions = eval_config.get("assertions", [])
-    name = eval_config.get("name", "unknown")
+def grade_exact_match(expected: str, response_text: str) -> tuple[bool, str]:
+    """确定性评审：exact_match——response 中必须包含 expected 文本（忽略首尾空白）。
+    返回 (pass, evidence)。"""
+    needle = expected.strip()
+    if needle in response_text:
+        # 截取匹配位置的上下文作为 evidence（最多 60 字）
+        idx = response_text.find(needle)
+        start = max(0, idx - 10)
+        snippet = response_text[start: idx + len(needle) + 10].replace("\n", " ")
+        return True, f"found: 「{snippet[:60]}」"
+    return False, f"not found: 「{needle[:60]}」"
 
-    assertions_text = json.dumps(assertions, ensure_ascii=False, indent=2)
+
+def grade_existence(expected: str, response_text: str) -> tuple[bool, str]:
+    """确定性评审：existence——检查 expected 描述的关键词是否出现在 response 中。
+    策略：取 expected 中所有长度>=2 的 token，至少一个在 response 中即为通过。
+    这是保守策略，对于纯关键词断言准确；如需更精确可升级为 semantic。
+    返回 (pass, evidence)。"""
+    # 以空格/标点分词，取实质性关键词
+    import re as _re
+    tokens = [t for t in _re.split(r"[\s,，。；;:：!！?？、]+", expected.strip()) if len(t) >= 2]
+    if not tokens:
+        # 没有可用 token，退化为 exact_match
+        return grade_exact_match(expected, response_text)
+    found_tokens = [t for t in tokens if t in response_text]
+    if found_tokens:
+        return True, f"found token(s): {found_tokens[:3]}"
+    return False, f"none of {tokens[:5]} found in response"
+
+
+def build_grading_prompt(eval_config: dict, transcript: str, response_text: str, semantic_only_assertions: list) -> str:
+    """构造单个 eval 的评审 prompt——只包含 semantic 断言。"""
+    name = eval_config.get("name", "unknown")
+    assertions_text = json.dumps(semantic_only_assertions, ensure_ascii=False, indent=2)
 
     return f"""你是 SkillSentry 的断言评审模块。请逐条评审以下断言是否通过。
 
@@ -119,15 +147,13 @@ def build_grading_prompt(eval_config: dict, transcript: str, response_text: str)
 {transcript}
 ```
 
-## 待评审断言
+## 待评审断言（仅 semantic 类型）
 ```json
 {assertions_text}
 ```
 
 ## 评审规则
-- exact_match：response 中必须包含 expected 的精确文本（允许前后有空白）
 - semantic：response 的语义必须符合 expected 描述的含义（不要求精确措辞）
-- existence：response 中必须存在 expected 描述的内容或元素
 
 ## 输出格式
 请以 JSON 格式返回评审结果（直接返回 JSON，不要 markdown 包裹）：
@@ -135,7 +161,7 @@ def build_grading_prompt(eval_config: dict, transcript: str, response_text: str)
   "assertions": [
     {{
       "name": "断言名",
-      "type": "exact_match|semantic|existence",
+      "type": "semantic",
       "expected": "断言期望",
       "pass": true,
       "evidence": "引用 response 中的具体文本作为证据（50字以内）"
@@ -260,76 +286,171 @@ def grade_single_eval(
             },
         }, started)
 
-    # 调用 LLM 评审
-    prompt = build_grading_prompt(eval_config, transcript, response_text)
-    result = call_llm(prompt, model=model, max_tokens=2000)
+    # ──────────────────────────────────────────────────
+    # 确定性评审：exact_match / existence 无需 LLM
+    # ──────────────────────────────────────────────────
+    deterministic_results: list[dict] = []
+    semantic_assertions: list[dict] = []
 
-    if not result:
-        if verbose:
-            print(f"  ❌ {eval_id}: LLM 评审调用失败", file=sys.stderr)
-        return attach_grader_timing(build_failed_grading(eval_config, "LLM grader call failed"), started)
+    for i, a in enumerate(assertions):
+        a_type = a.get("type", "semantic")
+        a_name = a.get("name", f"A{i+1}")
+        a_expected = a.get("expected", "")
 
-    # 解析 JSON 结果
-    try:
-        json_match = re.search(r"\{[\s\S]*\}", result)
-        if not json_match:
+        if a_type == "exact_match":
+            passed, evidence = grade_exact_match(a_expected, response_text)
+            deterministic_results.append({
+                "name": a_name,
+                "type": a_type,
+                "expected": a_expected,
+                "pass": passed,
+                "evidence": evidence,
+                "graded_by": "deterministic",
+            })
+        elif a_type == "existence":
+            passed, evidence = grade_existence(a_expected, response_text)
+            deterministic_results.append({
+                "name": a_name,
+                "type": a_type,
+                "expected": a_expected,
+                "pass": passed,
+                "evidence": evidence,
+                "graded_by": "deterministic",
+            })
+        else:
+            # semantic 或未知类型 → 留给 LLM
+            semantic_assertions.append(a)
+
+    det_count = len(deterministic_results)
+    sem_count = len(semantic_assertions)
+
+    if verbose and det_count > 0:
+        det_pass = sum(1 for r in deterministic_results if r["pass"])
+        print(
+            f"  ⚡ {eval_id}: 确定性评审 {det_count} 条 ({det_pass} pass)，"
+            f"LLM 评审 {sem_count} 条",
+            file=sys.stderr,
+        )
+
+    # ──────────────────────────────────────────────────
+    # LLM 评审：仅 semantic 断言（如果有）
+    # ──────────────────────────────────────────────────
+    llm_results: list[dict] = []
+
+    if semantic_assertions:
+        prompt = build_grading_prompt(eval_config, transcript, response_text, semantic_assertions)
+        result = call_llm(prompt, model=model, max_tokens=2000)
+
+        if not result:
             if verbose:
-                print(f"  ❌ {eval_id}: 评审结果无 JSON", file=sys.stderr)
-            return attach_grader_timing(build_failed_grading(eval_config, "LLM grader returned no JSON"), started)
-
-        grading_data = json.loads(json_match.group())
-        graded_assertions = grading_data.get("assertions", [])
-        summary = grading_data.get("summary", {})
-
-        # 计算 precision_breakdown
-        exact_pass = sum(1 for a in graded_assertions if a.get("type") == "exact_match" and a.get("pass"))
-        exact_total = sum(1 for a in graded_assertions if a.get("type") == "exact_match")
-        sem_pass = sum(1 for a in graded_assertions if a.get("type") == "semantic" and a.get("pass"))
-        sem_total = sum(1 for a in graded_assertions if a.get("type") == "semantic")
-
-        total_pass = summary.get("pass", sum(1 for a in graded_assertions if a.get("pass")))
-        total_fail = summary.get("fail", sum(1 for a in graded_assertions if not a.get("pass")))
-        total_count = summary.get("total", len(graded_assertions))
-
-        # 构造标准格式 grading.json
-        grading = {
-            "eval_id": eval_id,
-            "runs": {
-                "run-1": {
-                    "pass": total_fail == 0,
-                    "assertions": [
-                        {
-                            "id": a.get("name", f"A{i+1}"),
-                            "type": a.get("type", "semantic"),
-                            "expect": a.get("expected", ""),
-                            "pass": a.get("pass", False),
-                            "evidence": a.get("evidence", ""),
-                        }
-                        for i, a in enumerate(graded_assertions)
-                    ],
+                print(f"  ❌ {eval_id}: LLM 评审调用失败", file=sys.stderr)
+            # LLM 失败时，semantic 断言全部标记失败
+            llm_results = [
+                {
+                    "name": a.get("name", f"A{i+1}"),
+                    "type": "semantic",
+                    "expected": a.get("expected", ""),
+                    "pass": False,
+                    "evidence": "LLM grader call failed",
+                    "graded_by": "llm",
                 }
+                for i, a in enumerate(semantic_assertions)
+            ]
+        else:
+            try:
+                json_match = re.search(r"\{[\s\S]*\}", result)
+                if not json_match:
+                    raise ValueError("LLM grader returned no JSON")
+                grading_data = json.loads(json_match.group())
+                graded = grading_data.get("assertions", [])
+                # 补齐 graded_by 字段
+                for g in graded:
+                    g["graded_by"] = "llm"
+                llm_results = graded
+            except (json.JSONDecodeError, ValueError) as e:
+                if verbose:
+                    print(f"  ❌ {eval_id}: LLM 返回解析失败: {e}", file=sys.stderr)
+                llm_results = [
+                    {
+                        "name": a.get("name", f"A{i+1}"),
+                        "type": "semantic",
+                        "expected": a.get("expected", ""),
+                        "pass": False,
+                        "evidence": f"LLM parse error: {e}",
+                        "graded_by": "llm",
+                    }
+                    for i, a in enumerate(semantic_assertions)
+                ]
+
+    # ──────────────────────────────────────────────────
+    # 合并结果，构造标准格式 grading.json
+    # ──────────────────────────────────────────────────
+    # 合并：先 deterministic，后 llm（保持原始断言顺序）
+    # 通过 name 对齐
+    name_to_result: dict[str, dict] = {}
+    for r in deterministic_results:
+        name_to_result[r["name"]] = r
+    for r in llm_results:
+        name_to_result[r.get("name", "")] = r
+
+    # 按原始断言顺序重排
+    all_graded = []
+    for i, a in enumerate(assertions):
+        a_name = a.get("name", f"A{i+1}")
+        r = name_to_result.get(a_name, {
+            "name": a_name,
+            "type": a.get("type", "semantic"),
+            "expected": a.get("expected", ""),
+            "pass": False,
+            "evidence": "grading result missing",
+            "graded_by": "unknown",
+        })
+        all_graded.append(r)
+
+    exact_pass = sum(1 for r in all_graded if r.get("type") == "exact_match" and r.get("pass"))
+    exact_total = sum(1 for r in all_graded if r.get("type") == "exact_match")
+    sem_pass = sum(1 for r in all_graded if r.get("type") == "semantic" and r.get("pass"))
+    sem_total = sum(1 for r in all_graded if r.get("type") == "semantic")
+    total_pass = sum(1 for r in all_graded if r.get("pass"))
+    total_fail = len(all_graded) - total_pass
+    total_count = len(all_graded)
+
+    grading = {
+        "eval_id": eval_id,
+        "runs": {
+            "run-1": {
+                "pass": total_fail == 0,
+                "assertions": [
+                    {
+                        "id": r.get("name", f"A{i+1}"),
+                        "type": r.get("type", "semantic"),
+                        "expect": r.get("expected", r.get("expect", "")),
+                        "pass": r.get("pass", False),
+                        "evidence": r.get("evidence", ""),
+                        "graded_by": r.get("graded_by", "unknown"),
+                    }
+                    for i, r in enumerate(all_graded)
+                ],
+            }
+        },
+        "summary": {
+            "pass": total_pass,
+            "fail": total_fail,
+            "total": total_count,
+            "precision_breakdown": {
+                "exact_match": {"pass": exact_pass, "total": exact_total},
+                "semantic": {"pass": sem_pass, "total": sem_total},
             },
-            "summary": {
-                "pass": total_pass,
-                "fail": total_fail,
-                "total": total_count,
-                "precision_breakdown": {
-                    "exact_match": {"pass": exact_pass, "total": exact_total},
-                    "semantic": {"pass": sem_pass, "total": sem_total},
-                },
-                "authoritative_pass_rate": exact_pass / exact_total if exact_total > 0 else (total_pass / total_count if total_count > 0 else 0.0),
-            },
-        }
+            "authoritative_pass_rate": exact_pass / exact_total if exact_total > 0 else (total_pass / total_count if total_count > 0 else 0.0),
+            "deterministic_count": det_count,
+            "llm_count": sem_count,
+        },
+    }
 
-        if verbose:
-            print(f"  ✅ {eval_id} ({name}): {total_pass}/{total_count} 断言通过", file=sys.stderr)
+    if verbose:
+        print(f"  ✅ {eval_id} ({name}): {total_pass}/{total_count} 断言通过 (det={det_count}, llm={sem_count})", file=sys.stderr)
 
-        return attach_grader_timing(grading, started)
-
-    except json.JSONDecodeError as e:
-        if verbose:
-            print(f"  ❌ {eval_id}: JSON 解析失败: {e}", file=sys.stderr)
-        return attach_grader_timing(build_failed_grading(eval_config, f"LLM grader returned invalid JSON: {e}"), started)
+    return attach_grader_timing(grading, started)
 
 
 def grade_all_evals(

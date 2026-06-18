@@ -19,7 +19,15 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 CLI_MODEL_ALIASES = {
+    # SDK model name → Claude CLI alias
     "claude-sonnet-4-6": "sonnet",
+    "claude-haiku-4-5": "haiku",
+    "claude-opus-4-5": "opus",
+    "claude-haiku-3-5": "haiku",
+    # 允许直接传短名（透传不做二次映射）
+    "sonnet": "sonnet",
+    "haiku": "haiku",
+    "opus": "opus",
 }
 
 
