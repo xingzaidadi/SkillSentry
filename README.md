@@ -4,6 +4,8 @@
 
 支持平台：**Claude Code** · **OpenCode** · **OpenClaw（飞书）**
 
+> 文档总览和历史归档说明见 `references/README.md`。
+
 ---
 
 ## 三句话速查
