@@ -26,6 +26,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from sentry_gate import build_gate
 import sentry_report
+from sentry_diagnostics import collect_diagnostics
 
 
 def utc_now() -> str:
@@ -96,6 +97,7 @@ def update_session(session_dir: Path, publish_payload: dict, gate: dict) -> None
         "status": publish_payload["status"],
         "message": publish_payload["message"],
         "artifacts": publish_payload.get("artifacts", []),
+        "security_summary": publish_payload.get("security_summary"),
         "updated_at": publish_payload["updated_at"],
     }
     session.setdefault("verdict", {
@@ -229,11 +231,20 @@ def execute_publish(
             skip_history=skip_history,
             timeout=timeout,
         )
+        try:
+            gate = ensure_gate(session_path)
+            diagnostics = collect_diagnostics(session_path, gate)
+            payload["security_summary"] = sentry_report.security_summary_text(diagnostics) or None
+            update_session(session_path, payload, gate)
+        except Exception:
+            payload["security_summary"] = None
         save_json(session_path / "publish-result.json", payload)
         return payload
 
     try:
         gate = ensure_gate(session_path)
+        diagnostics = collect_diagnostics(session_path, gate)
+        security_summary = sentry_report.security_summary_text(diagnostics)
         report = ensure_report(session_path, gate)
         artifacts = [str(report), str(session_path / "gate-result.json")]
         payload = result_payload(
@@ -244,10 +255,12 @@ def execute_publish(
             ),
             artifacts=artifacts,
         )
+        payload["security_summary"] = security_summary or None
         save_json(session_path / "publish-result.json", payload)
         update_session(session_path, payload, gate)
         report = ensure_report(session_path, gate)
         payload["artifacts"] = [str(report), str(session_path / "gate-result.json")]
+        payload["security_summary"] = security_summary or None
         save_json(session_path / "publish-result.json", payload)
         update_session(session_path, payload, gate)
         return payload

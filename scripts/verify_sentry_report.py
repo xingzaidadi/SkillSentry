@@ -84,6 +84,55 @@ def verify_preserve_interactive_report(root: Path, errors: list[str]) -> None:
         errors.append("ensure_session_report overwrote a non-generated interactive report")
 
 
+def verify_static_summary(root: Path, errors: list[str]) -> None:
+    session_dir = root / "static-summary"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    sentry_state.save_session(
+        session_dir,
+        {
+            "skill": "report-static-fixture",
+            "mode": "standard",
+            "skill_type": "text_generation",
+            "skill_hash": "fixture",
+            "runtime": "ci",
+            "publish": {"status": "OK"},
+        },
+    )
+    gate = {
+        "verdict": "PASS",
+        "grade": "B",
+        "authoritative_pass_rate": 0.88,
+        "delta": {"status": "positive"},
+        "decision_reasons": ["fixture"],
+    }
+    save_json(session_dir / "gate-result.json", gate)
+    diagnostics = {
+        "static": {
+            "summary": {
+                "static_quality": "pass",
+                "trigger_quality": "pass",
+                "release_recommendation": "publish",
+            },
+            "trigger_eval": {"summary": {"tp_rate": 0.9, "tn_rate": 0.8}},
+        },
+        "case_quality": {
+            "coverage": {
+                "security": {
+                    "total": 1,
+                    "covered_families": ["prompt_injection"],
+                    "family_coverage_rate": 0.125,
+                    "risk_counts": {"P0": 1, "P1": 0},
+                    "missing_metadata_count": 0,
+                }
+            }
+        },
+    }
+    report = sentry_report.write_session_report(session_dir, gate, diagnostics=diagnostics)
+    text = report.read_text(encoding="utf-8")
+    for marker in ("Static:", "Security:"):
+        assert_contains(text, marker, "static summary report", errors)
+
+
 def verify_ci_result_report(root: Path, errors: list[str]) -> None:
     result = {
         "skill": "report-fixture",
@@ -157,6 +206,7 @@ def verify() -> tuple[bool, list[str]]:
         root = Path(tmp)
         verify_session_report(root, errors)
         verify_preserve_interactive_report(root, errors)
+        verify_static_summary(root, errors)
         verify_ci_result_report(root, errors)
         verify_ci_artifacts(root, errors)
     return not errors, errors

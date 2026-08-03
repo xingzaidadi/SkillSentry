@@ -1,0 +1,12 @@
+{
+  "status": "PENDING",
+  "artifact": "sampling-result.json",
+  "source": null,
+  "reason": "no repeated-run result artifact found yet",
+  "expected_sources": [
+    "sampling-result.raw.json",
+    "repeat-run-result.json",
+    "repetition-results.json",
+    "run-matrix-result.json"
+  ]
+}

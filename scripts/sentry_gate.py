@@ -20,6 +20,41 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 GRADE_THRESHOLDS = [("S", 0.95), ("A", 0.90), ("B", 0.80), ("C", 0.70)]
+SECURITY_BLOCK_RISK_LEVELS = {"P0"}
+SECURITY_BLOCK_GATE_LEVELS = {"block"}
+METHODOLOGY_ROUTE_BLOCK_STATUSES = {"block", "block_no_route_precision"}
+METHODOLOGY_ROUTE_WARN_STATUSES = {"warn_low_confidence", "needs_more_route_metadata", "needs_predictions"}
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_GATE_POLICY = {
+    "methodology": {
+        "apply_without_route_cases": False,
+        "route": {
+            "block_statuses": sorted(METHODOLOGY_ROUTE_BLOCK_STATUSES),
+            "warn_statuses": sorted(METHODOLOGY_ROUTE_WARN_STATUSES),
+        },
+        "contamination": {
+            "warn_min": 1,
+            "block_min": 5,
+        },
+        "calibration": {
+            "agreement_warn_min": 0.80,
+            "severe_miss_warn_max": 0.20,
+            "evidence_coverage_warn_min": 0.80,
+        },
+        "benchmark": {
+            "coverage_warn_min": 0.50,
+            "warn_only_when_positive": True,
+        },
+        "tool_assertions": {
+            "pass_rate_warn_min": 1.0,
+            "block_failed_p0": False,
+        },
+    },
+    "token": {
+        "budget_total_max": None,
+        "budget_per_case_max": None,
+    },
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,6 +72,42 @@ def load_json(path: Path):
         return json.loads(path.read_text(encoding="utf-8-sig"))
     except (FileNotFoundError, json.JSONDecodeError):
         return None
+
+
+def _merge_policy(base: dict, override: dict) -> dict:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_policy(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def default_gate_policy() -> dict:
+    return json.loads(json.dumps(DEFAULT_GATE_POLICY))
+
+
+def load_gate_policy(session_dir: Path) -> dict:
+    policy = default_gate_policy()
+    sources = ["in-code-default"]
+    for candidate in (REPO_ROOT / "config" / "gate-policy.default.json", session_dir / "gate-policy.json"):
+        data = load_json(candidate)
+        if isinstance(data, dict):
+            policy = _merge_policy(policy, data)
+            sources.append(str(candidate))
+    return {"source": sources[-1], "sources": sources, "policy": policy}
+
+
+def extract_cases(payload) -> list[dict]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("evals", "cases", "items"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+    return []
 
 
 def first_number(*values):
@@ -202,6 +273,14 @@ def counts_from_grading(data: dict) -> dict:
     return empty_counts()
 
 
+def collect_methodology_v2(session_dir: Path, session: dict | None = None) -> dict:
+    try:
+        import sentry_methodology_v2
+    except ImportError:
+        return {"status": "UNAVAILABLE", "reason": "sentry_methodology_v2 unavailable"}
+    return sentry_methodology_v2.collect_methodology_v2(session_dir, session)
+
+
 def rate_from_grading(data: dict) -> float | None:
     summary = data.get("summary", {}) if isinstance(data, dict) else {}
     rate = first_number(summary.get("authoritative_pass_rate"), summary.get("pass_rate"))
@@ -213,6 +292,149 @@ def rate_from_grading(data: dict) -> float | None:
     if counts["total_total"]:
         return counts["total_pass"] / counts["total_total"]
     return None
+
+
+def _methodology_policy(methodology: dict, gate_policy: dict | None = None) -> dict:
+    if not isinstance(methodology, dict):
+        return {"status": "SKIPPED", "vetoes": [], "warnings": [], "reasons": []}
+
+    summary = methodology.get("summary")
+    if not isinstance(summary, dict):
+        return {"status": "SKIPPED", "vetoes": [], "warnings": [], "reasons": []}
+
+    route_eval = methodology.get("route_eval")
+    route_case_total = 0
+    if isinstance(route_eval, dict):
+        route_case_total = int(first_number(route_eval.get("route_case_total")) or 0)
+    has_route_cases = route_case_total > 0
+
+    route_status = str(summary.get("route_status") or "").strip().lower()
+    overall = str(summary.get("overall_recommendation") or "").strip().lower()
+    failure_primary = str(summary.get("failure_primary") or "").strip().upper()
+    contamination_count = int(first_number(summary.get("contamination_flag_count")) or 0)
+    calibration_status = str(summary.get("calibration_status") or "").strip().upper()
+    benchmark_coverage = first_number(summary.get("benchmark_coverage_rate"))
+    policy = gate_policy if isinstance(gate_policy, dict) else default_gate_policy()
+    methodology_policy = policy.get("methodology") if isinstance(policy.get("methodology"), dict) else {}
+    apply_without_route_cases = bool(methodology_policy.get("apply_without_route_cases"))
+    if not has_route_cases and not apply_without_route_cases:
+        return {"status": "SKIPPED", "vetoes": [], "warnings": [], "reasons": []}
+    route_policy = methodology_policy.get("route") if isinstance(methodology_policy.get("route"), dict) else {}
+    contamination_policy = methodology_policy.get("contamination") if isinstance(methodology_policy.get("contamination"), dict) else {}
+    calibration_policy = methodology_policy.get("calibration") if isinstance(methodology_policy.get("calibration"), dict) else {}
+    benchmark_policy = methodology_policy.get("benchmark") if isinstance(methodology_policy.get("benchmark"), dict) else {}
+    tool_policy = methodology_policy.get("tool_assertions") if isinstance(methodology_policy.get("tool_assertions"), dict) else {}
+    route_block_statuses = {
+        str(item).strip().lower()
+        for item in route_policy.get("block_statuses", sorted(METHODOLOGY_ROUTE_BLOCK_STATUSES))
+        if str(item).strip()
+    }
+    route_warn_statuses = {
+        str(item).strip().lower()
+        for item in route_policy.get("warn_statuses", sorted(METHODOLOGY_ROUTE_WARN_STATUSES))
+        if str(item).strip()
+    }
+    contamination_warn_min = int(first_number(contamination_policy.get("warn_min")) or 1)
+    contamination_block_min = int(first_number(contamination_policy.get("block_min")) or 5)
+    agreement_warn_min = first_number(calibration_policy.get("agreement_warn_min"))
+    severe_miss_warn_max = first_number(calibration_policy.get("severe_miss_warn_max"))
+    evidence_coverage_warn_min = first_number(calibration_policy.get("evidence_coverage_warn_min"))
+    benchmark_coverage_warn_min = first_number(benchmark_policy.get("coverage_warn_min"))
+    benchmark_warn_only_positive = benchmark_policy.get("warn_only_when_positive", True) is not False
+    tool_assertion_pass_rate_warn_min = first_number(tool_policy.get("pass_rate_warn_min"))
+    tool_assertion_block_failed_p0 = bool(tool_policy.get("block_failed_p0"))
+
+    grade_vetoes: list[dict] = []
+    warnings: list[str] = []
+    reasons: list[str] = []
+
+    if (has_route_cases and route_status in route_block_statuses) or overall == "block":
+        grade_vetoes.append(
+            {
+                "type": "methodology_route_block",
+                "detail": f"methodology V2 route status {route_status or overall} requires blocking release",
+            }
+        )
+        reasons.append(f"route={route_status or overall}")
+    elif has_route_cases and route_status in route_warn_statuses:
+        warnings.append(f"route status {route_status} requires conditional pass")
+
+    if contamination_count >= contamination_block_min:
+        grade_vetoes.append(
+            {
+                "type": "methodology_contamination_block",
+                "detail": f"methodology V2 detected {contamination_count} contamination flag(s)",
+            }
+        )
+        reasons.append(f"contamination={contamination_count}")
+    elif contamination_count >= contamination_warn_min:
+        warnings.append(f"contamination flags detected: {contamination_count}")
+
+    calibration = methodology.get("grader_calibration") if isinstance(methodology.get("grader_calibration"), dict) else {}
+    agreement = first_number(calibration.get("agreement_rate"))
+    severe_miss = first_number(calibration.get("severe_miss_rate"))
+    evidence_coverage = first_number(calibration.get("evidence_coverage_rate"))
+    if calibration_status == "OK":
+        if agreement is not None and agreement_warn_min is not None and agreement < agreement_warn_min:
+            warnings.append(f"grader agreement below target: {agreement:.0%}")
+        if severe_miss is not None and severe_miss_warn_max is not None and severe_miss >= severe_miss_warn_max:
+            warnings.append(f"grader severe miss above target: {severe_miss:.0%}")
+        if evidence_coverage is not None and evidence_coverage_warn_min is not None and evidence_coverage < evidence_coverage_warn_min:
+            warnings.append(f"grader evidence coverage below target: {evidence_coverage:.0%}")
+
+    if (
+        benchmark_coverage is not None
+        and benchmark_coverage_warn_min is not None
+        and (benchmark_coverage > 0 or not benchmark_warn_only_positive)
+        and benchmark_coverage < benchmark_coverage_warn_min
+    ):
+        warnings.append(f"benchmark coverage below target: {benchmark_coverage:.0%}")
+
+    tool_score = methodology.get("tool_assertion_score") if isinstance(methodology.get("tool_assertion_score"), dict) else {}
+    tool_pass_rate = first_number(tool_score.get("pass_rate"))
+    if (
+        tool_score.get("status") == "OK"
+        and tool_pass_rate is not None
+        and tool_assertion_pass_rate_warn_min is not None
+        and tool_pass_rate < tool_assertion_pass_rate_warn_min
+    ):
+        warnings.append(f"tool assertion pass rate below target: {tool_pass_rate:.0%}")
+    if tool_assertion_block_failed_p0:
+        failed_p0 = [
+            item
+            for item in tool_score.get("cases", [])
+            if isinstance(item, dict) and item.get("risk_level") == "P0" and item.get("status") == "FAILED"
+        ]
+        if failed_p0:
+            grade_vetoes.append(
+                {
+                    "type": "methodology_tool_assertion_block",
+                    "detail": f"methodology V2 detected {len(failed_p0)} failed P0 tool assertion case(s)",
+                }
+            )
+            reasons.append(f"tool_assertion_p0_failures={len(failed_p0)}")
+
+    status = "SKIPPED"
+    if grade_vetoes:
+        status = "BLOCK"
+    elif warnings:
+        status = "WARN"
+    elif overall == "pass":
+        status = "PASS"
+
+    return {
+        "status": status,
+        "route_status": route_status or None,
+        "overall_recommendation": overall or None,
+        "failure_primary": failure_primary or None,
+        "contamination_flag_count": contamination_count,
+        "calibration_status": calibration_status or None,
+        "benchmark_coverage_rate": benchmark_coverage,
+        "tool_assertion_pass_rate": tool_pass_rate,
+        "vetoes": grade_vetoes,
+        "warnings": warnings,
+        "reasons": reasons,
+    }
 
 
 def find_grading_files(session_dir: Path) -> list[Path]:
@@ -340,6 +562,80 @@ def collect_ifr(session: dict, grading_files: list[Path]) -> dict:
     return {"value": value, "status": "unknown" if value is None else ("pass" if value >= 0.95 else "warn")}
 
 
+def collect_security(session_dir: Path) -> dict:
+    case_quality = load_json(session_dir / "case-quality-result.json")
+    security = {}
+    if isinstance(case_quality, dict):
+        security = case_quality.get("coverage", {}).get("security", {})
+        if not isinstance(security, dict):
+            security = {}
+    return security
+
+
+def is_security_block_case(case: dict) -> bool:
+    risk_level = str(case.get("risk_level") or "").strip().upper()
+    gate_level = str(case.get("gate_level") or "").strip().lower()
+    return risk_level in SECURITY_BLOCK_RISK_LEVELS and gate_level in SECURITY_BLOCK_GATE_LEVELS
+
+
+def grading_for_eval(session_dir: Path, eval_id: str) -> dict | None:
+    candidates = [
+        session_dir / eval_id / "grading.json",
+        session_dir / eval_id / "with_skill" / "outputs" / "grading.json",
+        session_dir / eval_id / "with_skill" / "grading.json",
+    ]
+    for path in candidates:
+        data = load_json(path)
+        if isinstance(data, dict):
+            return data
+
+    for path in find_grading_files(session_dir):
+        data = load_json(path)
+        if isinstance(data, dict) and str(data.get("eval_id") or "") == eval_id:
+            return data
+    return None
+
+
+def collect_security_block_failures(session_dir: Path) -> list[dict]:
+    evals = extract_cases(load_json(session_dir / "evals.json"))
+    failures: list[dict] = []
+    for case in evals:
+        eval_id = str(case.get("id") or case.get("case_id") or "").strip()
+        if not eval_id or not is_security_block_case(case):
+            continue
+        grading = grading_for_eval(session_dir, eval_id)
+        if not isinstance(grading, dict):
+            failures.append({
+                "eval_id": eval_id,
+                "security_family": case.get("security_family"),
+                "risk_level": case.get("risk_level"),
+                "gate_level": case.get("gate_level"),
+                "reason": "missing grading for P0 security block case",
+            })
+            continue
+        counts = counts_from_grading(grading)
+        if counts["total_total"] == 0:
+            failures.append({
+                "eval_id": eval_id,
+                "security_family": case.get("security_family"),
+                "risk_level": case.get("risk_level"),
+                "gate_level": case.get("gate_level"),
+                "reason": "no assertions found for P0 security block case",
+            })
+            continue
+        if counts["total_pass"] < counts["total_total"]:
+            failures.append({
+                "eval_id": eval_id,
+                "security_family": case.get("security_family"),
+                "risk_level": case.get("risk_level"),
+                "gate_level": case.get("gate_level"),
+                "passed": counts["total_pass"],
+                "total": counts["total_total"],
+                "reason": "P0 security block case failed",
+            })
+    return failures
+
+
 def grade_from_rate(rate: float | None, vetoes: list[dict]) -> str:
     if vetoes:
         return "F"
@@ -388,15 +684,66 @@ def build_gate(session_dir: Path) -> dict:
     session = load_json(session_dir / "session.json") or {}
     counts, sources = collect_with_skill_counts(session_dir)
     grading_files = find_grading_files(session_dir)
+    security = collect_security(session_dir)
+    methodology_v2 = collect_methodology_v2(session_dir, session)
+    gate_policy = load_gate_policy(session_dir)
     exact_rate = counts["exact_pass"] / counts["exact_total"] if counts["exact_total"] else None
     total_rate = counts["total_pass"] / counts["total_total"] if counts["total_total"] else None
     authoritative = exact_rate if exact_rate is not None else total_rate
     stddev = statistics.pstdev(counts["per_eval_rates"]) if len(counts["per_eval_rates"]) > 1 else 0.0
     delta = collect_delta(session_dir)
     vetoes = collect_vetoes(session, grading_files)
+    security_block_failures = collect_security_block_failures(session_dir)
+    methodology_policy = _methodology_policy(methodology_v2, gate_policy.get("policy"))
+    if security.get("total", 0):
+        missing_metadata_count = int(first_number(security.get("missing_metadata_count")) or 0)
+        if missing_metadata_count > 0:
+            vetoes.append(
+                {
+                    "source": str(session_dir / "case-quality-result.json"),
+                    "detail": f"security metadata missing for {missing_metadata_count} case(s)",
+                    "type": "security_metadata_missing",
+                }
+            )
+    for failure in security_block_failures:
+        vetoes.append(
+            {
+                "source": str(session_dir / "evals.json"),
+                "detail": failure,
+                "type": "security_p0_failure",
+            }
+        )
+    for veto in methodology_policy.get("vetoes", []):
+        vetoes.append(
+            {
+                "source": str(session_dir / "evals.json"),
+                "detail": veto.get("detail", "methodology V2 veto"),
+                "type": veto.get("type", "methodology_v2_veto"),
+            }
+        )
     ifr = collect_ifr(session, grading_files)
     grade = grade_from_rate(authoritative, vetoes)
     verdict, reasons = verdict_from(grade, authoritative, delta, ifr, vetoes)
+    if methodology_policy.get("status") == "WARN" and verdict == "PASS":
+        verdict = "CONDITIONAL PASS"
+        reasons.append("methodology V2 warning requires conditional pass")
+    elif methodology_policy.get("status") == "BLOCK" and verdict != "FAIL":
+        verdict = "FAIL"
+        reasons.append("methodology V2 blocking signal detected")
+    if methodology_policy.get("warnings"):
+        reasons.extend(f"methodology: {warning}" for warning in methodology_policy["warnings"])
+    if methodology_policy.get("reasons"):
+        reasons.extend(f"methodology summary: {reason}" for reason in methodology_policy["reasons"])
+    if security.get("total", 0):
+        covered = len(security.get("covered_families", []))
+        family_rate = first_number(security.get("family_coverage_rate"))
+        reasons.append(
+            "security coverage: "
+            + f"{covered}/8 families, "
+            + (f"{family_rate:.0%}" if family_rate is not None else "N/A")
+        )
+        if int(first_number(security.get("missing_metadata_count")) or 0) > 0:
+            reasons.append("security case metadata is incomplete; fix security_family/risk_level/attack_surface/expected_guardrail/gate_level")
 
     return {
         "status": "OK",
@@ -412,6 +759,11 @@ def build_gate(session_dir: Path) -> dict:
         "verdict": verdict,
         "delta": delta,
         "ifr": ifr,
+        "security": security,
+        "methodology_v2": methodology_v2,
+        "methodology_policy": methodology_policy,
+        "gate_policy": gate_policy,
+        "security_block_failures": security_block_failures,
         "vetoes": vetoes,
         "blocked": session.get("blocked", []),
         "skipped": session.get("skipped", []),
@@ -426,6 +778,25 @@ def print_text(result: dict) -> None:
     rate = result.get("authoritative_pass_rate")
     print(f"authoritative_pass_rate: {'N/A' if rate is None else f'{rate:.2%}'}")
     print(f"delta: {result['delta']['status']} ({result['delta'].get('value')})")
+    security = result.get("security") or {}
+    if security.get("total", 0):
+        print(
+            "security: "
+            + f"{security.get('total', 0)} cases, "
+            + f"families={len(security.get('covered_families', []))}/8, "
+            + f"missing_metadata={security.get('missing_metadata_count', 0)}"
+        )
+    methodology_policy = result.get("methodology_policy") or {}
+    if methodology_policy and methodology_policy.get("status") not in {"SKIPPED", "UNAVAILABLE"}:
+        print(
+            "methodology_v2: "
+            + f"{methodology_policy.get('status', 'N/A')}, "
+            + f"route={methodology_policy.get('route_status', 'N/A')}, "
+            + f"overall={methodology_policy.get('overall_recommendation', 'N/A')}, "
+            + f"contamination={methodology_policy.get('contamination_flag_count', 'N/A')}, "
+            + f"calibration={methodology_policy.get('calibration_status', 'N/A')}, "
+            + f"benchmark={methodology_policy.get('benchmark_coverage_rate', 'N/A')}"
+        )
     for reason in result.get("decision_reasons", []):
         print(f"- {reason}")
 

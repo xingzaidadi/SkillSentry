@@ -85,15 +85,16 @@ grader.md 现在会主动读取 timing.json 并将 `executor_duration_ms` 和 `t
 
 | skill-creator 能力 | 集成状态 | 说明 |
 |-------------------|---------|------|
-| **触发率测评**（`run_eval.py`）| ⚠️ **部分集成** | 真实测量仍需 claude CLI；已添加 AI 模拟替代方案（阶段一），产出置信度估算值，在报告第十一章展示 |
-| **description 自动优化循环**（`run_loop.py`）| ❌ 未集成 | 依赖触发率精确测量，且需要 60/40 train/test 分割能力 |
-| **60/40 防过拟合分割** | ❌ 未集成 | 仅在 description 优化场景需要 |
-| **实时 live report**（边跑边看）| ❌ 未集成 | 当前报告是执行完成后生成 |
+| **触发率测评**（`run_eval.py`）| ✅ **估算 + 可选精确探测** | `sentry_trigger_eval.py` 默认给出确定性触发估算；`--precise` 在本机有 Claude CLI 时尝试真实触发探测，否则显式 skipped |
+| **description 自动优化循环**（`run_loop.py`）| ✅ **轻量集成** | `sentry_optimize_description.py` 已提供非破坏性优化建议，不直接改写 `SKILL.md` |
+| **60/40 防过拟合分割** | ✅ **已集成** | description 优化时自动拆分 train/test，分别输出命中摘要 |
+| **实时 live report**（边跑边看）| ✅ **轻量集成** | `report_server.py` 可指向 sessions 根目录浏览最新 `report.html` |
 | **generate_review.py 交互式 viewer** | ⚠️ 部分 | 我们重写了 HTML 报告，不是 server 模式，但加入了人工反馈区 |
 | **aggregate_benchmark.py** | ✅ 思路借鉴 | 我们在 generate_html_report.py 中实现了类似的聚合逻辑 |
 | Grader / Comparator / Analyzer | ✅ 借鉴并扩展 | 见上方详细说明 |
 | **纯文本 Skill 测评** | ✅ **已支持** | Skill 类型自动检测（mcp_based/text_generation/code_execution），纯文本模式使用 response.md 作为 evidence 来源 |
 | **效率层指标采集** | ✅ **已支持** | grader.md 读取 timing.json，generate_html_report.py 聚合展示 P50/P95/Token |
+| **V2 方法论分析**（路由/归因/污染/校准/benchmark）| ✅ **已集成** | `sentry_methodology_v2.py` 输出 route matrix、failure taxonomy、contamination、grader calibration 和 benchmark adapter 映射 |
 
 ---
 
@@ -134,3 +135,48 @@ AI 逐条判断触发概率（prediction + confidence + reasoning）
 ---
 
 *本文档记录工具设计的技术溯源，供工程师参考。Last Updated: 2026-03-26*
+---
+
+## AI Skill 测评学习补充卡
+
+> 说明：本补充卡按《AI Skill 测评学习总纲：唯一主线版》的学习口径补齐，方便复习、面试和项目复盘。
+
+### 本文件定位
+
+| 项目 | 内容 |
+|---|---|
+| 所属主题 | AI Skill 测评学习资料 |
+| 当前文件 | `SkillSentry_repo\references\archive\skill-creator-capability-notes.md` |
+| 学习重点 | skill-creator-capability-notes |
+| 阅读目标 | 看懂这份资料解决什么问题、为什么重要、怎么落地、面试时怎么讲。 |
+
+### 背景、痛点、举措、收益
+
+| 维度 | 内容 |
+|---|---|
+| 背景 | AI Skill 从个人提示词沉淀走向工程化资产，需要把知识、流程、评测、安全和交付统一管理。 |
+| 痛点 | 如果只看原始说明，容易知道“是什么”，但面试时讲不出背景、问题、措施、收益和案例。 |
+| 举措 | 围绕该文件主题补齐面试话术、具体案例、背景痛点举措收益、英文专业术语解释和复习抓手。 |
+| 收益 | 学习时能快速建立业务语境，面试时能用结构化表达说明为什么做、怎么做、带来什么价值。 |
+
+### 面试话术怎么回答
+
+> 这份材料我会按“背景—痛点—举措—收益”来讲：背景是 Agent 能力需要被资产化和评测；痛点是执行不稳定、触发不准、安全边界不清；举措是用 Skill 固化流程，用指标和 CI gate 做验证；收益是让能力可复用、可比较、可回归。
+
+### 具体案例是什么
+
+以 SkillSentry 为例：先读取 Skill 或评测材料，再构造样本执行 Agent，最后用评分器和报告判断质量是否达标。
+
+### 专业术语解释
+
+| 中文术语 | 英文术语 | 专业解释 | 白话解释 |
+|---|---|---|---|
+| Skill | Skill | 面向 Agent 的结构化任务说明、流程和约束包。 | 给 AI 的专业说明书。 |
+| Agent | Agent | 能围绕目标规划步骤、调用工具并交付结果的 AI 系统。 | 会自己安排步骤做事的 AI。 |
+| Evaluation | Evaluation | 用样本、指标和评分规则系统衡量效果。 | 统一考试和打分。 |
+
+### 复习抓手
+
+1. 先用一句话说清这个文件的主题。
+2. 再用“背景—痛点—举措—收益”解释它为什么重要。
+3. 最后补一个 SkillSentry 或业务场景案例，证明你不是只背概念。

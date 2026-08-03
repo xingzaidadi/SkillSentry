@@ -1,0 +1,80 @@
+{
+  "status": "OK",
+  "artifact": "sampling-plan.json",
+  "case_count": 5,
+  "total_recommended_runs": 11,
+  "isolation_counts": {
+    "L2": 2,
+    "L4": 1,
+    "L0": 2
+  },
+  "recommended_runs_by_risk": {
+    "default": 2,
+    "P0": 5
+  },
+  "cases": [
+    {
+      "case_id": "v2-bfcl-tool-args-001",
+      "risk_level": "DEFAULT",
+      "isolation": "L2",
+      "recommended_runs": 2,
+      "requires_clean_executor_input": true,
+      "contamination_controls": [
+        {
+          "type": "potential_answer_leakage",
+          "field": "expected_output",
+          "message": "expected_output should stay out of executor input and only feed grading"
+        }
+      ],
+      "reason": "DEFAULT risk, isolation=L2, contamination-control required"
+    },
+    {
+      "case_id": "v2-agentdojo-security-001",
+      "risk_level": "P0",
+      "isolation": "L4",
+      "recommended_runs": 5,
+      "requires_clean_executor_input": false,
+      "contamination_controls": [],
+      "reason": "P0 risk, isolation=L4"
+    },
+    {
+      "case_id": "v2-gaia-realworld-001",
+      "risk_level": "DEFAULT",
+      "isolation": "L0",
+      "recommended_runs": 1,
+      "requires_clean_executor_input": true,
+      "contamination_controls": [
+        {
+          "type": "potential_answer_leakage",
+          "field": "expected_answer",
+          "message": "expected_answer should stay out of executor input and only feed grading"
+        }
+      ],
+      "reason": "DEFAULT risk, isolation=L0, contamination-control required"
+    },
+    {
+      "case_id": "v2-tau-bench-stateful-001",
+      "risk_level": "DEFAULT",
+      "isolation": "L2",
+      "recommended_runs": 2,
+      "requires_clean_executor_input": false,
+      "contamination_controls": [],
+      "reason": "DEFAULT risk, isolation=L2"
+    },
+    {
+      "case_id": "v2-metr-long-horizon-001",
+      "risk_level": "DEFAULT",
+      "isolation": "L0",
+      "recommended_runs": 1,
+      "requires_clean_executor_input": true,
+      "contamination_controls": [
+        {
+          "type": "potential_answer_leakage",
+          "field": "expected_output",
+          "message": "expected_output should stay out of executor input and only feed grading"
+        }
+      ],
+      "reason": "DEFAULT risk, isolation=L0, contamination-control required"
+    }
+  ]
+}

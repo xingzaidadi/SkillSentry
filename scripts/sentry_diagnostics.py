@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import sentry_artifacts
+import sentry_methodology_v2
 
 
 def load_json(path: Path) -> Any:
@@ -301,6 +302,7 @@ def collect_publish(session_dir: Path, session: dict) -> dict:
     return {
         "status": publish.get("status"),
         "message": _short_error(publish.get("message")),
+        "security_summary": publish.get("security_summary"),
     }
 
 
@@ -418,6 +420,7 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
     session_path = Path(session_dir)
     session = _as_dict(load_json(session_path / "session.json"))
     gate_data = gate if isinstance(gate, dict) else _as_dict(load_json(session_path / "gate-result.json"))
+    methodology_v2 = sentry_methodology_v2.collect_methodology_v2(session_path, session)
 
     case_warnings = _as_list(session.get("case_warnings"))
     executor = collect_executor(session_path, session)
@@ -485,6 +488,41 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
     verdict = gate_data.get("verdict")
     rate = gate_data.get("authoritative_pass_rate")
     counts = _as_dict(gate_data.get("counts"))
+    vetoes = _as_list(gate_data.get("vetoes"))
+    methodology_policy = _as_dict(gate_data.get("methodology_policy"))
+    methodology_summary = _as_dict(_as_dict(gate_data.get("methodology_v2")).get("summary"))
+    methodology_route = str(methodology_summary.get("route_status") or methodology_policy.get("route_status") or "").strip().lower()
+    methodology_overall = str(
+        methodology_summary.get("overall_recommendation") or methodology_policy.get("overall_recommendation") or ""
+    ).strip().lower()
+    methodology_contamination = _int_value(
+        methodology_summary.get("contamination_flag_count", methodology_policy.get("contamination_flag_count"))
+    )
+    methodology_calibration = str(
+        methodology_summary.get("calibration_status") or methodology_policy.get("calibration_status") or ""
+    ).strip().upper()
+    security_vetoes = [
+        item for item in vetoes
+        if isinstance(item, dict) and str(item.get("type") or "").startswith("security_")
+    ]
+    if security_vetoes:
+        categories.append("security_failure")
+        notes.append(f"{len(security_vetoes)} security gate veto(es) recorded.")
+    if methodology_policy.get("status") == "BLOCK":
+        categories.append("methodology_failure")
+        notes.append("Methodology V2 policy blocked the release.")
+    elif methodology_policy.get("status") == "WARN":
+        categories.append("methodology_warning")
+        notes.append("Methodology V2 policy downgraded the release to conditional pass.")
+    elif methodology_route or methodology_overall or methodology_contamination or methodology_calibration:
+        categories.append("methodology_observation")
+        notes.append(
+            "Methodology V2 summary: "
+            + f"route={methodology_route or 'N/A'}, "
+            + f"overall={methodology_overall or 'N/A'}, "
+            + f"contamination={methodology_contamination}, "
+            + f"calibration={methodology_calibration or 'N/A'}."
+        )
     technical_blockers = {
         "preflight_error",
         "runner_unavailable",
@@ -499,6 +537,7 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
         and rate is not None
         and _int_value(counts.get("total_total")) > 0
         and not any(category in technical_blockers for category in categories)
+        and "security_failure" not in categories
     ):
         categories.append("quality_failure")
         notes.append("Gate failed with grading data available; inspect assertion failures for skill-quality issues.")
@@ -507,11 +546,23 @@ def collect_diagnostics(session_dir: str | Path, gate: dict | None = None) -> di
         notes.append("No CI execution diagnostics were recorded.")
 
     case_quality = _as_dict(load_json(session_path / "case-quality-result.json"))
+    security = _as_dict(_as_dict(case_quality.get("coverage")).get("security"))
+    if security:
+        missing_security_metadata = _int_value(security.get("missing_metadata_count"))
+        if missing_security_metadata > 0:
+            categories.append("security_case_gap")
+            notes.append(f"{missing_security_metadata} security case(s) are missing required metadata.")
+        family_rate = _number(security.get("family_coverage_rate"))
+        if family_rate is not None and family_rate < 0.5:
+            if "security_case_gap" not in categories:
+                categories.append("security_case_gap")
+            notes.append("Security family coverage is below 50%.")
 
     return {
         "case_warnings_count": len(case_warnings),
         "case_warnings": case_warnings[:10],
         "case_quality": case_quality,
+        "methodology_v2": methodology_v2,
         "preflight": preflight,
         "executor": executor,
         "grader_errors": grader_errors,
@@ -561,6 +612,19 @@ def render_markdown(diagnostics: dict) -> str:
         for item in _as_list(grader_cases.get("slowest_cases"))[:3]
         if isinstance(item, dict)
     ) or "N/A"
+    case_quality = _as_dict(diagnostics.get("case_quality"))
+    methodology_v2 = _as_dict(diagnostics.get("methodology_v2"))
+    coverage = _as_dict(_as_dict(case_quality.get("coverage")).get("security"))
+    security_line = None
+    if coverage.get("total"):
+        family_rate = coverage.get("family_coverage_rate")
+        family_rate_text = f"{family_rate:.0%}" if isinstance(family_rate, (int, float)) else "N/A"
+        risk_counts = _as_dict(coverage.get("risk_counts"))
+        security_line = (
+            f"| Security | cases={coverage.get('total', 0)}, families={len(_as_list(coverage.get('covered_families')))}/8 "
+            f"({family_rate_text}), P0={risk_counts.get('P0', 0)}, P1={risk_counts.get('P1', 0)}, "
+            f"missing_metadata={coverage.get('missing_metadata_count', 0)} |"
+        )
     lines = [
         "### Execution Diagnostics",
         "",
@@ -587,19 +651,34 @@ def render_markdown(diagnostics: dict) -> str:
             f"push_results={sync.get('push_results') or 'N/A'} |"
         ),
         f"| Delta | {delta.get('status') or 'N/A'} |",
-        f"| Publish | {publish.get('status') or 'N/A'} |",
+        (
+            "| Publish | "
+            f"{publish.get('status') or 'N/A'}"
+            + (
+                f", security={publish.get('security_summary')}"
+                if publish.get("security_summary")
+                else ""
+            )
+            + " |"
+        ),
         f"| CI timing | total={total_text}ms; slowest={slowest_text} |",
         f"| CI phases | {phases_text} |",
         f"| Executor case timing | {executor_stats}; slowest={executor_text} |",
         f"| Grader case timing | {grader_stats}; slowest={grader_text} |",
+        security_line,
         "",
     ]
 
+    methodology_text = sentry_methodology_v2.render_markdown(methodology_v2) if methodology_v2 else ""
+    if methodology_text:
+        lines.extend(methodology_text.splitlines())
+        lines.append("")
     for note in _as_list(diagnostics.get("notes")):
-        lines.append(f"- {note}")
+        if note:
+            lines.append(f"- {note}")
     for hint in timing_hints:
         lines.append(f"- {hint}")
-    return "\n".join(lines) + "\n"
+    return "\n".join(line for line in lines if line is not None) + "\n"
 
 
 def _render_case_quality_html(diagnostics: dict) -> str:
@@ -639,6 +718,16 @@ def _render_case_quality_html(diagnostics: dict) -> str:
     coverage = _as_dict(cq.get("coverage"))
     dims = _as_dict(coverage.get("dimensions"))
     dim_text = " | ".join(f"{k}={v}" for k, v in dims.items()) if dims else "N/A"
+    security = _as_dict(coverage.get("security"))
+    security_html = ""
+    if security.get("total"):
+        covered = len(_as_list(security.get("covered_families")))
+        family_rate = security.get("family_coverage_rate")
+        family_rate_text = f"{family_rate:.0%}" if isinstance(family_rate, (int, float)) else "N/A"
+        risk_counts = _as_dict(security.get("risk_counts"))
+        security_html = f"""
+  <p><strong>Security:</strong> {security.get("total", 0)} cases, families {covered}/8 ({family_rate_text}), P0={risk_counts.get("P0", 0)}, P1={risk_counts.get("P1", 0)}, missing metadata={security.get("missing_metadata_count", 0)}</p>
+"""
 
     # Assertion quality
     aq = _as_dict(cq.get("assertion_quality"))
@@ -688,6 +777,7 @@ def _render_case_quality_html(diagnostics: dict) -> str:
     {soft_rows}
   </table>
   <p><strong>Dimensions:</strong> {html.escape(dim_text)} (total: {coverage.get("total_cases", 0)})</p>
+  {security_html}
   <p><strong>Assertions:</strong> {aq.get("total", 0)} total, {aq.get("with_rule_ref", 0)} with rule_ref, {aq.get("orphan", 0)} orphan (<span style="color:{orphan_color}">{orphan_rate:.0%} {orphan_verdict}</span>)</p>
   {rule_cov_html}
   {dangling_html}
@@ -717,6 +807,8 @@ def render_html_section(diagnostics: dict) -> str:
         hint_items = "<li>none</li>"
     grader_errors = _as_list(diagnostics.get("grader_errors"))
     case_quality_html = _render_case_quality_html(diagnostics)
+    methodology_v2 = _as_dict(diagnostics.get("methodology_v2"))
+    methodology_html = sentry_methodology_v2.render_html(methodology_v2) if methodology_v2 else ""
     grader_items = "".join(
         "<li>"
         + html.escape(str(item.get("source", "grading")))
@@ -792,10 +884,11 @@ def render_html_section(diagnostics: dict) -> str:
     <tr><th>Executor</th><td>{executor.get("success", 0)}/{executor.get("total", 0)} success, {executor.get("failed", 0)} failed, {executor.get("timeouts", 0)} timeout(s)</td></tr>
     <tr><th>Sync</th><td>pull={html.escape(str(sync.get("pull") or "N/A"))}, push_cases={html.escape(str(sync.get("push_cases") or "N/A"))}, push_results={html.escape(str(sync.get("push_results") or "N/A"))}</td></tr>
     <tr><th>Delta</th><td>{html.escape(str(delta.get("status") or "N/A"))}</td></tr>
-    <tr><th>Publish</th><td>{html.escape(str(publish.get("status") or "N/A"))}</td></tr>
-    <tr><th>CI timing</th><td>{html.escape(total_text)}ms</td></tr>
+  <tr><th>Publish</th><td>{html.escape(str(publish.get("status") or "N/A"))}{(", security=" + html.escape(str(publish.get("security_summary")))) if publish.get("security_summary") else ""}</td></tr>
+  <tr><th>CI timing</th><td>{html.escape(total_text)}ms</td></tr>
   </table>
 {case_quality_html}
+{methodology_html}
   <h3>Notes</h3>
   <ul>{notes}</ul>
   <h3>Timing hints</h3>

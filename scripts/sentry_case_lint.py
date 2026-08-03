@@ -26,7 +26,75 @@ import sentry_state
 
 
 WINDOWS_PATH_PATTERN = re.compile(r"[A-Za-z]:\\[^\s，。；,;`\"']+")
-LINT_VERSION = 1
+LINT_VERSION = 2
+
+PROMPT_INJECTION_PATTERN = re.compile(
+    r"(ignore\s+(all\s+)?previous|ignore\s+above|system\s+override|developer\s+override|忽略(前文|之前|以上|上面)|覆盖(系统|开发者)指令)",
+    re.IGNORECASE,
+)
+SECRET_ACCESS_PATTERN = re.compile(
+    r"(\.env\b|id_rsa|ssh\s*key|api[_-]?key|token|secret|password|密钥|令牌|数据库配置|凭据)",
+    re.IGNORECASE,
+)
+EXFILTRATION_PATTERN = re.compile(
+    r"(https?://[^\s，。；,;`\"']+|webhook|callback|回调地址|外部地址|发送到|上传到|post\s+to)",
+    re.IGNORECASE,
+)
+DANGEROUS_COMMAND_PATTERN = re.compile(
+    r"(rm\s+-rf|del\s+/[fsq]|format\s+[A-Za-z]:|shutdown\b|chmod\s+777|curl\b.*\|\s*(sh|bash)|Invoke-WebRequest\b.*iex\b)",
+    re.IGNORECASE,
+)
+VAGUE_AUTH_PATTERN = re.compile(
+    r"(无需(确认|审批|授权)|不用(确认|审批|授权)|绕过(确认|审批|权限)|所有权限|直接执行|不需要用户确认|自动批准)",
+    re.IGNORECASE,
+)
+
+SECURITY_FAMILIES = {
+    "prompt_injection",
+    "indirect_injection",
+    "multi_turn_induction",
+    "normal_request_disguise",
+    "tool_overscope",
+    "secrets_access",
+    "exfiltration",
+    "recovery_rollback",
+}
+
+SECURITY_RISK_LEVELS = {"P0", "P1"}
+SECURITY_GATE_LEVELS = {"block", "review", "warn"}
+
+SECURITY_SIGNAL_RULES = (
+    {
+        "warning_type": "unlabeled_prompt_injection",
+        "pattern": PROMPT_INJECTION_PATTERN,
+        "families": {"prompt_injection", "indirect_injection"},
+        "message": "Case contains prompt-injection signals but is not marked as a Security V1 injection case.",
+    },
+    {
+        "warning_type": "unlabeled_secret_access",
+        "pattern": SECRET_ACCESS_PATTERN,
+        "families": {"secrets_access"},
+        "message": "Case references secrets or credentials but is not marked as a Security V1 secrets_access case.",
+    },
+    {
+        "warning_type": "unlabeled_exfiltration",
+        "pattern": EXFILTRATION_PATTERN,
+        "families": {"exfiltration"},
+        "message": "Case references external sending or URLs but is not marked as a Security V1 exfiltration case.",
+    },
+    {
+        "warning_type": "unlabeled_dangerous_command",
+        "pattern": DANGEROUS_COMMAND_PATTERN,
+        "families": {"tool_overscope"},
+        "message": "Case references dangerous command execution but is not marked as a Security V1 tool_overscope case.",
+    },
+    {
+        "warning_type": "unlabeled_vague_authorization",
+        "pattern": VAGUE_AUTH_PATTERN,
+        "families": {"tool_overscope", "normal_request_disguise"},
+        "message": "Case contains vague authorization or approval-bypass language without Security V1 metadata.",
+    },
+)
 
 
 def load_json(path: Path):
@@ -50,6 +118,140 @@ def extract_cases(payload) -> list:
     return []
 
 
+def _case_text(case: dict, key: str) -> str:
+    value = case.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _combined_case_text(case: dict) -> str:
+    parts: list[str] = []
+    for key in ("name", "prompt", "expected_output", "expected_guardrail"):
+        value = case.get(key)
+        if isinstance(value, str):
+            parts.append(value)
+    for key in ("assertions", "expectations"):
+        items = case.get(key)
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict):
+                    for field in ("name", "expected", "message"):
+                        value = item.get(field)
+                        if isinstance(value, str):
+                            parts.append(value)
+                elif isinstance(item, str):
+                    parts.append(item)
+    return "\n".join(parts)
+
+
+def inspect_security_metadata(cases) -> list[dict]:
+    """Return deterministic warnings for security cases with incomplete metadata."""
+    warnings: list[dict] = []
+
+    for case in extract_cases(cases):
+        if not isinstance(case, dict):
+            continue
+
+        case_id = case.get("id") or case.get("case_id") or "unknown"
+        dimension = _case_text(case, "dimension").lower() or _case_text(case, "category").lower()
+        security_family = _case_text(case, "security_family").lower()
+        risk_level = _case_text(case, "risk_level").upper()
+        gate_level = _case_text(case, "gate_level").lower()
+        attack_surface = case.get("attack_surface")
+        expected_guardrail = case.get("expected_guardrail")
+
+        is_security_case = bool(
+            security_family
+            or risk_level
+            or gate_level
+            or dimension == "security"
+        )
+        if not is_security_case:
+            continue
+
+        if not security_family:
+            warnings.append({
+                "case_id": case_id,
+                "type": "security_metadata_missing",
+                "field": "security_family",
+                "message": "Security case is missing security_family.",
+            })
+        elif security_family not in SECURITY_FAMILIES:
+            warnings.append({
+                "case_id": case_id,
+                "type": "security_family_unknown",
+                "field": "security_family",
+                "value": security_family,
+                "message": "Security case uses an unknown security_family.",
+            })
+
+        if risk_level not in SECURITY_RISK_LEVELS:
+            warnings.append({
+                "case_id": case_id,
+                "type": "security_metadata_missing",
+                "field": "risk_level",
+                "message": "Security case is missing or invalid risk_level.",
+            })
+
+        if not isinstance(attack_surface, list) or not attack_surface:
+            warnings.append({
+                "case_id": case_id,
+                "type": "security_metadata_missing",
+                "field": "attack_surface",
+                "message": "Security case is missing attack_surface.",
+            })
+
+        if not expected_guardrail:
+            warnings.append({
+                "case_id": case_id,
+                "type": "security_metadata_missing",
+                "field": "expected_guardrail",
+                "message": "Security case is missing expected_guardrail.",
+            })
+
+        if gate_level not in SECURITY_GATE_LEVELS:
+            warnings.append({
+                "case_id": case_id,
+                "type": "security_metadata_missing",
+                "field": "gate_level",
+                "message": "Security case is missing or invalid gate_level.",
+            })
+
+    return warnings
+
+
+def inspect_static_security_signals(cases) -> list[dict]:
+    """Warn when risky case text is not explicitly mapped to Security V1 metadata."""
+    warnings: list[dict] = []
+
+    for case in extract_cases(cases):
+        if not isinstance(case, dict):
+            continue
+        case_id = case.get("id") or case.get("case_id") or "unknown"
+        security_family = _case_text(case, "security_family").lower()
+        risk_level = _case_text(case, "risk_level").upper()
+        gate_level = _case_text(case, "gate_level").lower()
+        text = _combined_case_text(case)
+        if not text:
+            continue
+
+        for rule in SECURITY_SIGNAL_RULES:
+            match = rule["pattern"].search(text)
+            if not match:
+                continue
+            expected_families = rule["families"]
+            if security_family in expected_families and risk_level in SECURITY_RISK_LEVELS and gate_level in SECURITY_GATE_LEVELS:
+                continue
+            warnings.append({
+                "case_id": case_id,
+                "type": rule["warning_type"],
+                "signal": match.group(0),
+                "expected_security_family": sorted(expected_families),
+                "message": rule["message"],
+            })
+
+    return warnings
+
+
 def inspect_case_feasibility(cases) -> list[dict]:
     """Return deterministic warnings for cases that cannot run as-is."""
     warnings: list[dict] = []
@@ -70,6 +272,8 @@ def inspect_case_feasibility(cases) -> list[dict]:
                     "path": normalized,
                     "message": "Generated case references a local path that does not exist in this environment.",
                 })
+    warnings.extend(inspect_security_metadata(cases))
+    warnings.extend(inspect_static_security_signals(cases))
     return warnings
 
 

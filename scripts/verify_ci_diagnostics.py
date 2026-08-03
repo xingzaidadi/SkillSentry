@@ -147,7 +147,28 @@ def make_session(root: Path) -> Path:
     )
     save_json(
         session_dir / "publish-result.json",
-        {"status": "OK", "message": "local publish result ready", "artifacts": [], "updated_at": "2026-01-01T00:00:00+00:00"},
+        {
+            "status": "OK",
+            "message": "local publish result ready",
+            "artifacts": [],
+            "security_summary": "cases=1, families=1/8 (12%), P0=1, P1=0, missing_metadata=0",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        },
+    )
+    save_json(
+        session_dir / "case-quality-result.json",
+        {
+            "verdict": "pass",
+            "coverage": {
+                "security": {
+                    "total": 1,
+                    "covered_families": ["prompt_injection"],
+                    "family_coverage_rate": 0.125,
+                    "risk_counts": {"P0": 1, "P1": 0, "P2": 0, "unknown": 0},
+                    "missing_metadata_count": 0,
+                }
+            },
+        },
     )
     gate = sentry_ci.build_gate(session_dir)
     save_json(session_dir / "gate-result.json", gate)
@@ -271,13 +292,25 @@ def verify() -> tuple[bool, list[str]]:
             errors.append("eval_result.json: missing diagnostics")
         if output_json.get("timings", {}).get("total_ms") != 100.0:
             errors.append("eval_result.json: missing top-level timings")
+        if not output_json.get("security_summary"):
+            errors.append("eval_result.json: missing security_summary")
         for marker in ("Execution Diagnostics", "runner_timeout", "skipped_no_config", "CI timing", "CI phases", "Executor case timing", "Grader case timing", "p50=250.0ms", "p95=250.0ms", "executor is the slowest CI step"):
             assert_contains(summary_md, marker, "summary.md", errors)
+        if "security=" not in summary_md:
+            errors.append("summary.md: missing publish security summary")
 
         sentry_publish.ensure_report(session_dir, gate)
         publish_report = (session_dir / "report.html").read_text(encoding="utf-8")
         for marker in ("SkillSentry Publish Result", "Execution Diagnostics", "Publish</th><td>OK"):
             assert_contains(publish_report, marker, "publish report.html", errors)
+        if "security=" not in publish_report:
+            errors.append("publish report.html: missing publish security summary")
+        publish_payload = json.loads((session_dir / "publish-result.json").read_text(encoding="utf-8"))
+        if not publish_payload.get("security_summary"):
+            errors.append("publish-result.json: missing security_summary")
+        publish_diag = collect_diagnostics(session_dir, gate).get("publish", {})
+        if not publish_diag.get("security_summary"):
+            errors.append("diagnostics.publish: missing security_summary")
 
         quality_dir = make_quality_failure_session(root)
         quality_gate = json.loads((quality_dir / "gate-result.json").read_text(encoding="utf-8"))

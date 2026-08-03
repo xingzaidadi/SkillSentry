@@ -25,6 +25,19 @@ DIMENSIONS = ("happy_path", "edge_case", "negative", "robustness", "security", "
 
 HARD_GATE_DIMENSIONS = ("happy_path", "negative", "robustness")
 
+SECURITY_FAMILIES = (
+    "prompt_injection",
+    "indirect_injection",
+    "multi_turn_induction",
+    "normal_request_disguise",
+    "tool_overscope",
+    "secrets_access",
+    "exfiltration",
+    "recovery_rollback",
+)
+
+SECURITY_RISK_LEVELS = ("P0", "P1")
+
 # ── Mode-based thresholds ────────────────────────────────────────────────────
 # hard_gate_min: minimum count per hard-gate dimension
 # soft_warn_min: minimum count per soft-warn dimension
@@ -70,11 +83,90 @@ def count_dimensions(evals: list[dict]) -> dict[str, int]:
     for case in evals:
         if not isinstance(case, dict):
             continue
-        dim = case.get("dimension") or case.get("category") or ""
+        dim = case.get("dimension") or case.get("category") or case.get("type") or ""
         dim = dim.strip().lower()
         if dim in counts:
             counts[dim] += 1
     return counts
+
+
+def analyze_security(evals: list[dict]) -> dict:
+    """Collect security-family coverage and metadata completeness."""
+    family_counts: dict[str, int] = {family: 0 for family in SECURITY_FAMILIES}
+    risk_counts: dict[str, int] = {risk: 0 for risk in SECURITY_RISK_LEVELS}
+    risk_counts["unknown"] = 0
+    gate_counts: dict[str, int] = {}
+    missing_metadata: list[dict] = []
+    total = 0
+
+    for case in evals:
+        if not isinstance(case, dict):
+            continue
+
+        dimension = str(case.get("dimension") or case.get("category") or "").strip().lower()
+        security_family = str(case.get("security_family") or "").strip().lower()
+        risk_level = str(case.get("risk_level") or "").strip().upper()
+        gate_level = str(case.get("gate_level") or "").strip().lower()
+        attack_surface = case.get("attack_surface")
+        expected_guardrail = case.get("expected_guardrail")
+
+        is_security_case = bool(
+            security_family
+            or risk_level
+            or gate_level
+            or dimension == "security"
+        )
+        if not is_security_case:
+            continue
+
+        total += 1
+
+        if security_family in family_counts:
+            family_counts[security_family] += 1
+
+        if risk_level in risk_counts:
+            risk_counts[risk_level] += 1
+        else:
+            risk_counts["unknown"] += 1
+
+        if gate_level:
+            gate_counts[gate_level] = gate_counts.get(gate_level, 0) + 1
+
+        missing: list[str] = []
+        if not security_family:
+            missing.append("security_family")
+        elif security_family not in family_counts:
+            missing.append("security_family(unknown)")
+        if risk_level not in SECURITY_RISK_LEVELS:
+            missing.append("risk_level")
+        if not isinstance(attack_surface, list) or not attack_surface:
+            missing.append("attack_surface")
+        if not expected_guardrail:
+            missing.append("expected_guardrail")
+        if not gate_level:
+            missing.append("gate_level")
+
+        if missing:
+            missing_metadata.append({
+                "case_id": case.get("id") or case.get("case_id") or "unknown",
+                "type": "security_metadata_missing",
+                "missing": missing,
+                "message": "Security case metadata is incomplete.",
+            })
+
+    covered_families = [family for family, count in family_counts.items() if count > 0]
+    family_coverage_rate = len(covered_families) / len(SECURITY_FAMILIES) if SECURITY_FAMILIES else 1.0
+
+    return {
+        "total": total,
+        "family_counts": family_counts,
+        "covered_families": covered_families,
+        "family_coverage_rate": round(family_coverage_rate, 4),
+        "risk_counts": risk_counts,
+        "gate_counts": gate_counts,
+        "missing_metadata": missing_metadata,
+        "missing_metadata_count": len(missing_metadata),
+    }
 
 
 # ── Assertion quality ────────────────────────────────────────────────────────
@@ -278,6 +370,16 @@ def build_quality_result(session_dir: Path, mode: str) -> dict:
             "hard_gate": {"total": 3, "passed": 0, "items": []},
             "soft_warn": {"total": 3, "passed": 0, "items": []},
             "coverage": {"dimensions": {}, "total_cases": 0},
+            "security": {
+                "total": 0,
+                "family_counts": {family: 0 for family in SECURITY_FAMILIES},
+                "covered_families": [],
+                "family_coverage_rate": 0.0,
+                "risk_counts": {risk: 0 for risk in SECURITY_RISK_LEVELS} | {"unknown": 0},
+                "gate_counts": {},
+                "missing_metadata": [],
+                "missing_metadata_count": 0,
+            },
             "assertion_quality": {"total": 0, "with_rule_ref": 0, "orphan": 0, "orphan_rate": 0, "orphan_verdict": "pass"},
             "suggestions": ["evals.json 不存在或无法解析，请先运行 sentry-cases 生成用例"],
         }
@@ -290,6 +392,7 @@ def build_quality_result(session_dir: Path, mode: str) -> dict:
     soft_min = thresholds["soft_warn_min"]
 
     dim_counts = count_dimensions(evals)
+    security_profile = analyze_security(evals)
     hard_gate = check_hard_gates(dim_counts, hard_min)
     soft_warn = check_soft_warns(dim_counts, soft_min)
 
@@ -306,6 +409,10 @@ def build_quality_result(session_dir: Path, mode: str) -> dict:
 
     assertion_quality = analyze_assertions(evals, rules_cache)
     suggestions = generate_suggestions(hard_gate, soft_warn, assertion_quality)
+    if security_profile.get("missing_metadata_count", 0):
+        suggestions.append(
+            f"安全 case 元数据缺失 {security_profile['missing_metadata_count']} 项，请补齐 security_family / risk_level / attack_surface / expected_guardrail / gate_level"
+        )
 
     # Determine verdict
     if hard_gate["passed"] < hard_gate["total"]:
@@ -332,6 +439,7 @@ def build_quality_result(session_dir: Path, mode: str) -> dict:
         "coverage": {
             "dimensions": dim_counts,
             "total_cases": len(evals),
+            "security": security_profile,
         },
         "assertion_quality": assertion_quality,
         "suggestions": suggestions,
@@ -360,6 +468,14 @@ def print_text(result: dict) -> None:
     print(f"\n覆盖: 总用例 {cov['total_cases']}")
     for dim, count in cov["dimensions"].items():
         print(f"  {dim}: {count}")
+
+    security = cov.get("security") or {}
+    if security.get("total", 0):
+        print(f"\n安全覆盖: {security['total']} 个安全 case")
+        print(f"  family_coverage: {len(security.get('covered_families', []))}/{len(SECURITY_FAMILIES)} ({security.get('family_coverage_rate', 0):.0%})")
+        print(f"  risk_levels: P0={security.get('risk_counts', {}).get('P0', 0)} P1={security.get('risk_counts', {}).get('P1', 0)} unknown={security.get('risk_counts', {}).get('unknown', 0)}")
+        if security.get("missing_metadata_count", 0):
+            print(f"  missing_metadata: {security['missing_metadata_count']}")
 
     aq = result["assertion_quality"]
     print(f"\n断言质量: {aq['total']} 条, rule_ref {aq['with_rule_ref']}, orphan {aq['orphan']} ({aq['orphan_verdict']})")

@@ -128,16 +128,21 @@ bash install.sh
 | `scripts/sentry_preflight.py` | 定位被测 Skill、计算 hash、识别 skill_type、检查 config、cases 缓存和 Claude/SDK 运行时可用性。 |
 | `scripts/sentry_pipeline.py` | 输出当前稳定口径 pipeline、下一步、步骤类型、工具和 required artifacts。 |
 | `scripts/sentry_state.py` | 初始化/读取/写入 `session.json`,校验 pipeline transition,写入 milestone evidence。 |
-| `scripts/sentry_gate.py` | 原方案 `sentry-score` 的当前落地形态;聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项和最终 verdict。 |
+| `scripts/sentry_gate.py` | 原方案 `sentry-score` 的当前落地形态;聚合 grading,计算 `authoritative_pass_rate`、等级、Delta 状态、IFR、否决项、V2 门禁策略和最终 verdict。 |
 | `scripts/sentry_ci.py` | CI 编排入口;用 `--timeout-per-eval` 控制单用例 executor 超时,并在 `session.json.case_warnings` 记录不可执行用例风险。 |
 | `scripts/sentry_case_lint.py` | 独立轻量用例可执行性检查,读取 `evals.json` 并输出 `case_warnings`,不调 LLM、不跑 executor。 |
 | `scripts/sentry_executor.py` | executor 稳定 wrapper,调用 `ci_executor.py` 执行 with/without_skill,输出 JSON 并更新 session。 |
 | `scripts/sentry_grader.py` | grader-report 稳定 wrapper,调用 `ci_grader.py` 评审已有 response,写 summary/report 并更新 session。 |
 | `scripts/sentry_run.py` | profile 组合器;`preflight/lint/debug` 跑轻路径,`local` 跑已有 cases 的本地单边测评,`ci/release` 委托完整 CI。 |
+| `scripts/sentry_static.py` | 确定性静态检查入口,支持 lint-only、trigger-only 和 JSON 输出,用于快速发现 SKILL.md 结构/安全/触发风险。 |
+| `scripts/sentry_trigger_eval.py` | 触发率测评入口;默认给出确定性启发式估算,`--precise` 在本机有 Claude CLI 时尝试真实触发探测,否则显式标记 skipped。 |
+| `scripts/sentry_optimize_description.py` | description 优化助手;对触发 prompts 做 60/40 train/test 分割,输出触发命中摘要和非破坏性的建议 description。 |
+| `scripts/sentry_methodology_v2.py` | V2 方法论分析器;输出路由矩阵、失败归因 taxonomy、污染/采样协议、工具参数级评分、grader 校准和 benchmark adapter 映射;CLI 运行时会写出 `sampling-plan.json`/`sampling-result.json`。 |
 | `scripts/sentry_reuse.py` | 复用 miss reason 到排查 hint 的共享映射,供 run/timing 输出使用。 |
 | `scripts/sentry_diagnostics.py` | 聚合 CI 诊断:用例可执行性、executor 失败/超时、grader 错误、sync 降级、Delta 状态和 publish 状态。 |
 | `scripts/sentry_timing.py` | 独立轻量耗时分析器,读取 `eval_result.json`、`sentry-run-result.json` 或 session,输出最慢 step/phase、executor per-eval 耗时分布、grader per-eval 耗时分布、local 复用决策和优化建议;不调 LLM、不联网。 |
 | `scripts/sentry_report.py` | 独立轻量报告生成器,只读取已有 session/result artifact 并生成 HTML,不调 LLM、不联网。 |
+| `scripts/report_server.py` | 本地报告浏览器/live viewer,可指向 sessions 根目录浏览最新 `report.html`。 |
 | `scripts/sentry_sync.py` | 包装 `sync_cases.py`,为 `sync-pull`/`sync-push-*` 输出稳定 JSON,无配置时显式 `skipped_no_config`。 |
 | `scripts/sentry_publish.py` | 包装发布步骤,生成本地 `publish-result.json`/报告兜底,保留 `publish.py` 交互发布入口。 |
 | `scripts/sentry_contract_lint.py` | 扫描 SkillSentry 本体是否混入旧工具名、旧指标或旧 pipeline 口径。 |
@@ -167,9 +172,23 @@ python scripts/verify_deterministic.py --format json
 python scripts/verify_deterministic.py --full --format json
 python scripts/verify_local_dogfood.py --format json
 python scripts/verify_local_dogfood.py --real --format json
+python scripts/verify_methodology_v2.py --format json
+python scripts/verify_gate_methodology_v2.py --format json
 ```
 
 `verify_deterministic.py` 是推荐的本体自检入口;默认 core 模式约 15 秒,`--full` 会多跑 CLI 子进程、local 复用矩阵、CI mode 等宽回归。`verify_local_dogfood.py` 第一条使用 fake Claude CLI,不联网、不依赖账号余额;第二条使用本机真实 Claude CLI 和真实 skill,用于改动 local profile 后做一次端到端 smoke。
+
+触发率、静态风险和 description 优化可用下面的轻量入口先跑一遍:
+
+```bash
+python scripts/sentry_static.py SKILL.md --format json
+python scripts/sentry_trigger_eval.py SKILL.md --precise --format json
+python scripts/sentry_optimize_description.py SKILL.md --format json
+python scripts/sentry_methodology_v2.py sessions/<run> --format json
+python scripts/report_server.py --base-dir sessions --port 18080
+```
+
+其中 `sentry_trigger_eval.py --precise` 会优先尝试 Claude CLI;本机不可用时不会失败,而是输出明确的 skipped precise 状态并保留确定性估算结果。`sentry_optimize_description.py` 默认只给建议,不直接改写 `SKILL.md`,避免把 train 集合过拟合到正式 description。
 
 ---
 
@@ -297,9 +316,14 @@ SkillSentry/
 │   ├── sentry_executor.py      # Claude CLI executor 稳定 wrapper
 │   ├── sentry_grader.py        # Anthropic SDK/LLM grader-report wrapper
 │   ├── sentry_run.py           # profile 组合器
+│   ├── sentry_static.py        # 静态 lint + 触发启发式估算
+│   ├── sentry_trigger_eval.py  # 触发率估算/可选 Claude CLI 精确探测
+│   ├── sentry_optimize_description.py # 60/40 description 优化助手
+│   ├── sentry_methodology_v2.py # 路由/归因/污染/calibration/benchmark 分析
 │   ├── sentry_diagnostics.py   # CI/publish 执行诊断聚合
 │   ├── sentry_reuse.py         # local 复用诊断 hint 共享模块
 │   ├── sentry_report.py        # no-LLM/no-network HTML 报告生成器
+│   ├── report_server.py        # sessions/report.html 本地浏览器
 │   ├── sentry_sync.py          # sync 步骤稳定 JSON wrapper
 │   ├── sentry_publish.py       # publish 步骤稳定 JSON wrapper
 │   ├── sentry_contract_lint.py # SkillSentry 当前口径自检
@@ -311,6 +335,8 @@ SkillSentry/
 │   ├── verify_sentry_grader.py # grader wrapper 回归
 │   ├── verify_sentry_run.py    # profile 组合器回归
 │   ├── verify_local_dogfood.py # local 首跑/复用 dogfood 回归
+│   ├── verify_methodology_v2.py # V2 方法论分析回归
+│   ├── verify_gate_methodology_v2.py # V2 门禁策略回归
 │   ├── verify_ci_modes.py      # 五种 CI 模式编排回归
 │   ├── verify_ci_diagnostics.py # CI 诊断输出回归
 │   ├── verify_ci_failure_report.py # CI 失败报告 artifact 回归
@@ -354,3 +380,48 @@ A：当前正式工具名是 `sentry-static`。说 `lint xxx`、`测触发率 xx
 ---
 
 *v9.0.0 · 2026-05-14*
+---
+
+## AI Skill 测评学习补充卡
+
+> 说明：本补充卡按《AI Skill 测评学习总纲：唯一主线版》的学习口径补齐，方便复习、面试和项目复盘。
+
+### 本文件定位
+
+| 项目 | 内容 |
+|---|---|
+| 所属主题 | AI Skill 测评学习资料 |
+| 当前文件 | `SkillSentry_repo\README.md` |
+| 学习重点 | README |
+| 阅读目标 | 看懂这份资料解决什么问题、为什么重要、怎么落地、面试时怎么讲。 |
+
+### 背景、痛点、举措、收益
+
+| 维度 | 内容 |
+|---|---|
+| 背景 | AI Skill 从个人提示词沉淀走向工程化资产，需要把知识、流程、评测、安全和交付统一管理。 |
+| 痛点 | 如果只看原始说明，容易知道“是什么”，但面试时讲不出背景、问题、措施、收益和案例。 |
+| 举措 | 围绕该文件主题补齐面试话术、具体案例、背景痛点举措收益、英文专业术语解释和复习抓手。 |
+| 收益 | 学习时能快速建立业务语境，面试时能用结构化表达说明为什么做、怎么做、带来什么价值。 |
+
+### 面试话术怎么回答
+
+> 这份材料我会按“背景—痛点—举措—收益”来讲：背景是 Agent 能力需要被资产化和评测；痛点是执行不稳定、触发不准、安全边界不清；举措是用 Skill 固化流程，用指标和 CI gate 做验证；收益是让能力可复用、可比较、可回归。
+
+### 具体案例是什么
+
+以 SkillSentry 为例：先读取 Skill 或评测材料，再构造样本执行 Agent，最后用评分器和报告判断质量是否达标。
+
+### 专业术语解释
+
+| 中文术语 | 英文术语 | 专业解释 | 白话解释 |
+|---|---|---|---|
+| Skill | Skill | 面向 Agent 的结构化任务说明、流程和约束包。 | 给 AI 的专业说明书。 |
+| Agent | Agent | 能围绕目标规划步骤、调用工具并交付结果的 AI 系统。 | 会自己安排步骤做事的 AI。 |
+| Evaluation | Evaluation | 用样本、指标和评分规则系统衡量效果。 | 统一考试和打分。 |
+
+### 复习抓手
+
+1. 先用一句话说清这个文件的主题。
+2. 再用“背景—痛点—举措—收益”解释它为什么重要。
+3. 最后补一个 SkillSentry 或业务场景案例，证明你不是只背概念。

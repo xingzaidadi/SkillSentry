@@ -22,12 +22,17 @@ ROOT = SCRIPT_DIR.parent
 
 CORE_CHECKS: list[list[str]] = [
     ["sentry_contract_lint.py", "--strict", "--format", "json"],
+    ["sentry_static.py", str(ROOT / "SKILL.md"), "--format", "json"],
+    ["sentry_trigger_eval.py", str(ROOT / "SKILL.md"), "--format", "json"],
     ["verify_sentry_executor.py", "--format", "json"],
     ["verify_sentry_grader.py", "--format", "json"],
     ["verify_sentry_run.py", "--format", "json"],
     ["verify_local_dogfood.py", "--format", "json"],
     ["verify_sentry_report.py", "--format", "json"],
     ["verify_sentry_timing.py", "--format", "json"],
+    ["verify_methodology_v2.py", "--format", "json"],
+    ["verify_gate_methodology_v2.py", "--format", "json"],
+    ["verify_security_v1.py", "--format", "json"],
     ["verify_ci_diagnostics.py", "--format", "json"],
     ["verify_ci_exit_contract.py", "--format", "json"],
     ["verify_ci_checks_integration.py", "--format", "json"],
@@ -37,10 +42,12 @@ CORE_CHECKS: list[list[str]] = [
 ]
 
 FULL_ONLY_CHECKS: list[list[str]] = [
+    ["verify_gate_fixtures.py", "--format", "json"],
     ["verify_ci_preflight.py", "--format", "json"],
     ["verify_ci_feasibility.py", "--format", "json"],
     ["verify_ci_failure_report.py", "--format", "json"],
     ["verify_ci_modes.py", "--format", "json"],
+    ["sentry_optimize_description.py", str(ROOT / "SKILL.md"), "--format", "json"],
 ]
 
 
