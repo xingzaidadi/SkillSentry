@@ -282,7 +282,7 @@ tools/sentry-*/(业务逻辑层)
 **教训**:不是"规矩不够",是"旧答案太容易被看到"。约束规则解决的是"该怎么做",数据隔离解决的是"能看到什么"。两层独立。
 
 ### 坑 22:JSON 示例的通过/失败分布不均导致评审偏差
-**症状**:grader 系统性高估通过率 15-20%(与 IFEval 研究吻合)。
+**症状**:grader 系统性高估通过率 15-20%(评审偏乐观,与 LLM-as-Judge 公认的 self-enhancement bias 一致;Zheng et al., MT-Bench, 2023)。
 **根因**:grader.md 和 comparator 的 JSON 示例中,通过示例 >> 失败示例。LLM 从示例分布中学到"通过是常态,失败是异常"。comparator 示例中 A(with_skill)永远赢 B(without_skill),强化了"有 Skill 一定好"的偏见。
 **解法**:在 grader.md 补充完整的 `passed: false` 示例(含 evidence);在 comparator 补充 B 赢 A 的示例。加评审员须知:"通过和失败是等概率事件"。
 **教训**:JSON 示例的示范效应比文字说明强 10 倍。写示例时必须平衡通过/失败分布。

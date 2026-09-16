@@ -111,14 +111,14 @@ python3 <SkillSentry路径>/scripts/verify_assertions.py \
 
 读取 `grading_script.json`，提取每条断言的 `passed` 和 `evidence`，写入最终 grading.json（`"method": "script"`）。
 
-**脚本执行失败时的处理**：若 `verify_assertions.py` 退出码非 0（脚本无法运行，非断言结果不通过），该批可脚本化断言标注 `"method": "grader_fallback"`，结果设为 `passed: false`，在 `eval_feedback` 中注明：「脚本验证不可用，exact_match 结论不可信，请检查 verify_assertions.py 运行环境」。**不允许将这些断言回退到 AI 评审**——AI 重判会引入 15-20% 高估偏差（IFEval），比标注失败更危险。
+**脚本执行失败时的处理**：若 `verify_assertions.py` 退出码非 0（脚本无法运行，非断言结果不通过），该批可脚本化断言标注 `"method": "grader_fallback"`，结果设为 `passed: false`，在 `eval_feedback` 中注明：「脚本验证不可用，exact_match 结论不可信，请检查 verify_assertions.py 运行环境」。**不允许将这些断言回退到 AI 评审**——AI 重判会引入系统性偏乐观（self-enhancement bias），明显高于客观校验结果，比标注失败更危险。
 
 **这些断言在后续 AI 评审中跳过**（脚本成功时），AI 只处理：
 - `semantic` 类断言
 - `existence` 类断言
 - 无法映射到脚本类型的 `exact_match` 断言
 
-> **为什么强制而非尝试**：`tool_call_count`、`args_field`、`response_not_contains` 等类型的答案完全由 transcript 原文决定，正则/字符串匹配结果唯一确定，0/1 无歧义。让 AI 重判这类问题是主动引入偏差——IFEval 研究证明 AI 自评系统性高估 15-20%。脚本结论标注 `method: script`，在报告中单独统计，`authoritative_pass_rate` 首先统计脚本验证的 exact_match 结果，这是发布决策的最可信来源。
+> **为什么强制而非尝试**：`tool_call_count`、`args_field`、`response_not_contains` 等类型的答案完全由 transcript 原文决定，正则/字符串匹配结果唯一确定，0/1 无歧义。让 AI 重判这类问题是主动引入偏差——LLM 自评存在系统性偏乐观（self-enhancement bias，是 LLM-as-Judge 公认的三大偏差之一），会明显高于客观校验结果，且难以靠提示词完全消除（Zheng et al., MT-Bench, 2023），因此评审必须独立于执行。脚本结论标注 `method: script`，在报告中单独统计，`authoritative_pass_rate` 首先统计脚本验证的 exact_match 结果，这是发布决策的最可信来源。
 
 ---
 
